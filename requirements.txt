@@ -1,3 +1,5 @@
-flask
-telebot
+qrcode[pil]
 redis
+requests
+Flask
+pyTelegramBotAPI
