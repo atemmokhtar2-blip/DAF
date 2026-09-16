@@ -18,6 +18,11 @@ RAILWAY_URL = "https://daf-production-8df9.up.railway.app"
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379").strip()
 if REDIS_URL.startswith("redis-cli"):
     REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
+
+# تنظيف وتحقق إضافي لمنع أي خطأ في الـ Scheme الخاص بـ Redis
+if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
+    REDIS_URL = "redis://default:aF4GQMQw6l9ZEpZjfThV2koySkuFbk9c@insect-outsize-shirt-48022.db.redis.io:15744"
+
 redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
 if not BOT_TOKEN:
