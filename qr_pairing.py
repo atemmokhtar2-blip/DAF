@@ -80,7 +80,8 @@ def generate_qr_code_bytes(deep_link_url):
     qr = qrcode.QRCode(version=1, box_size=10, border=1)
     qr.add_data(deep_link_url)
     qr.make(fit=True)
-    img = qr.make_image(fill_color="000000", back_color="ffffff")
+    # تم تصحيح الألوان وإضافة علامة # لتتوافق مع مكتبة Pillow وتمنع الكراش
+    img = qr.make_image(fill_color="#000000", back_color="#ffffff")
     buf = io.BytesIO()
     img.save(buf, format="JPEG")
     buf.seek(0)
