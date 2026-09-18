@@ -54,8 +54,8 @@ def main_menu():
 def start_command(message):
     user_name = message.from_user.first_name
     text = (
-        f"⚡ **مرحباً بك يا {user_name} في لوحة التحكم المركزية**\n\n"
-        "تم عزل كل أداة في ملفها الخاص لضمان الأمان والاستقرار. اختر الأداة المطلوبة:"
+        f"⚡ **مرحباً بك يا {user_name} في DEV ١ 😈**\n\n"
+        "غير مسؤال تماما عن اساء الاستخدام "
     )
     bot.send_message(message.chat.id, text, parse_mode="Markdown", reply_markup=main_menu())
 
