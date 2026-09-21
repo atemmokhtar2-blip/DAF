@@ -4,7 +4,6 @@ import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
 
-# استيراد ملفات الأدوات المستقلة تماماً
 from facebook_module import init_facebook_routes
 from instagram_module import init_instagram_routes
 from rat_module import init_rat_routes, rat_bp, queue_command
