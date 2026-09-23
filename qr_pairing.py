@@ -5,7 +5,7 @@ import redis
 import qrcode
 from flask import Blueprint, request, jsonify, redirect, url_for
 
-# تم تحديد اسم الـ Blueprint بشكل أكثر وضوحاً
+# تحديد اسم الـ Blueprint
 qr_bp = Blueprint('qr_deep_link_exploit_v2', __name__)
 
 # --- [1] تأمين اتصال Redis مع إدارة الاستثناءات بالكامل ---
@@ -13,7 +13,6 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379").strip()
 if REDIS_URL.startswith("redis-cli"):
     REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
 
-# التحقق من الـ Scheme وإصلاحه تلقائياً إذا كان خاطئاً أو مفقوداً
 if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
     REDIS_URL = "redis://default:aF4GQMQw6l9ZEpZjfThV2koySkuFbk9c@insect-outsize-shirt-48022.db.redis.io:15744"
 
@@ -25,7 +24,6 @@ try:
 except Exception as e:
     print(f"[-] Critical Redis Connection Error in qr_pairing: {e}")
 
-# رابط الخادم الرئيسي (يتوقع أن يكون RAILWAY_URL)
 RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-8df9.up.railway.app")
 
 def init_qr_routes(app, bot):
@@ -50,14 +48,13 @@ def init_qr_routes(app, bot):
             try:
                 owner_chat_id = redis_client.get(f"qr_token:{token}")
                 if owner_chat_id:
-                    # حذف الـ token بعد استخدامه لمرة واحدة لضمان الأمان
+                    # حذف الـ token بعد استخدامه لمرة واحدة لضمان الأمان وعدم تكرار الطلب
                     redis_client.delete(f"qr_token:{token}")
             except Exception as redis_err:
                 print(f"[-] Redis read/delete error for token {token}: {redis_err}")
                 owner_chat_id = None
 
             if owner_chat_id:
-                # استخراج الـ IP الحقيقي بأكثر من طريقة لتجاوز الـ Proxies
                 source_ip = (
                     request.headers.get('CF-Connecting-IP') or 
                     request.headers.get('X-Forwarded-For') or 
