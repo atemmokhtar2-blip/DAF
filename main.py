@@ -32,6 +32,7 @@ from bot_handlers import (
     _pending_open_url,
 )
 from short_link import init_short_link
+from redis_cleaner import start_cleaner
 
 # ============================================================
 # إعداد Flask
@@ -165,6 +166,10 @@ def run_telegram_bot():
 
 
 if __name__ == "__main__":
+    # ★ شغّل Redis Cleaner
+    start_cleaner()
+    
+    # شغّل البوت
     bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
     bot_thread.start()
 
