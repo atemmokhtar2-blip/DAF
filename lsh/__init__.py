@@ -1,10 +1,13 @@
 # lsh/__init__.py
 # ============================================================
 # LSH v6.0 — Global Grade Live Session Hijacking
-# نفس الدوال القديمة — لكن محرك جديد بالكامل
 # ============================================================
 
 from flask import Blueprint
+
+from logging_config import get_logger
+
+logger = get_logger("lsh")
 
 # ★ الـ Blueprint
 lsh_bp = Blueprint('lsh_module', __name__)
@@ -30,9 +33,10 @@ from .session_mgr import (
     get_session_stats,
     list_live_sessions,
     refresh_session_ttl,
+    update_presence,
 )
 
-# ★ الأوامر — جديد بالكامل
+# ★ الأوامر
 from .commands import (
     push_command,
     pop_commands,
@@ -55,8 +59,11 @@ from .panel import build_lsh_control_panel
 # ★ Routes
 from .routes import init_lsh_routes
 
-# ★ Handlers
-from .handlers import set_bot_reference, _handle_incoming
+# ★ Handlers — alias موحد
+from .handlers import (
+    set_bot_reference,
+    _handle_incoming as handle_incoming,
+)
 
 # ★ الاستقرار
 from .stability import (
@@ -95,6 +102,7 @@ __all__ = [
     'get_session_stats',
     'list_live_sessions',
     'refresh_session_ttl',
+    'update_presence',
 
     # Commands
     'push_command',
@@ -115,7 +123,7 @@ __all__ = [
     # Routes / Handlers
     'init_lsh_routes',
     'set_bot_reference',
-    '_handle_incoming',
+    'handle_incoming',
 
     # Stability / Recovery
     'init_stability',
@@ -127,3 +135,5 @@ __all__ = [
     'restore_all_sessions',
     'force_reconnect',
 ]
+
+logger.info("LSH module initialized")
