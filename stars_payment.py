@@ -3,25 +3,31 @@
 # نظام الدفع + الأدمن — نسخة HTML
 # ============================================================
 
-import os
 import html
 import json
 import time
 from datetime import datetime, timedelta
+
 from telebot.types import (
     InlineKeyboardMarkup, InlineKeyboardButton,
-    LabeledPrice, PreCheckoutQuery
+    LabeledPrice, PreCheckoutQuery,
 )
+
+from logging_config import get_logger
+from monitoring import metrics
+
+logger = get_logger("stars_payment")
 
 try:
     from config import redis_client
-    print("[+] stars_payment: Using shared Redis")
+    logger.info("stars_payment: Using shared Redis")
 except Exception as e:
-    print(f"[-] stars_payment: config failed - {e}")
+    logger.error(f"stars_payment: config failed - {e}")
     redis_client = None
 
 
 def h(text):
+    """Escape HTML"""
     if text is None:
         return ""
     return html.escape(str(text))
@@ -55,15 +61,10 @@ PRICING_PLANS = {
 }
 
 FREE_TRIAL_USES = 3
-AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh", "sh", "apk"]
+AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh", "sh", "apk", "wa"]
 
-ADMIN_IDS = [
-    7631249810,
-]
-
-VIP_IDS = [
-    7631249810,
-]
+ADMIN_IDS = [7631249810]
+VIP_IDS = [7631249810]
 
 
 def is_admin(user_id):
@@ -79,7 +80,7 @@ def is_vip(user_id):
 
 
 # ============================================================
-# [4] إدارة المستخدمين
+# [2] إدارة المستخدمين
 # ============================================================
 def _user_key(user_id):
     return f"user:{user_id}"
@@ -93,7 +94,7 @@ def get_user(user_id):
         if raw:
             return json.loads(raw)
     except Exception as e:
-        print(f"[-] get_user error: {e}")
+        logger.error(f"get_user error: {e}")
     return None
 
 
@@ -104,7 +105,7 @@ def save_user(user_id, data):
         redis_client.set(_user_key(user_id), json.dumps(data))
         return True
     except Exception as e:
-        print(f"[-] save_user error: {e}")
+        logger.error(f"save_user error: {e}")
         return False
 
 
@@ -125,11 +126,13 @@ def create_new_user(user_id, username="Unknown", first_name="User"):
         "notes": "",
     }
     save_user(user_id, user)
+
     if redis_client:
         try:
             redis_client.sadd("all_users", str(user_id))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"sadd user error: {e}")
+
     return user
 
 
@@ -137,19 +140,20 @@ def get_or_create_user(user_id, username="Unknown", first_name="User"):
     user = get_user(user_id)
     if not user:
         user = create_new_user(user_id, username, first_name)
+
+    # تأكد من وجود كل الحقول
     if "trial_uses" not in user:
         user["trial_uses"] = {tool: FREE_TRIAL_USES for tool in AVAILABLE_TOOLS}
+
     for tool in AVAILABLE_TOOLS:
         user["trial_uses"].setdefault(tool, FREE_TRIAL_USES)
-    if "daily_reset_date" not in user:
-        user["daily_reset_date"] = datetime.utcnow().strftime("%Y-%m-%d")
-        user["daily_uses_count"] = 0
-    if "is_banned" not in user:
-        user["is_banned"] = False
-    if "is_vip" not in user:
-        user["is_vip"] = False
-    if "notes" not in user:
-        user["notes"] = ""
+
+    user.setdefault("daily_reset_date", datetime.utcnow().strftime("%Y-%m-%d"))
+    user.setdefault("daily_uses_count", 0)
+    user.setdefault("is_banned", False)
+    user.setdefault("is_vip", False)
+    user.setdefault("notes", "")
+
     return user
 
 
@@ -165,7 +169,7 @@ def get_all_users():
                 users.append(u)
         return users
     except Exception as e:
-        print(f"[-] get_all_users error: {e}")
+        logger.error(f"get_all_users error: {e}")
         return []
 
 
@@ -177,7 +181,7 @@ def delete_user(user_id):
         redis_client.srem("all_users", str(user_id))
         return True
     except Exception as e:
-        print(f"[-] delete_user error: {e}")
+        logger.error(f"delete_user error: {e}")
         return False
 
 
@@ -206,7 +210,7 @@ def _reset_daily_counter_if_needed(user):
 
 
 # ============================================================
-# [5] التحقق من الصلاحيات
+# [3] التحقق من الصلاحيات
 # ============================================================
 def check_subscription_active(user):
     sub = user.get("subscription")
@@ -215,7 +219,8 @@ def check_subscription_active(user):
     try:
         expires_at = datetime.fromisoformat(sub["expires_at"])
         return datetime.utcnow() < expires_at
-    except Exception:
+    except Exception as e:
+        logger.warning(f"check_subscription error: {e}")
         return False
 
 
@@ -234,7 +239,11 @@ def can_use_tool(user_id, tool):
 
     trial = user.get("trial_uses", {})
     if trial.get(tool, 0) > 0:
-        return {"allowed": True, "reason": "free_trial", "remaining_free": trial[tool]}
+        return {
+            "allowed": True,
+            "reason": "free_trial",
+            "remaining_free": trial[tool]
+        }
 
     if check_subscription_active(user):
         plan_key = user["subscription"]["plan"]
@@ -242,9 +251,16 @@ def can_use_tool(user_id, tool):
         daily_limit = plan.get("daily_limit", 0)
         used_today = user.get("daily_uses_count", 0)
         if used_today < daily_limit:
-            return {"allowed": True, "reason": "subscription",
-                    "remaining_today": daily_limit - used_today}
-        return {"allowed": False, "reason": "daily_limit_reached", "daily_limit": daily_limit}
+            return {
+                "allowed": True,
+                "reason": "subscription",
+                "remaining_today": daily_limit - used_today
+            }
+        return {
+            "allowed": False,
+            "reason": "daily_limit_reached",
+            "daily_limit": daily_limit
+        }
 
     return {"allowed": False, "reason": "no_credit", "remaining_free": 0}
 
@@ -267,11 +283,12 @@ def consume_usage(user_id, tool):
         user["daily_uses_count"] = user.get("daily_uses_count", 0) + 1
         save_user(user_id, user)
         return True
+
     return False
 
 
 # ============================================================
-# [6] لوحات الباقات
+# [4] لوحات الباقات
 # ============================================================
 def build_plans_keyboard():
     markup = InlineKeyboardMarkup()
@@ -312,7 +329,7 @@ def build_account_text(user_id):
     tool_names = {
         "fb": "فيسبوك", "ig": "انستقرام", "qr": "QR Code",
         "rat": "RAT", "lsh": "LSH", "sh": "سرقة الجلسات",
-        "apk": "APK",
+        "apk": "APK", "wa": "واتساب",
     }
 
     trial_lines = []
@@ -320,7 +337,6 @@ def build_account_text(user_id):
         trial_lines.append(f"  • {tool_names.get(tool, tool)}: {count} متبقية")
     trial_text = "\n".join(trial_lines) if trial_lines else "  لا يوجد"
 
-    status = ""
     if is_admin(user_id):
         status = "👑 <b>أدمن</b> — كل شيء مفتوح (لا نهائي)"
     elif user.get("is_banned"):
@@ -354,7 +370,7 @@ def build_account_text(user_id):
 
 
 # ============================================================
-# [7] الفاتورة
+# [5] الفاتورة
 # ============================================================
 def send_invoice(bot, chat_id, plan_key):
     plan = PRICING_PLANS.get(plan_key)
@@ -380,8 +396,9 @@ def send_invoice(bot, chat_id, plan_key):
             need_shipping_address=False,
             is_flexible=False,
         )
+        logger.info(f"Invoice sent: {plan_key} → user={chat_id}")
     except Exception as e:
-        print(f"[-] send_invoice error: {e}")
+        logger.exception(f"send_invoice error: {e}")
 
 
 def activate_subscription(user_id, plan_key):
@@ -411,11 +428,13 @@ def activate_subscription(user_id, plan_key):
         "date": now.isoformat()
     })
     save_user(user_id, user)
+
+    metrics.inc_counter("subscriptions_activated", tags={"plan": plan_key})
     return user
 
 
 # ============================================================
-# [8] تسجيل معالجات الدفع
+# [6] تسجيل معالجات الدفع
 # ============================================================
 def register_payment_handlers(bot):
 
@@ -423,9 +442,9 @@ def register_payment_handlers(bot):
     def pre_checkout(pre_checkout_q: PreCheckoutQuery):
         try:
             bot.answer_pre_checkout_query(pre_checkout_q.id, ok=True)
-            print(f"[+] Pre-checkout OK: {pre_checkout_q.from_user.id}")
+            logger.info(f"Pre-checkout OK: {pre_checkout_q.from_user.id}")
         except Exception as e:
-            print(f"[-] pre_checkout error: {e}")
+            logger.error(f"pre_checkout error: {e}")
 
     @bot.message_handler(content_types=['successful_payment'])
     def successful_payment(message):
@@ -464,22 +483,18 @@ def register_payment_handlers(bot):
                 f"استمتع بكل الميزات! 🚀",
                 parse_mode="HTML"
             )
-            print(f"[+] Subscription activated: user={user_id}, plan={plan_key}")
+            logger.info(f"Subscription activated: user={user_id}, plan={plan_key}")
 
         except Exception as e:
-            print(f"[-] successful_payment error: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception(f"successful_payment error: {e}")
 
 
 # ============================================================
-# [9] دوال الأدمن
+# [7] دوال الأدمن
 # ============================================================
 def build_admin_menu():
     m = InlineKeyboardMarkup()
-    m.row(
-        InlineKeyboardButton("👥 قائمة المستخدمين", callback_data="admin_users_0"),
-    )
+    m.row(InlineKeyboardButton("👥 قائمة المستخدمين", callback_data="admin_users_0"))
     m.row(
         InlineKeyboardButton("➕ إضافة مستخدم لباقة", callback_data="admin_add_sub"),
         InlineKeyboardButton("💎 منح VIP", callback_data="admin_grant_vip"),
@@ -500,15 +515,12 @@ def build_admin_menu():
         InlineKeyboardButton("⭐ إعطاء نجوم", callback_data="admin_give_stars"),
         InlineKeyboardButton("📋 آخر المسجلين", callback_data="admin_recent"),
     )
-    m.row(
-        InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"),
-    )
+    m.row(InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"))
     return m
 
 
 def build_admin_users_keyboard(users, page=0, per_page=10):
     m = InlineKeyboardMarkup()
-
     start = page * per_page
     end = start + per_page
     page_users = users[start:end]
@@ -528,12 +540,13 @@ def build_admin_users_keyboard(users, page=0, per_page=10):
         else:
             icon = "👤"
 
-        m.row(
-            InlineKeyboardButton(f"{icon} {name} | {uid}", callback_data=f"admin_user_{uid}")
-        )
+        m.row(InlineKeyboardButton(
+            f"{icon} {name} | {uid}",
+            callback_data=f"admin_user_{uid}"
+        ))
 
-    nav_buttons = []
     total_pages = (len(users) + per_page - 1) // per_page
+    nav_buttons = []
     if page > 0:
         nav_buttons.append(InlineKeyboardButton("⬅️ السابق", callback_data=f"admin_users_{page-1}"))
     nav_buttons.append(InlineKeyboardButton(f"{page+1}/{total_pages}", callback_data="noop"))
@@ -564,9 +577,7 @@ def build_user_detail_keyboard(uid, user):
         InlineKeyboardButton("📅 إعطاء اشتراك", callback_data=f"admin_give_sub_{uid}"),
         InlineKeyboardButton("⭐ إعطاء نجوم", callback_data=f"admin_give_stars_{uid}"),
     )
-    m.row(
-        InlineKeyboardButton("🗑️ حذف نهائي", callback_data=f"admin_delete_user_{uid}"),
-    )
+    m.row(InlineKeyboardButton("🗑️ حذف نهائي", callback_data=f"admin_delete_user_{uid}"))
     m.row(
         InlineKeyboardButton("📨 رسالة له", callback_data=f"admin_msg_user_{uid}"),
         InlineKeyboardButton("🔙 رجوع", callback_data="admin_users_0"),
@@ -591,10 +602,10 @@ def build_user_info_text(uid, user):
         status = "👤 مجاني"
 
     created = user.get("created_at", "")[:19].replace("T", " ")
-
     purchases = user.get("purchases", [])
     total_spent = user.get("total_stars_spent", 0)
     daily_uses = user.get("daily_uses_count", 0)
+    trials = user.get("trial_uses", {})
 
     return (
         f"👤 <b>معلومات المستخدم</b>\n"
@@ -608,13 +619,14 @@ def build_user_info_text(uid, user):
         f"⭐ <b>إجمالي المصروف:</b> <code>{total_spent}</code> نجمة\n"
         f"🛍️ <b>عدد المشتريات:</b> <code>{len(purchases)}</code>\n\n"
         f"🎁 <b>الاستخدام المجاني:</b>\n"
-        f"• فيسبوك: <code>{user.get('trial_uses', {}).get('fb', 0)}</code>\n"
-        f"• انستقرام: <code>{user.get('trial_uses', {}).get('ig', 0)}</code>\n"
-        f"• QR: <code>{user.get('trial_uses', {}).get('qr', 0)}</code>\n"
-        f"• RAT: <code>{user.get('trial_uses', {}).get('rat', 0)}</code>\n"
-        f"• LSH: <code>{user.get('trial_uses', {}).get('lsh', 0)}</code>\n"
-        f"• SH: <code>{user.get('trial_uses', {}).get('sh', 0)}</code>\n"
-        f"• APK: <code>{user.get('trial_uses', {}).get('apk', 0)}</code>\n\n"
+        f"• فيسبوك: <code>{trials.get('fb', 0)}</code>\n"
+        f"• انستقرام: <code>{trials.get('ig', 0)}</code>\n"
+        f"• QR: <code>{trials.get('qr', 0)}</code>\n"
+        f"• RAT: <code>{trials.get('rat', 0)}</code>\n"
+        f"• LSH: <code>{trials.get('lsh', 0)}</code>\n"
+        f"• SH: <code>{trials.get('sh', 0)}</code>\n"
+        f"• APK: <code>{trials.get('apk', 0)}</code>\n"
+        f"• WA: <code>{trials.get('wa', 0)}</code>\n\n"
         f"📝 <b>ملاحظات:</b> <code>{h(user.get('notes', 'لا يوجد'))}</code>"
     )
 
@@ -631,9 +643,11 @@ def build_admin_stats_text():
     total_purchases = sum(len(u.get("purchases", [])) for u in users)
 
     now = time.time()
-    recent = sum(1 for u in users
-                 if u.get("created_at") and
-                 (now - datetime.fromisoformat(u["created_at"]).timestamp()) < 86400)
+    recent = sum(
+        1 for u in users
+        if u.get("created_at") and
+        (now - datetime.fromisoformat(u["created_at"]).timestamp()) < 86400
+    )
 
     return (
         f"📊 <b>إحصائيات النظام</b>\n"
@@ -647,4 +661,4 @@ def build_admin_stats_text():
         f"🛍️ <b>إجمالي المشتريات:</b> <code>{total_purchases}</code>\n\n"
         f"👑 <b>الأدمن:</b> <code>{len(ADMIN_IDS)}</code>\n"
         f"━━━━━━━━━━━━━━━━━━"
-        )
+                      )
