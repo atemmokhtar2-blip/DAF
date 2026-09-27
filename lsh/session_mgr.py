@@ -5,11 +5,15 @@
 
 import json
 import time
-import threading
+
 from .config import (
     sessions, sessions_lock, redis_client, LSH_CONFIG,
     ws_connections, ws_lock, sse_connections, sse_lock,
 )
+
+from logging_config import get_logger
+
+logger = get_logger("lsh.session_mgr")
 
 
 # ============================================================
@@ -74,7 +78,7 @@ def create_session(session_id, chat_id):
             )
             pipe.execute()
         except Exception as e:
-            print(f"[-] Redis session save: {e}")
+            logger.warning(f"Redis session save failed: {e}")
 
     return session
 
@@ -156,9 +160,10 @@ def delete_session(session_id):
             pipe.delete(f"lsh_active:{session_id}")
             pipe.delete(f"lsh_stream:{session_id}")
             pipe.delete(f"lsh_dead_letters:{session_id}")
+            pipe.delete(f"lsh_acked:{session_id}")
             pipe.execute()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Redis delete session error: {e}")
 
 
 # ============================================================
@@ -210,7 +215,7 @@ def refresh_session_ttl(session_id):
         pipe.execute()
         return True
     except Exception as e:
-        print(f"[-] refresh_session_ttl: {e}")
+        logger.warning(f"refresh_session_ttl error: {e}")
         return False
 
 
@@ -243,4 +248,4 @@ def get_session_stats(session_id):
             "ip": session.get("ip"),
             "ws_connected": session.get("ws_connected", False),
             "sse_connected": session.get("sse_connected", False),
-          }
+            }
