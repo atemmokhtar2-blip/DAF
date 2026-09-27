@@ -29,27 +29,48 @@ print(f"[+] GitHub Token: {'Set' if GITHUB_TOKEN else 'NOT SET'}")
 
 
 # ============================================================
-# Redis
+# ★★★ Redis — Upstash (Fixed) ★★★
 # ============================================================
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
+
+# ★ لو مفيش REDIS_URL، استخدم Upstash hardcoded
 if not REDIS_URL:
-    REDIS_URL = "redis://default:aF4GQMQw6l9ZEpZjfThV2koySkuFbk9c@insect-outsize-shirt-48022.db.redis.io:15744"
+    REDIS_URL = "rediss://default:gQAAAAAABLEzAAIgcDI0M2E4ZjUzNThjMTg0ZDVjODc4YTYxZjExNGZkNDZkYQ@electric-caribou-307507.upstash.io:6379"
+
+# ★ لو لسه فيه رابط قديم Insect/Outsize → استبدله بـ Upstash
+if "insect-outsize-shirt" in REDIS_URL or "insect" in REDIS_URL:
+    print(f"[!] OLD Redis detected! Switching to Upstash...")
+    REDIS_URL = "rediss://default:gQAAAAAABLEzAAIgcDI0M2E4ZjUzNThjMTg0ZDVjODc4YTYxZjExNGZkNDZkYQ@electric-caribou-307507.upstash.io:6379"
+
 if REDIS_URL.startswith("redis-cli"):
     REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
+
 if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
     REDIS_URL = "redis://" + REDIS_URL
 
-print(f"[+] Redis URL: {REDIS_URL[:45]}...")
+# ★ Upstash إجباري TLS
+if "upstash.io" in REDIS_URL and REDIS_URL.startswith("redis://"):
+    REDIS_URL = REDIS_URL.replace("redis://", "rediss://", 1)
+
+print(f"[+] Redis URL (masked): {REDIS_URL[:30]}...{REDIS_URL[-30:]}")
+print(f"[+] Redis host: {REDIS_URL.split('@')[-1] if '@' in REDIS_URL else 'unknown'}")
 
 
 def _try_redis(url):
     try:
         client = redis.Redis.from_url(
             url, decode_responses=True,
-            socket_timeout=10, socket_connect_timeout=10,
+            socket_timeout=15, socket_connect_timeout=15,
             retry_on_timeout=True, health_check_interval=30,
+            ssl_cert_reqs=None,
         )
         client.ping()
+        # ★ اختبار info
+        try:
+            info = client.info("server")
+            print(f"[+] Redis version: {info.get('redis_version', 'unknown')}")
+        except Exception:
+            pass
         return client
     except Exception as e:
         print(f"[-] Redis try failed: {e}")
@@ -58,24 +79,23 @@ def _try_redis(url):
 
 redis_client = _try_redis(REDIS_URL)
 
-if not redis_client and REDIS_URL.startswith("redis://"):
-    tls_url = REDIS_URL.replace("redis://", "rediss://", 1)
-    redis_client = _try_redis(tls_url)
-    if redis_client:
-        REDIS_URL = tls_url
-        print("[+] TLS connection succeeded!")
-
-if not redis_client and REDIS_URL.startswith("rediss://"):
-    non_tls = REDIS_URL.replace("rediss://", "redis://", 1)
-    redis_client = _try_redis(non_tls)
-    if redis_client:
-        REDIS_URL = non_tls
-        print("[+] Non-TLS succeeded!")
+# fallback
+if not redis_client:
+    fallbacks = [
+        "rediss://default:gQAAAAAABLEzAAIgcDI0M2E4ZjUzNThjMTg0ZDVjODc4YTYxZjExNGZkNDZkYQ@electric-caribou-307507.upstash.io:6379",
+    ]
+    for fb_url in fallbacks:
+        redis_client = _try_redis(fb_url)
+        if redis_client:
+            REDIS_URL = fb_url
+            print(f"[+] Fallback worked!")
+            break
 
 if redis_client:
-    print("[+] config: Redis connected")
+    print("[+] config: ✅ Redis connected to Upstash")
+    print(f"[+] config: Using: {REDIS_URL.split('@')[-1]}")
 else:
-    print("[-] config: Redis FAILED")
+    print("[-] config: ❌ Redis FAILED — check Upstash URL")
 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN missing!")
