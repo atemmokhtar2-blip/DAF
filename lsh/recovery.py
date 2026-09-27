@@ -5,6 +5,7 @@
 
 import json
 import time
+
 from .config import (
     redis_client, sessions, sessions_lock, LSH_CONFIG,
 )
@@ -13,12 +14,16 @@ from .session_mgr import (
 )
 from .commands import clear_commands, push_command
 
+from logging_config import get_logger
+
+logger = get_logger("lsh.recovery")
+
 
 # ============================================================
 # استرجاع جلسة
 # ============================================================
 def recover_session(session_id):
-    """استرجاع من Redis"""
+    """استرجاع جلسة من Redis"""
     if not redis_client:
         return None
 
@@ -36,27 +41,29 @@ def recover_session(session_id):
                 meta = json.loads(meta_raw)
                 session["created_at"] = meta.get("created_at", time.time())
                 session["reconnect_count"] = meta.get("reconnect_count", 0)
-            except Exception:
-                pass
+            except json.JSONDecodeError as e:
+                logger.warning(f"Meta JSON parse error: {e}")
 
-        print(f"[+] Recovery: {session_id[:8]} recovered")
+        logger.info(f"Recovery: {session_id[:8]} recovered")
         return session
+
     except Exception as e:
-        print(f"[-] Recovery error: {e}")
+        logger.exception(f"Recovery error: {e}")
         return None
 
 
 # ============================================================
-# تنظيف
+# تنظيف الجلسات الميتة
 # ============================================================
 def cleanup_stale_sessions():
-    """حذف الجلسات الميتة"""
+    """حذف الجلسات الميتة من Redis"""
     if not redis_client:
         return 0
 
     try:
         count = 0
         cursor = 0
+
         while True:
             cursor, keys = redis_client.scan(
                 cursor, match="lsh_session:*", count=100
@@ -67,16 +74,18 @@ def cleanup_stale_sessions():
                     if ttl == -2:
                         redis_client.delete(key)
                         count += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"TTL check error for {key}: {e}")
+
             if cursor == 0:
                 break
 
         if count > 0:
-            print(f"[+] Recovery: cleaned {count} stale keys")
+            logger.info(f"Recovery: cleaned {count} stale keys")
         return count
+
     except Exception as e:
-        print(f"[-] cleanup_stale_sessions: {e}")
+        logger.exception(f"cleanup_stale_sessions: {e}")
         return 0
 
 
@@ -84,13 +93,14 @@ def cleanup_stale_sessions():
 # استرجاع كل الجلسات
 # ============================================================
 def restore_all_sessions():
-    """استرجاع عند البدء"""
+    """استرجاع كل الجلسات عند البدء"""
     if not redis_client:
         return 0
 
     try:
         count = 0
         cursor = 0
+
         while True:
             cursor, keys = redis_client.scan(
                 cursor, match="lsh_session:*", count=100
@@ -99,18 +109,21 @@ def restore_all_sessions():
                 try:
                     sid = key.replace("lsh_session:", "")
                     chat_id = redis_client.get(key)
+
                     if chat_id and not session_exists(sid):
                         create_session(sid, chat_id)
                         count += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Restore error for {key}: {e}")
+
             if cursor == 0:
                 break
 
-        print(f"[+] Recovery: restored {count} sessions")
+        logger.info(f"Recovery: restored {count} sessions")
         return count
+
     except Exception as e:
-        print(f"[-] restore_all_sessions: {e}")
+        logger.exception(f"restore_all_sessions: {e}")
         return 0
 
 
@@ -133,8 +146,9 @@ def force_reconnect(session_id):
                 sessions[session_id]["channel"] = "unknown"
                 sessions[session_id]["presence"] = "reconnecting"
 
-        print(f"[+] Force reconnect: {session_id[:8]}")
+        logger.info(f"Force reconnect: {session_id[:8]}")
         return True
+
     except Exception as e:
-        print(f"[-] force_reconnect: {e}")
+        logger.exception(f"force_reconnect: {e}")
         return False
