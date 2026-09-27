@@ -5,9 +5,13 @@
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from logging_config import get_logger
+
+logger = get_logger("lsh.panel")
+
 
 def build_lsh_control_panel(session_id, chat_id):
-    """★ اللوحة الكاملة"""
+    """★ بناء اللوحة الكاملة"""
     m = InlineKeyboardMarkup()
 
     # ═══ الوسائط ═══
