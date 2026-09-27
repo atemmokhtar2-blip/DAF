@@ -6,12 +6,15 @@
 import json
 import time
 import uuid
-import threading
-import random
+
 from .config import (
     redis_client, streams_available, LSH_CONFIG,
     ws_connections, ws_lock, sse_connections, sse_lock,
 )
+
+from logging_config import get_logger
+
+logger = get_logger("lsh.commands")
 
 
 # ============================================================
@@ -25,7 +28,7 @@ def push_command(session_id, command_dict):
     3) Redis Streams/List (للـ polling)
     """
     if not redis_client:
-        print(f"[-] PUSH FAIL: no Redis")
+        logger.error("PUSH FAIL: no Redis")
         return False
 
     try:
@@ -54,13 +57,14 @@ def push_command(session_id, command_dict):
         _increment_counter(session_id, "commands_sent")
 
         channel_info = f"ws={ws_sent} sse={sse_sent}"
-        print(f"[+] PUSH >> {session_id[:8]} | {cmd.get('action')} | {channel_info} | id={cmd_id[:12]}")
+        logger.info(
+            f"PUSH >> {session_id[:8]} | {cmd.get('action')} | "
+            f"{channel_info} | id={cmd_id[:12]}"
+        )
         return True
 
     except Exception as e:
-        print(f"[-] PUSH ERROR: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception(f"PUSH ERROR: {e}")
         return False
 
 
@@ -87,8 +91,9 @@ def _send_via_ws(session_id, cmd):
             return True
 
         return False
+
     except Exception as e:
-        print(f"[-] WS send error: {e}")
+        logger.warning(f"WS send error: {e}")
         return False
 
 
@@ -110,8 +115,9 @@ def _send_via_sse(session_id, cmd):
             return True
 
         return False
+
     except Exception as e:
-        print(f"[-] SSE send error: {e}")
+        logger.warning(f"SSE send error: {e}")
         return False
 
 
@@ -139,19 +145,25 @@ def _save_to_stream(session_id, cmd):
         )
         redis_client.expire(stream_key, LSH_CONFIG["cmd_ttl"])
 
-        # ★ إضافة للقائمة (للتوافق مع النسخة القديمة)
+        # ★ إضافة للقائمة (للتوافق)
         redis_client.lpush(f"lsh_cmd:{session_id}", json.dumps(cmd))
-        redis_client.expire(f"lsh_cmd:{session_id}", LSH_CONFIG["cmd_ttl"])
-        redis_client.ltrim(f"lsh_cmd:{session_id}", 0, LSH_CONFIG["cmd_max_pending"] - 1)
+        redis_client.expire(
+            f"lsh_cmd:{session_id}",
+            LSH_CONFIG["cmd_ttl"]
+        )
+        redis_client.ltrim(
+            f"lsh_cmd:{session_id}",
+            0,
+            LSH_CONFIG["cmd_max_pending"] - 1
+        )
 
     except Exception as e:
-        print(f"[-] stream save error: {e}")
-        # Fallback to list
+        logger.warning(f"stream save error: {e} - falling back to list")
         _save_to_list(session_id, json.dumps(cmd))
 
 
 # ============================================================
-# List Fallback (لما Streams غير متاح)
+# List Fallback
 # ============================================================
 def _save_to_list(session_id, payload):
     """حفظ الأمر في List"""
@@ -163,7 +175,7 @@ def _save_to_list(session_id, payload):
         pipe.ltrim(key, 0, LSH_CONFIG["cmd_max_pending"] - 1)
         pipe.execute()
     except Exception as e:
-        print(f"[-] list save error: {e}")
+        logger.warning(f"list save error: {e}")
 
 
 # ============================================================
@@ -192,14 +204,14 @@ def pop_commands(session_id, max_count=5):
                 # ★ تنظيف metadata
                 cmd.pop("_session_id", None)
                 commands.append(cmd)
-            except Exception as e:
-                print(f"[-] Parse error: {e}")
+            except json.JSONDecodeError as e:
+                logger.warning(f"Parse error for cmd: {e}")
 
         if commands:
-            print(f"[+] DELIVER >> {session_id[:8]} | {len(commands)} commands")
+            logger.info(f"DELIVER >> {session_id[:8]} | {len(commands)} commands")
 
     except Exception as e:
-        print(f"[-] pop_commands error: {e}")
+        logger.exception(f"pop_commands error: {e}")
 
     return commands
 
@@ -217,7 +229,7 @@ def ack_command(session_id, cmd_id):
         redis_client.expire(key, 300)
         return True
     except Exception as e:
-        print(f"[-] ack error: {e}")
+        logger.warning(f"ack error: {e}")
         return False
 
 
@@ -237,10 +249,10 @@ def nack_command(session_id, cmd_id, reason="unknown"):
         })
         redis_client.lpush(dl_key, item)
         redis_client.expire(dl_key, LSH_CONFIG["dead_letter_ttl"])
-        redis_client.ltrim(dl_key, 0, 99)  # حد 100 عنصر
+        redis_client.ltrim(dl_key, 0, 99)
         return True
     except Exception as e:
-        print(f"[-] nack error: {e}")
+        logger.warning(f"nack error: {e}")
         return False
 
 
@@ -258,10 +270,11 @@ def get_dead_letters(session_id, limit=20):
         for item in raw:
             try:
                 result.append(json.loads(item))
-            except Exception:
-                pass
+            except json.JSONDecodeError:
+                continue
         return result
-    except Exception:
+    except Exception as e:
+        logger.warning(f"get_dead_letters error: {e}")
         return []
 
 
@@ -274,7 +287,8 @@ def retry_dead_letters(session_id):
         items = redis_client.lrange(dl_key, 0, -1)
         redis_client.delete(dl_key)
         return len(items)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"retry_dead_letters error: {e}")
         return 0
 
 
@@ -288,9 +302,13 @@ def mark_session_active(session_id, ttl=None):
     try:
         if ttl is None:
             ttl = LSH_CONFIG["active_ttl"]
-        redis_client.setex(f"lsh_active:{session_id}", ttl, str(time.time()))
-    except Exception:
-        pass
+        redis_client.setex(
+            f"lsh_active:{session_id}",
+            ttl,
+            str(time.time())
+        )
+    except Exception as e:
+        logger.warning(f"mark_session_active error: {e}")
 
 
 def is_session_active(session_id):
@@ -299,7 +317,8 @@ def is_session_active(session_id):
         return False
     try:
         return bool(redis_client.get(f"lsh_active:{session_id}"))
-    except Exception:
+    except Exception as e:
+        logger.warning(f"is_session_active error: {e}")
         return False
 
 
@@ -309,7 +328,8 @@ def get_pending_count(session_id):
         return 0
     try:
         return redis_client.llen(f"lsh_cmd:{session_id}")
-    except Exception:
+    except Exception as e:
+        logger.warning(f"get_pending_count error: {e}")
         return 0
 
 
@@ -324,8 +344,8 @@ def _increment_counter(session_id, counter_name):
         key = f"lsh_stats:{session_id}:{counter_name}"
         redis_client.incr(key)
         redis_client.expire(key, 86400)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"increment_counter error: {e}")
 
 
 # ============================================================
@@ -341,5 +361,5 @@ def clear_commands(session_id):
         pipe.delete(f"lsh_stream:{session_id}")
         pipe.delete(f"lsh_dead_letters:{session_id}")
         pipe.execute()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"clear_commands error: {e}")
