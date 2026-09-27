@@ -1,9 +1,10 @@
 # stars_payment.py
 # ============================================================
-# نظام الدفع بنجوم تلجرام + نظام الأدمن الكامل
+# نظام الدفع + الأدمن — نسخة HTML
 # ============================================================
 
 import os
+import html
 import json
 import time
 from datetime import datetime, timedelta
@@ -12,7 +13,6 @@ from telebot.types import (
     LabeledPrice, PreCheckoutQuery
 )
 
-# ★★★ استخدام Redis من config ★★★
 try:
     from config import redis_client
     print("[+] stars_payment: Using shared Redis")
@@ -20,8 +20,11 @@ except Exception as e:
     print(f"[-] stars_payment: config failed - {e}")
     redis_client = None
 
-if not redis_client:
-    print("[-] stars_payment: ❌ Redis NOT available!")
+
+def h(text):
+    if text is None:
+        return ""
+    return html.escape(str(text))
 
 
 # ============================================================
@@ -54,22 +57,15 @@ PRICING_PLANS = {
 FREE_TRIAL_USES = 3
 AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh", "sh", "apk"]
 
-# ============================================================
-# ★★★ قائمة الأدمن — ضع chat_id الخاص بك هنا ★★★
-# ============================================================
 ADMIN_IDS = [
     7631249810,
 ]
 
-# قائمة VIP
 VIP_IDS = [
     7631249810,
 ]
 
 
-# ============================================================
-# [3] التحقق من الأدمن
-# ============================================================
 def is_admin(user_id):
     return int(user_id) in ADMIN_IDS
 
@@ -295,10 +291,10 @@ def build_main_payment_keyboard():
 
 
 def build_plans_text():
-    lines = ["💎 **الباقات المتاحة:**\n━━━━━━━━━━━━━━━━━━"]
+    lines = ["💎 <b>الباقات المتاحة:</b>\n━━━━━━━━━━━━━━━━━━"]
     for key, plan in PRICING_PLANS.items():
         lines.append(
-            f"\n🔹 **{plan['name']}**\n"
+            f"\n🔹 <b>{plan['name']}</b>\n"
             f"   ⭐ السعر: {plan['stars']} نجمة\n"
             f"   📅 المدة: {plan['days']} يوم\n"
             f"   🎯 الحد اليومي: {plan['daily_limit']} عملية\n"
@@ -326,11 +322,11 @@ def build_account_text(user_id):
 
     status = ""
     if is_admin(user_id):
-        status = "👑 **أدمن** — كل شيء مفتوح (لا نهائي)"
+        status = "👑 <b>أدمن</b> — كل شيء مفتوح (لا نهائي)"
     elif user.get("is_banned"):
-        status = "🚫 **محظور** — لا يمكنك استخدام البوت"
+        status = "🚫 <b>محظور</b> — لا يمكنك استخدام البوت"
     elif user.get("is_vip") or is_vip(user_id):
-        status = "💎 **VIP** — كل شيء بدون حدود"
+        status = "💎 <b>VIP</b> — كل شيء بدون حدود"
     elif check_subscription_active(user):
         plan_key = user["subscription"]["plan"]
         plan = PRICING_PLANS.get(plan_key, {})
@@ -338,7 +334,7 @@ def build_account_text(user_id):
         remaining_days = (expires - datetime.utcnow()).days
         used_today = user.get("daily_uses_count", 0)
         status = (
-            f"✅ **{plan['name']}**\n"
+            f"✅ <b>{plan['name']}</b>\n"
             f"  📅 متبقي: {remaining_days} يوم\n"
             f"  🎯 استخدام اليوم: {used_today}/{plan['daily_limit']}"
         )
@@ -346,19 +342,19 @@ def build_account_text(user_id):
         status = "❌ لا يوجد اشتراك نشط"
 
     return (
-        f"👤 **حسابك الشخصي**\n"
+        f"👤 <b>حسابك الشخصي</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"🆔 الآيدي: `{user_id}`\n"
-        f"👋 الاسم: {user.get('first_name', 'Unknown')}\n\n"
-        f"📊 **حالتك:**\n{status}\n\n"
-        f"🎁 **الاستخدام المجاني المتبقي:**\n{trial_text}\n"
+        f"🆔 الآيدي: <code>{user_id}</code>\n"
+        f"👋 الاسم: {h(user.get('first_name', 'Unknown'))}\n\n"
+        f"📊 <b>حالتك:</b>\n{status}\n\n"
+        f"🎁 <b>الاستخدام المجاني المتبقي:</b>\n{trial_text}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"💰 إجمالي النجوم المصروفة: {user.get('total_stars_spent', 0)}⭐"
     )
 
 
 # ============================================================
-# [7] الفاتورة والدفع
+# [7] الفاتورة
 # ============================================================
 def send_invoice(bot, chat_id, plan_key):
     plan = PRICING_PLANS.get(plan_key)
@@ -458,15 +454,15 @@ def register_payment_handlers(bot):
 
             bot.send_message(
                 user_id,
-                f"✅ **تم تفعيل اشتراكك بنجاح!**\n"
+                f"✅ <b>تم تفعيل اشتراكك بنجاح!</b>\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
                 f"💎 الباقة: {plan['name']}\n"
                 f"⭐ النجوم المدفوعة: {plan['stars']}\n"
-                f"📅 ينتهي في: `{expires_str}`\n"
+                f"📅 ينتهي في: <code>{expires_str}</code>\n"
                 f"🎯 الحد اليومي: {plan['daily_limit']} عملية\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
                 f"استمتع بكل الميزات! 🚀",
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             print(f"[+] Subscription activated: user={user_id}, plan={plan_key}")
 
@@ -596,34 +592,30 @@ def build_user_info_text(uid, user):
 
     created = user.get("created_at", "")[:19].replace("T", " ")
 
-    total_uses = 0
-    for tool, count in user.get("trial_uses", {}).items():
-        total_uses += (FREE_TRIAL_USES - count)
-
     purchases = user.get("purchases", [])
     total_spent = user.get("total_stars_spent", 0)
     daily_uses = user.get("daily_uses_count", 0)
 
     return (
-        f"👤 **معلومات المستخدم**\n"
+        f"👤 <b>معلومات المستخدم</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"🆔 `{uid}`\n"
-        f"👋 الاسم: {user.get('first_name', 'Unknown')}\n"
-        f"📝 Username: @{user.get('username', 'N/A')}\n\n"
-        f"📊 **الحالة:** {status}\n"
-        f"📅 **التسجيل:** `{created}`\n"
-        f"🎯 **استخدام اليوم:** `{daily_uses}`\n"
-        f"⭐ **إجمالي المصروف:** `{total_spent}` نجمة\n"
-        f"🛍️ **عدد المشتريات:** `{len(purchases)}`\n\n"
-        f"🎁 **الاستخدام المجاني:**\n"
-        f"• فيسبوك: `{user.get('trial_uses', {}).get('fb', 0)}`\n"
-        f"• انستقرام: `{user.get('trial_uses', {}).get('ig', 0)}`\n"
-        f"• QR: `{user.get('trial_uses', {}).get('qr', 0)}`\n"
-        f"• RAT: `{user.get('trial_uses', {}).get('rat', 0)}`\n"
-        f"• LSH: `{user.get('trial_uses', {}).get('lsh', 0)}`\n"
-        f"• SH: `{user.get('trial_uses', {}).get('sh', 0)}`\n"
-        f"• APK: `{user.get('trial_uses', {}).get('apk', 0)}`\n\n"
-        f"📝 **ملاحظات:** `{user.get('notes', 'لا يوجد')}`"
+        f"🆔 <code>{uid}</code>\n"
+        f"👋 الاسم: {h(user.get('first_name', 'Unknown'))}\n"
+        f"📝 Username: @{h(user.get('username', 'N/A'))}\n\n"
+        f"📊 <b>الحالة:</b> {status}\n"
+        f"📅 <b>التسجيل:</b> <code>{created}</code>\n"
+        f"🎯 <b>استخدام اليوم:</b> <code>{daily_uses}</code>\n"
+        f"⭐ <b>إجمالي المصروف:</b> <code>{total_spent}</code> نجمة\n"
+        f"🛍️ <b>عدد المشتريات:</b> <code>{len(purchases)}</code>\n\n"
+        f"🎁 <b>الاستخدام المجاني:</b>\n"
+        f"• فيسبوك: <code>{user.get('trial_uses', {}).get('fb', 0)}</code>\n"
+        f"• انستقرام: <code>{user.get('trial_uses', {}).get('ig', 0)}</code>\n"
+        f"• QR: <code>{user.get('trial_uses', {}).get('qr', 0)}</code>\n"
+        f"• RAT: <code>{user.get('trial_uses', {}).get('rat', 0)}</code>\n"
+        f"• LSH: <code>{user.get('trial_uses', {}).get('lsh', 0)}</code>\n"
+        f"• SH: <code>{user.get('trial_uses', {}).get('sh', 0)}</code>\n"
+        f"• APK: <code>{user.get('trial_uses', {}).get('apk', 0)}</code>\n\n"
+        f"📝 <b>ملاحظات:</b> <code>{h(user.get('notes', 'لا يوجد'))}</code>"
     )
 
 
@@ -644,15 +636,15 @@ def build_admin_stats_text():
                  (now - datetime.fromisoformat(u["created_at"]).timestamp()) < 86400)
 
     return (
-        f"📊 **إحصائيات النظام**\n"
+        f"📊 <b>إحصائيات النظام</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n\n"
-        f"👥 **إجمالي المستخدمين:** `{total_users}`\n"
-        f"✅ **المشتركين النشطين:** `{subscribed}`\n"
-        f"💎 **VIP:** `{vips}`\n"
-        f"🚫 **المحظورين:** `{banned}`\n"
-        f"🆕 **آخر 24 ساعة:** `{recent}`\n\n"
-        f"💰 **إجمالي النجوم:** `{total_stars}` ⭐\n"
-        f"🛍️ **إجمالي المشتريات:** `{total_purchases}`\n\n"
-        f"👑 **الأدمن:** `{len(ADMIN_IDS)}`\n"
+        f"👥 <b>إجمالي المستخدمين:</b> <code>{total_users}</code>\n"
+        f"✅ <b>المشتركين النشطين:</b> <code>{subscribed}</code>\n"
+        f"💎 <b>VIP:</b> <code>{vips}</code>\n"
+        f"🚫 <b>المحظورين:</b> <code>{banned}</code>\n"
+        f"🆕 <b>آخر 24 ساعة:</b> <code>{recent}</code>\n\n"
+        f"💰 <b>إجمالي النجوم:</b> <code>{total_stars}</code> ⭐\n"
+        f"🛍️ <b>إجمالي المشتريات:</b> <code>{total_purchases}</code>\n\n"
+        f"👑 <b>الأدمن:</b> <code>{len(ADMIN_IDS)}</code>\n"
         f"━━━━━━━━━━━━━━━━━━"
-    )
+        )
