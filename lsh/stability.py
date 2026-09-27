@@ -4,8 +4,8 @@
 # ============================================================
 
 import time
-import json
 import threading
+
 from .config import (
     sessions, sessions_lock, redis_client, LSH_CONFIG,
 )
@@ -13,7 +13,11 @@ from .session_mgr import (
     get_all_sessions, delete_session, refresh_session_ttl,
     list_live_sessions,
 )
-from .commands import is_session_active, get_pending_count
+from .commands import is_session_active
+
+from logging_config import get_logger
+
+logger = get_logger("lsh.stability")
 
 
 # ============================================================
@@ -27,7 +31,6 @@ _stability_stats = {
     "circuit_breakers": {},
 }
 
-# ★ Threads
 _threads = []
 _shutdown_flag = threading.Event()
 
@@ -37,9 +40,8 @@ _shutdown_flag = threading.Event()
 # ============================================================
 def init_stability(bot=None):
     """بدء خدمات الاستقرار"""
-    print("[+] LSH v6 Stability: Initializing...")
+    logger.info("LSH Stability: Initializing...")
 
-    # ★ 4 حلقات استقرار
     loops = [
         ("session_checker", _session_checker_loop),
         ("redis_monitor", _redis_monitor_loop),
@@ -52,18 +54,18 @@ def init_stability(bot=None):
         t = threading.Thread(target=target, name=name, daemon=True)
         t.start()
         _threads.append(t)
-        print(f"[+] LSH Stability: {name} started")
+        logger.info(f"LSH Stability: {name} started")
 
-    print("[+] LSH v6 Stability: ✅ All services running")
+    logger.info("LSH Stability: ✅ All services running")
 
 
 def shutdown_stability():
-    """إيقاف"""
-    print("[+] LSH Stability: Shutting down...")
+    """إيقاف خدمات الاستقرار"""
+    logger.info("LSH Stability: Shutting down...")
     _shutdown_flag.set()
     for t in _threads:
         t.join(timeout=2)
-    print("[+] LSH Stability: Stopped")
+    logger.info("LSH Stability: Stopped")
 
 
 # ============================================================
@@ -78,7 +80,7 @@ def _session_checker_loop():
                 break
             check_all_sessions()
         except Exception as e:
-            print(f"[-] session_checker: {e}")
+            logger.exception(f"session_checker error: {e}")
             _stability_stats["errors"] += 1
 
 
@@ -97,16 +99,17 @@ def _redis_monitor_loop():
 
             try:
                 cfg.redis_client.ping()
-            except Exception:
-                print("[!] Redis died — attempting reconnect")
+            except Exception as e:
+                logger.warning(f"Redis died: {e} - attempting reconnect")
                 new_client = cfg._try_redis(cfg.REDIS_URL, "reconnect")
                 if new_client:
                     cfg.redis_client = new_client
-                    print("[+] Redis reconnected")
+                    logger.info("Redis reconnected")
                 else:
                     _stability_stats["errors"] += 1
+
         except Exception as e:
-            print(f"[-] redis_monitor: {e}")
+            logger.exception(f"redis_monitor error: {e}")
 
 
 def _stale_cleaner_loop():
@@ -118,7 +121,7 @@ def _stale_cleaner_loop():
                 break
             _cleanup_stale()
         except Exception as e:
-            print(f"[-] stale_cleaner: {e}")
+            logger.exception(f"stale_cleaner error: {e}")
 
 
 def _active_refresher_loop():
@@ -130,7 +133,7 @@ def _active_refresher_loop():
                 break
             _refresh_active()
         except Exception as e:
-            print(f"[-] active_refresher: {e}")
+            logger.exception(f"active_refresher error: {e}")
 
 
 def _stats_reporter_loop():
@@ -142,11 +145,14 @@ def _stats_reporter_loop():
                 break
 
             report = get_stability_report()
-            print(f"[+] Stability: {report['live_sessions']} live | "
-                  f"{report['total_sessions']} total | "
-                  f"checks={report['checks']} | errors={report['errors']}")
+            logger.info(
+                f"Stability: {report.get('live_sessions', 0)} live | "
+                f"{report.get('total_sessions', 0)} total | "
+                f"checks={report.get('checks', 0)} | "
+                f"errors={report.get('errors', 0)}"
+            )
         except Exception as e:
-            print(f"[-] stats_reporter: {e}")
+            logger.exception(f"stats_reporter error: {e}")
 
 
 # ============================================================
@@ -165,7 +171,6 @@ def check_all_sessions():
 
         with sessions_lock:
             for session in all_sessions:
-                sid = session.get("session_id")
                 last_seen = session.get("last_seen", now)
                 idle_time = now - last_seen
 
@@ -186,9 +191,15 @@ def check_all_sessions():
                     session["presence"] = "offline"
                     stale += 1
 
-        return {"alive": alive, "idle": idle, "stale": stale, "total": len(all_sessions)}
+        return {
+            "alive": alive,
+            "idle": idle,
+            "stale": stale,
+            "total": len(all_sessions)
+        }
+
     except Exception as e:
-        print(f"[-] check_all_sessions: {e}")
+        logger.exception(f"check_all_sessions error: {e}")
         return {"alive": 0, "idle": 0, "stale": 0, "total": 0}
 
 
@@ -210,14 +221,15 @@ def _cleanup_stale():
         for sid in to_delete:
             try:
                 delete_session(sid)
-                print(f"[+] Stability: deleted stale {sid[:8]}")
+                logger.info(f"Stability: deleted stale {sid[:8]}")
             except Exception as e:
-                print(f"[-] Delete stale: {e}")
+                logger.warning(f"Delete stale error for {sid[:8]}: {e}")
 
         if to_delete:
             _stability_stats["restarts"] += len(to_delete)
+
     except Exception as e:
-        print(f"[-] _cleanup_stale: {e}")
+        logger.exception(f"_cleanup_stale error: {e}")
 
 
 # ============================================================
@@ -232,7 +244,7 @@ def _refresh_active():
             if sid and is_session_active(sid):
                 refresh_session_ttl(sid)
     except Exception as e:
-        print(f"[-] _refresh_active: {e}")
+        logger.exception(f"_refresh_active error: {e}")
 
 
 # ============================================================
@@ -242,7 +254,10 @@ def get_stability_report():
     """تقرير الحالة"""
     try:
         all_sessions = get_all_sessions()
-        live = [s for s in all_sessions if time.time() - s.get("last_seen", 0) < 60]
+        live = [
+            s for s in all_sessions
+            if time.time() - s.get("last_seen", 0) < 60
+        ]
 
         return {
             "started_at": _stability_stats["started_at"],
@@ -254,6 +269,7 @@ def get_stability_report():
             "live_sessions": len(live),
             "redis_connected": bool(redis_client),
         }
+
     except Exception as e:
-        print(f"[-] get_stability_report: {e}")
+        logger.exception(f"get_stability_report error: {e}")
         return {}
