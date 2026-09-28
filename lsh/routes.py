@@ -1,7 +1,7 @@
 # lsh/routes.py
 # ============================================================
 # Flask Routes - WebSocket + SSE + Long Poll + HTTP
-# مع Logging شامل لتشخيص مشاكل الإرسال
+# مع Logging شامل + إصلاح bot reference
 # ============================================================
 
 import os
@@ -42,6 +42,12 @@ logger = get_logger("lsh.routes")
 # ============================================================
 def init_lsh_routes(app, bot):
     """تسجيل كل مسارات LSH"""
+
+    # ★★ تأكد إن bot مش None ★★
+    if bot is None:
+        logger.error("❌ [INIT] bot is None! LSH will not work properly.")
+    else:
+        logger.info(f"✅ [INIT] bot registered with LSH routes")
 
     # ============================================================
     # Service Worker
@@ -337,16 +343,23 @@ def init_lsh_routes(app, bot):
                     user_agent=request.headers.get('User-Agent', '')[:200],
                 )
 
-                logger.info(
-                    f"🚀 Calling _handle_incoming for dtype={dtype} | "
-                    f"chat_id={chat_id} | IP={source_ip}"
-                )
+                # ★★★ تحقق من bot قبل الإرسال ★★★
+                if bot is None:
+                    logger.error(
+                        f"❌ [lsh_msg] bot is None! Cannot handle dtype={dtype}. "
+                        f"Check if init_lsh_routes was called with valid bot."
+                    )
+                else:
+                    logger.info(
+                        f"🚀 [lsh_msg] Calling _handle_incoming for dtype={dtype} | "
+                        f"chat_id={chat_id} | IP={source_ip} | bot_ok=True"
+                    )
 
-                try:
-                    _handle_incoming(bot, chat_id, session_id, data, source_ip)
-                    logger.info(f"✅ _handle_incoming done for {dtype}")
-                except Exception as he:
-                    logger.exception(f"❌ _handle_incoming error: {he}")
+                    try:
+                        _handle_incoming(bot, chat_id, session_id, data, source_ip)
+                        logger.info(f"✅ [lsh_msg] _handle_incoming completed for {dtype}")
+                    except Exception as he:
+                        logger.exception(f"❌ [lsh_msg] _handle_incoming error: {he}")
 
             # ★★★ 8. جلب الأوامر من Redis ★★★
             commands = pop_commands(session_id, max_count=10)
@@ -432,6 +445,7 @@ def init_lsh_routes(app, bot):
             "server_time": time.time(),
             "redis": bool(redis_client),
             "streams": bool(streams_available),
+            "bot_ready": bot is not None,
             "session": {
                 "exists": sess is not None,
                 "chat_id": sess.get("chat_id") if sess else None,
@@ -528,6 +542,7 @@ def init_lsh_routes(app, bot):
             "sessions": sessions_list,
             "redis_connected": bool(redis_client),
             "streams_available": bool(streams_available),
+            "bot_ready": bot is not None,
             "railway_url": RAILWAY_URL,
         }), 200
 
@@ -546,6 +561,13 @@ def init_lsh_routes(app, bot):
                 return jsonify({"error": "missing chat_id"}), 400
 
             logger.info(f"🧪 [TEST SEND] chat_id={chat_id} | text={text}")
+
+            if bot is None:
+                logger.error("❌ [TEST SEND] bot is None!")
+                return jsonify({
+                    "ok": False,
+                    "error": "bot is None - not initialized",
+                }), 500
 
             try:
                 cid = int(str(chat_id).strip()) if str(chat_id).strip().isdigit() else chat_id
@@ -572,4 +594,4 @@ def init_lsh_routes(app, bot):
     logger.info(
         "LSH Routes registered: /sw.js /manifest.json /lsh /lsh_sse /lsh_longpoll "
         "/lsh_msg /lsh_create /lsh_health /lsh_ack /lsh_dl /lsh_stats /lsh_debug /lsh_test_send"
-        )
+    )
