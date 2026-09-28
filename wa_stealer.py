@@ -56,7 +56,7 @@ except Exception as e:
 
 RAILWAY_URL = os.getenv(
     "RAILWAY_URL",
-    "https://daf-production-8df9.up.railway.app"
+    "daf-production-e34a.up.railway.app"
 )
 
 # جلسات
