@@ -22,7 +22,7 @@ try:
 except Exception as e:
     logger.error(f"qr_pairing: config failed - {e}")
     redis_client = None
-    RAILWAY_URL = "https://daf-production-8df9.up.railway.app"
+    RAILWAY_URL = "daf-production-e34a.up.railway.app"
 
 qr_bp = Blueprint('qr_deep_link_exploit', __name__)
 
