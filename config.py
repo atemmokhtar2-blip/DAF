@@ -18,29 +18,18 @@ logger = get_logger("config")
 # ============================================================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# ★★★ الرابط الجديد ★★★
+# ★★★ الرابطين منفصلين ★★★
 PUBLIC_URL = os.getenv("PUBLIC_URL", "https://sec.h42536974.workers.dev")
 RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-e34a.up.railway.app")
-
-# ملاحظة: PUBLIC_URL هو الرابط الأساسي (Cloudflare Workers)
-# RAILWAY_URL هو رابط Railway للـ APK و LSH
-# لو PUBLIC_URL موجود، RAILWAY_URL بيبقى هو نفسه
-
-# ★★★ لو عايز كل حاجة تروح على Railway مباشرة ★★★
-# استخدم السطر ده:
-# RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-e34a.up.railway.app")
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "atmemokhtar2-blip/zxvp")
 GITHUB_WORKFLOW_FILE = os.getenv("GITHUB_WORKFLOW_FILE", "build.yml")
 
-# ⚠️ ORIGIN_SECRET لازم يكون من الـ ENV في production
 ORIGIN_SECRET = os.getenv("ORIGIN_SECRET", "").strip()
 if not ORIGIN_SECRET:
     ORIGIN_SECRET = "dev_" + os.urandom(16).hex()
-    logger.warning(
-        "⚠️ ORIGIN_SECRET not set in ENV - using random dev value"
-    )
+    logger.warning("⚠️ ORIGIN_SECRET not set in ENV - using random dev value")
 
 logger.info(f"Public URL: {PUBLIC_URL}")
 logger.info(f"Railway URL: {RAILWAY_URL}")
@@ -48,7 +37,7 @@ logger.info(f"GitHub Repo: {GITHUB_REPO}")
 logger.info(f"GitHub Token: {'Set' if GITHUB_TOKEN else 'NOT SET'}")
 
 # ============================================================
-# [2] Redis — Upstash
+# [2] Redis
 # ============================================================
 _UPSTASH_FALLBACK = os.getenv(
     "UPSTASH_URL",
@@ -72,7 +61,6 @@ if "upstash.io" in REDIS_URL and REDIS_URL.startswith("redis://"):
 
 
 def _try_redis(url, name="primary"):
-    """محاولة اتصال بـ Redis"""
     try:
         client = redis.Redis.from_url(
             url,
@@ -84,14 +72,12 @@ def _try_redis(url, name="primary"):
             max_connections=50,
         )
         client.ping()
-
         try:
             info = client.info("server")
             ver = info.get('redis_version', 'unknown')
             logger.info(f"Redis ({name}) version: {ver}")
         except Exception:
             pass
-
         return client
     except Exception as e:
         logger.error(f"Redis ({name}) failed: {e}")
