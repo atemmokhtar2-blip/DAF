@@ -17,9 +17,18 @@ logger = get_logger("config")
 # [1] الإعدادات الأساسية
 # ============================================================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+# ★★★ الرابط الجديد ★★★
 PUBLIC_URL = os.getenv("PUBLIC_URL", "https://sec.h42536974.workers.dev")
-RAILWAY_URL = os.getenv("RAILWAY_URL", PUBLIC_URL)
-RAILWAY_URL = PUBLIC_URL
+RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-e34a.up.railway.app")
+
+# ملاحظة: PUBLIC_URL هو الرابط الأساسي (Cloudflare Workers)
+# RAILWAY_URL هو رابط Railway للـ APK و LSH
+# لو PUBLIC_URL موجود، RAILWAY_URL بيبقى هو نفسه
+
+# ★★★ لو عايز كل حاجة تروح على Railway مباشرة ★★★
+# استخدم السطر ده:
+# RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-e34a.up.railway.app")
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "atmemokhtar2-blip/zxvp")
@@ -28,20 +37,19 @@ GITHUB_WORKFLOW_FILE = os.getenv("GITHUB_WORKFLOW_FILE", "build.yml")
 # ⚠️ ORIGIN_SECRET لازم يكون من الـ ENV في production
 ORIGIN_SECRET = os.getenv("ORIGIN_SECRET", "").strip()
 if not ORIGIN_SECRET:
-    # Fallback للتطوير فقط - في production لازم ENV
     ORIGIN_SECRET = "dev_" + os.urandom(16).hex()
     logger.warning(
         "⚠️ ORIGIN_SECRET not set in ENV - using random dev value"
     )
 
 logger.info(f"Public URL: {PUBLIC_URL}")
+logger.info(f"Railway URL: {RAILWAY_URL}")
 logger.info(f"GitHub Repo: {GITHUB_REPO}")
 logger.info(f"GitHub Token: {'Set' if GITHUB_TOKEN else 'NOT SET'}")
 
 # ============================================================
 # [2] Redis — Upstash
 # ============================================================
-# ⚠️ الأفضل تحط الرابط في ENV
 _UPSTASH_FALLBACK = os.getenv(
     "UPSTASH_URL",
     "rediss://default:gQAAAAAABLEzAAIgcDI0M2E4ZjUzNThjMTg0ZDVjODc4YTYxZjExNGZkNDZkYQ@electric-caribou-307507.upstash.io:6379"
@@ -49,19 +57,16 @@ _UPSTASH_FALLBACK = os.getenv(
 
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 
-# لو مفيش URL → استخدم Upstash
 if not REDIS_URL:
     logger.warning("⚠️ REDIS_URL not set - using fallback")
     REDIS_URL = _UPSTASH_FALLBACK
 
-# نظّف الرابط من أي prefix
 if REDIS_URL.startswith("redis-cli"):
     REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
 
 if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
     REDIS_URL = "redis://" + REDIS_URL
 
-# Upstash لازم TLS
 if "upstash.io" in REDIS_URL and REDIS_URL.startswith("redis://"):
     REDIS_URL = REDIS_URL.replace("redis://", "rediss://", 1)
 
@@ -80,7 +85,6 @@ def _try_redis(url, name="primary"):
         )
         client.ping()
 
-        # جلب النسخة للتشخيص
         try:
             info = client.info("server")
             ver = info.get('redis_version', 'unknown')
