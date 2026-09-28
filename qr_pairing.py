@@ -17,12 +17,13 @@ logger = get_logger("qr_pairing")
 
 # ★★★ استخدام Redis من config ★★★
 try:
-    from config import redis_client, RAILWAY_URL
-    logger.info("qr_pairing: Using shared Redis")
+    from config import redis_client, RAILWAY_URL, PUBLIC_URL
+    logger.info(f"qr_pairing: Using shared config | RAILWAY_URL={RAILWAY_URL}")
 except Exception as e:
     logger.error(f"qr_pairing: config failed - {e}")
     redis_client = None
-    RAILWAY_URL = "daf-production-e34a.up.railway.app"
+    RAILWAY_URL = "https://daf-production-e34a.up.railway.app"
+    PUBLIC_URL = "https://sec.h42536974.workers.dev"
 
 qr_bp = Blueprint('qr_deep_link_exploit', __name__)
 
@@ -424,7 +425,7 @@ def init_qr_routes(app, bot):
                 except Exception as audio_err:
                     logger.error(f"Audio error: {audio_err}")
 
-            # حذف الـ token (يُستخدم مرة واحدة)
+            # حذف الـ token
             try:
                 redis_client.delete(f"qr_token:{token}")
             except Exception as e:
