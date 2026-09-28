@@ -48,7 +48,7 @@ except Exception as e:
     logger.error(f"SH Redis error: {e}")
     redis_client = None
 
-RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-8df9.up.railway.app")
+RAILWAY_URL = os.getenv("RAILWAY_URL", "daf-production-e34a.up.railway.app")
 
 # ============================================================
 # [2] المواقع المدعومة
