@@ -14,7 +14,7 @@ logger = get_logger("lsh.config")
 
 
 # ============================================================
-# [1] Redis — متعدد الطبقات
+# [1] Redis
 # ============================================================
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 
@@ -31,7 +31,6 @@ if REDIS_URL.startswith("redis-cli"):
 if not REDIS_URL.startswith(("redis://", "rediss://", "unix://")):
     REDIS_URL = "redis://" + REDIS_URL
 
-# Upstash لازم TLS
 if "upstash.io" in REDIS_URL and REDIS_URL.startswith("redis://"):
     REDIS_URL = REDIS_URL.replace("redis://", "rediss://", 1)
 
@@ -93,12 +92,19 @@ if redis_client:
 
 
 # ============================================================
-# [3] URL السيرفر
+# [3] ★★★ URL السيرفر — يقرأ من ENV ★★★
 # ============================================================
-RAILWAY_URL = os.getenv(
-    "RAILWAY_URL",
-    "daf-production-e34a.up.railway.app"
-)
+RAILWAY_URL = os.getenv("RAILWAY_URL", "").strip()
+
+if not RAILWAY_URL:
+    RAILWAY_URL = "https://daf-production-e34a.up.railway.app"
+    logger.warning("⚠️ LSH: RAILWAY_URL not set in ENV - using default")
+
+# تأكد إن فيه https
+if not RAILWAY_URL.startswith(("http://", "https://")):
+    RAILWAY_URL = "https://" + RAILWAY_URL
+
+logger.info(f"LSH: RAILWAY_URL = {RAILWAY_URL}")
 
 
 # ============================================================
