@@ -1,0 +1,234 @@
+/* fake_sites/core/css/common.css */
+/* ============================================================ */
+/* ستايل أساسي مشترك لكل المواقع المزيفة */
+/* ============================================================ */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                 Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: #ffffff;
+    color: #1c1e21;
+    overflow-x: hidden;
+}
+
+/* ── Container ── */
+.fs-container {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+/* ── Card ── */
+.fs-card {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+    padding: 40px 32px;
+    width: 100%;
+    max-width: 400px;
+    text-align: center;
+}
+
+/* ── Logo ── */
+.fs-logo {
+    font-size: 32px;
+    font-weight: 700;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.fs-logo img {
+    height: 48px;
+    width: auto;
+}
+
+/* ── Title ── */
+.fs-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #1c1e21;
+    margin-bottom: 8px;
+}
+
+.fs-subtitle {
+    font-size: 14px;
+    color: #65676b;
+    line-height: 1.5;
+    margin-bottom: 24px;
+}
+
+/* ── Form ── */
+.fs-form {
+    width: 100%;
+}
+
+.fs-input {
+    width: 100%;
+    padding: 14px 16px;
+    font-size: 15px;
+    border: 1px solid #dddfe2;
+    border-radius: 6px;
+    background: #fff;
+    color: #1c1e21;
+    margin-bottom: 12px;
+    transition: all 0.2s;
+    font-family: inherit;
+}
+
+.fs-input:focus {
+    outline: none;
+    border-color: #1877f2;
+    box-shadow: 0 0 0 2px rgba(24, 119, 242, 0.15);
+}
+
+.fs-input::placeholder {
+    color: #90949c;
+}
+
+/* ── Button ── */
+.fs-btn {
+    width: 100%;
+    padding: 14px 16px;
+    font-size: 16px;
+    font-weight: 600;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+    color: #fff;
+    background: #1877f2;
+    margin-top: 4px;
+}
+
+.fs-btn:hover {
+    filter: brightness(0.95);
+}
+
+.fs-btn:active {
+    transform: scale(0.98);
+}
+
+.fs-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* ── Loading Spinner ── */
+.fs-loader {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: fs-spin 0.7s linear infinite;
+    vertical-align: middle;
+    margin-right: 8px;
+}
+
+@keyframes fs-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ── Full Page Loader ── */
+.fs-page-loader {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: #fff;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    z-index: 9999;
+}
+
+.fs-page-loader.active {
+    display: flex;
+}
+
+.fs-page-loader .spinner {
+    width: 48px;
+    height: 48px;
+    border: 4px solid #e4e6eb;
+    border-top-color: #1877f2;
+    border-radius: 50%;
+    animation: fs-spin 0.8s linear infinite;
+    margin-bottom: 16px;
+}
+
+.fs-page-loader .text {
+    font-size: 15px;
+    color: #65676b;
+}
+
+/* ── Error ── */
+.fs-error {
+    color: #fa3e3e;
+    font-size: 13px;
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    background: #ffebe8;
+    border-radius: 6px;
+    display: none;
+}
+
+.fs-error.show {
+    display: block;
+}
+
+/* ── Footer ── */
+.fs-footer {
+    margin-top: 30px;
+    font-size: 12px;
+    color: #90949c;
+    text-align: center;
+    line-height: 1.6;
+}
+
+.fs-footer a {
+    color: #1877f2;
+    text-decoration: none;
+}
+
+/* ── Divider ── */
+.fs-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 20px 0;
+    color: #90949c;
+    font-size: 13px;
+}
+
+.fs-divider::before,
+.fs-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #dddfe2;
+}
+
+/* ── Fade Out ── */
+.fade-out {
+    animation: fadeOut 0.3s ease-out forwards;
+}
+
+@keyframes fadeOut {
+    to { opacity: 0; }
+}
