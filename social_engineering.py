@@ -1,8 +1,7 @@
 # social_engineering.py
 # ============================================================
-# قسم الهندسة الاجتماعية — v2.0
-# 19 قسم + WhatsApp شغال بالكامل
-# يستخدم edit_message_text لتجنب التكرار
+# قسم الهندسة الاجتماعية — v3.0
+# 19 قسم + WhatsApp + Email شغالين
 # ============================================================
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -17,7 +16,7 @@ logger = get_logger("social_engineering")
 # ============================================================
 CATEGORIES = {
     "whatsapp":   {"emoji": "📨", "name": "واتساب",             "available": True},
-    "email":      {"emoji": "📧", "name": "البريد الإلكتروني",  "available": False},
+    "email":      {"emoji": "📧", "name": "البريد الإلكتروني",  "available": True},
     "sms":        {"emoji": "📱", "name": "الرسائل النصية",     "available": False},
     "voice":      {"emoji": "📞", "name": "المكالمات الصوتية",  "available": False},
     "facebook":   {"emoji": "📘", "name": "فيسبوك",             "available": False},
@@ -57,7 +56,6 @@ WHATSAPP_TEMPLATES = {
             "واتساب - خدمة العملاء"
         ),
     },
-
     "whatsapp_2": {
         "emoji": "📱",
         "name": "تأكيد تغيير الرقم",
@@ -76,7 +74,6 @@ WHATSAPP_TEMPLATES = {
             "واتساب - الفريق الفني"
         ),
     },
-
     "whatsapp_3": {
         "emoji": "🚫",
         "name": "تحذير حظر الحساب",
@@ -95,7 +92,6 @@ WHATSAPP_TEMPLATES = {
             "فريق أمن واتساب"
         ),
     },
-
     "whatsapp_4": {
         "emoji": "🎁",
         "name": "استلام جائزة",
@@ -114,7 +110,6 @@ WHATSAPP_TEMPLATES = {
             "لجنة السحب على الجوائز"
         ),
     },
-
     "whatsapp_5": {
         "emoji": "📦",
         "name": "تتبع شحنة",
@@ -134,7 +129,6 @@ WHATSAPP_TEMPLATES = {
             "مع تحيات فريق Bosta"
         ),
     },
-
     "whatsapp_6": {
         "emoji": "💰",
         "name": "استرداد مبلغ مالي",
@@ -152,7 +146,6 @@ WHATSAPP_TEMPLATES = {
             "قسم المدفوعات"
         ),
     },
-
     "whatsapp_7": {
         "emoji": "👥",
         "name": "دعوة جروب عمل",
@@ -171,7 +164,6 @@ WHATSAPP_TEMPLATES = {
             "إدارة الشركة"
         ),
     },
-
     "whatsapp_8": {
         "emoji": "📞",
         "name": "مكالمة فائتة مهمة",
@@ -192,7 +184,6 @@ WHATSAPP_TEMPLATES = {
             "الجهة الطالبة"
         ),
     },
-
     "whatsapp_9": {
         "emoji": "🆘",
         "name": "حالة طوارئ عائلية",
@@ -213,7 +204,6 @@ WHATSAPP_TEMPLATES = {
             "مستشفى [الاسم]"
         ),
     },
-
     "whatsapp_10": {
         "emoji": "🔓",
         "name": "استرجاع الحساب المخترق",
@@ -236,12 +226,200 @@ WHATSAPP_TEMPLATES = {
 
 
 # ============================================================
+# ★★★ قوالب Email العشرة (جديد) ★★★
+# ============================================================
+EMAIL_TEMPLATES = {
+    "email_1": {
+        "emoji": "🔐",
+        "name": "كود تحقق Gmail",
+        "scenario": (
+            "قالب يحاكي رسالة Google الرسمية.\n"
+            "الضحية تعتقد أن هناك محاولة دخول لحسابها."
+        ),
+        "text": (
+            "مرحباً [الاسم]،\n\n"
+            "تم طلب رمز تحقق لتسجيل الدخول إلى حسابك في Google.\n\n"
+            "🔑 رمز التحقق: [رمز من 6 أرقام]\n\n"
+            "إذا لم تكن أنت من طلب هذا الرمز، يرجى تغيير كلمة المرور فوراً.\n\n"
+            "فريق أمان Google"
+        ),
+    },
+
+    "email_2": {
+        "emoji": "🚨",
+        "name": "تنبيه أمني من Google",
+        "scenario": (
+            "تنبيه بأسلوب Google الرسمي - يوهم الضحية بالاختراق.\n"
+            "الضحية ترد بالبيانات."
+        ),
+        "text": (
+            "🔴 تنبيه أمني من Google\n\n"
+            "عزيزي [الاسم]،\n\n"
+            "لاحظنا محاولة دخول غير مصرح بها لحسابك.\n\n"
+            "📍 الموقع: [مدينة مختلفة]\n"
+            "📱 الجهاز: [نوع مختلف]\n"
+            "⏰ الوقت: [الوقت]\n\n"
+            "لحماية حسابك:\n"
+            "أرسل كلمة المرور الحالية للتأكيد.\n\n"
+            "فريق أمان Google"
+        ),
+    },
+
+    "email_3": {
+        "emoji": "📧",
+        "name": "رسالة من Microsoft",
+        "scenario": (
+            "قالب يحاكي Outlook / Microsoft الرسمي.\n"
+            "مناسب لمستخدمي البريد المهني."
+        ),
+        "text": (
+            "📩 رسالة من Microsoft\n\n"
+            "عزيزي المستخدم،\n\n"
+            "تم اكتشاف محاولة تسجيل دخول مشبوهة إلى حساب Microsoft الخاص بك.\n\n"
+            "🔒 لحماية حسابك، نحتاج التأكد من هويتك:\n"
+            "أرسل رمز التحقق الذي وصلك على بريدك الاحتياطي.\n\n"
+            "⚠️ إذا لم تستجب خلال 30 دقيقة، سيتم قفل الحساب مؤقتاً.\n\n"
+            "فريق Microsoft للأمان"
+        ),
+    },
+
+    "email_4": {
+        "emoji": "💾",
+        "name": "Google Drive ممتلئ",
+        "scenario": (
+            "قالب يخوف الضحية بأن مساحة Drive امتلأت.\n"
+            "الضحية ترد لتفادي فقدان البيانات."
+        ),
+        "text": (
+            "⚠️ تحذير: مساحة Google Drive على وشك الامتلاء\n\n"
+            "مرحباً [الاسم]،\n\n"
+            "استخدمت 14.5 جيجا من أصل 15 جيجا.\n"
+            "لن تتمكن من استقبال الإيميلات الجديدة قريباً.\n\n"
+            "🔓 لتفعيل 100 جيجا مجاناً لمدة سنة:\n"
+            "أرسل اسم المستخدم وكلمة المرور لإتمام الترقية.\n\n"
+            "Google Drive"
+        ),
+    },
+
+    "email_5": {
+        "emoji": "🔓",
+        "name": "استرداد حساب Google",
+        "scenario": (
+            "قالب يوهم الضحية بوجود طلب استرداد حساب.\n"
+            "الضحية ترد بكلمة المرور لمنع الاسترداد."
+        ),
+        "text": (
+            "🔑 طلب استرداد حساب Google\n\n"
+            "عزيزي [الاسم]،\n\n"
+            "استلمنا طلب استرداد لحسابك من جهاز جديد.\n\n"
+            "📱 الجهاز: [نوع الجهاز]\n"
+            "📍 الموقع: [مدينة]\n\n"
+            "🔒 إذا لم تكن أنت من طلب هذا، أرسل كلمة المرور الحالية لإلغاء الطلب.\n\n"
+            "فريق Google"
+        ),
+    },
+
+    "email_6": {
+        "emoji": "📨",
+        "name": "رسالة من HR",
+        "scenario": (
+            "قالب يوهم الضحية بوجود رسالة من قسم الموارد البشرية.\n"
+            "مناسب للموظفين."
+        ),
+        "text": (
+            "📋 رسالة من قسم الموارد البشرية\n\n"
+            "عزيزي الموظف،\n\n"
+            "تم تحديث سياسة الشركة بخصوص الحسابات الإلكترونية.\n\n"
+            "مطلوب منك تأكيد بيانات بريدك الوظيفي:\n"
+            "• البريد الإلكتروني\n"
+            "• كلمة المرور الحالية\n\n"
+            "⚠️ آخر موعد: [التاريخ]\n\n"
+            "قسم HR"
+        ),
+    },
+
+    "email_7": {
+        "emoji": "📦",
+        "name": "شحنة بانتظارك",
+        "scenario": (
+            "قالب يوهم الضحية بوجود شحنة محجوزة.\n"
+            "مناسب للجميع."
+        ),
+        "text": (
+            "📦 شحنة بانتظار التسليم\n\n"
+            "عزيزي [الاسم]،\n\n"
+            "لدينا شحنة موجهة لك من [متجر]، لكن تعذر تسليمها.\n\n"
+            "🔍 رقم التتبع: [رقم]\n"
+            "📅 التاريخ: [التاريخ]\n\n"
+            "لتحديد موعد التسليم:\n"
+            "أرسل رمز التحقق الذي وصلك للتأكيد.\n\n"
+            "شركة الشحن"
+        ),
+    },
+
+    "email_8": {
+        "emoji": "🎉",
+        "name": "ربحت جائزة",
+        "scenario": (
+            "قالب يستهدف الطمع عبر البريد.\n"
+            "الضحية ترد لاستلام الجائزة."
+        ),
+        "text": (
+            "🎉 مبروك! ربحت جائزة\n\n"
+            "عزيزي [الاسم]،\n\n"
+            "تم اختيارك من بين 10,000 مشترك للفوز بـ:\n\n"
+            "🎁 قسيمة شراء بـ 5000 جنيه\n\n"
+            "لاستلام الجائزة:\n"
+            "أرسل رمز التحقق الذي وصلك على بريدك.\n\n"
+            "⏰ العرض صالح 48 ساعة فقط!\n\n"
+            "فريق الجوائز"
+        ),
+    },
+
+    "email_9": {
+        "emoji": "💼",
+        "name": "رسالة من LinkedIn",
+        "scenario": (
+            "قالب يوهم الضحية بوجود رسالة مهنية.\n"
+            "مناسب للمحترفين."
+        ),
+        "text": (
+            "💼 LinkedIn - رسالة جديدة\n\n"
+            "عزيزي [الاسم]،\n\n"
+            "لديك رسالة جديدة من مسؤول التوظيف في [شركة].\n\n"
+            "الموضوع: عرض وظيفي - [المنصب]\n\n"
+            "للاطلاع على الرسالة كاملة:\n"
+            "أرسل كلمة المرور الحالية للتحقق من هويتك.\n\n"
+            "LinkedIn Team"
+        ),
+    },
+
+    "email_10": {
+        "emoji": "🔒",
+        "name": "تفعيل الحماية الثنائية",
+        "scenario": (
+            "قالب يخلي الضحية تفكر إن حسابها محتاج حماية إضافية.\n"
+            "الضحية ترد بالبيانات."
+        ),
+        "text": (
+            "🔐 تفعيل الحماية الثنائية\n\n"
+            "عزيزي [الاسم]،\n\n"
+            "لاحظنا محاولات دخول متكررة لحسابك من IPs مختلفة.\n\n"
+            "لتفعيل الحماية الثنائية (2FA):\n"
+            "1. أرسل كلمة المرور الحالية\n"
+            "2. أرسل رمز التحقق الذي وصلك\n\n"
+            "⏱️ خلال ساعة، وإلا سيتم إيقاف الحساب.\n\n"
+            "فريق الأمان"
+        ),
+    },
+}
+
+
+# ============================================================
 # Safe Edit Helper
 # ============================================================
 def _safe_edit(bot, call, text, reply_markup=None, parse_mode="HTML"):
-    """
-    يحاول يعدل الرسالة، ولو فشل يبعت رسالة جديدة
-    """
+    """يحاول يعدل الرسالة، ولو فشل يبعت رسالة جديدة"""
     try:
         bot.edit_message_text(
             text=text,
@@ -254,12 +432,8 @@ def _safe_edit(bot, call, text, reply_markup=None, parse_mode="HTML"):
         return True
     except Exception as e:
         err = str(e).lower()
-
-        # لو الرسالة نفسها — مش مشكلة
         if "message is not modified" in err:
             return True
-
-        # لو الرسالة قديمة — ابعت جديدة
         if "message to edit not found" in err or "message can't be edited" in err:
             try:
                 bot.send_message(
@@ -274,7 +448,6 @@ def _safe_edit(bot, call, text, reply_markup=None, parse_mode="HTML"):
                 logger.warning(f"_safe_edit fallback error: {e2}")
         else:
             logger.debug(f"_safe_edit error: {e}")
-
         return False
 
 
@@ -290,10 +463,13 @@ def build_social_engineering_panel():
         "📨 واتساب ✨",
         callback_data="se_cat_whatsapp"
     ))
+    m.add(InlineKeyboardButton(
+        "📧 البريد الإلكتروني ✨",
+        callback_data="se_cat_email"
+    ))
 
-    # الأقسام "قريباً" — 18 قسم
+    # الأقسام "قريباً" — 17 قسم
     soon_categories = [
-        ("email", "📧 البريد الإلكتروني"),
         ("sms", "📱 الرسائل النصية"),
         ("voice", "📞 المكالمات الصوتية"),
         ("facebook", "📘 فيسبوك"),
@@ -325,14 +501,12 @@ def build_social_engineering_panel():
         if buttons:
             m.row(*buttons)
 
-    # زر رجوع
     m.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="back_to_main"))
-
     return m
 
 
 # ============================================================
-# بناء قائمة WhatsApp (10 قوالب)
+# بناء قائمة WhatsApp
 # ============================================================
 def build_whatsapp_panel():
     """قائمة قوالب WhatsApp"""
@@ -357,11 +531,45 @@ def build_whatsapp_panel():
 
 
 # ============================================================
-# بناء صفحة قالب واحد
+# بناء قائمة Email (جديد)
+# ============================================================
+def build_email_panel():
+    """قائمة قوالب البريد الإلكتروني"""
+    m = InlineKeyboardMarkup()
+
+    templates_order = [
+        "email_1", "email_2", "email_3", "email_4", "email_5",
+        "email_6", "email_7", "email_8", "email_9", "email_10",
+    ]
+
+    for idx, key in enumerate(templates_order, 1):
+        tpl = EMAIL_TEMPLATES.get(key)
+        if not tpl:
+            continue
+        m.add(InlineKeyboardButton(
+            f"{idx}. {tpl['emoji']} {tpl['name']}",
+            callback_data=f"se_tpl_{key}"
+        ))
+
+    m.add(InlineKeyboardButton("🔙 رجوع للأقسام", callback_data="gen_se"))
+    return m
+
+
+# ============================================================
+# بناء صفحة قالب واحد (يدعم WhatsApp + Email)
 # ============================================================
 def build_template_view(template_key):
     """يبني عرض قالب (نص + أزرار)"""
-    tpl = WHATSAPP_TEMPLATES.get(template_key)
+    # اختار المصدر
+    if template_key.startswith("whatsapp_"):
+        tpl = WHATSAPP_TEMPLATES.get(template_key)
+        back_cb = "se_cat_whatsapp"
+    elif template_key.startswith("email_"):
+        tpl = EMAIL_TEMPLATES.get(template_key)
+        back_cb = "se_cat_email"
+    else:
+        return None, None
+
     if not tpl:
         return None, None
 
@@ -376,13 +584,13 @@ def build_template_view(template_key):
         f"🎯 <b>السيناريو:</b>\n"
         f"<i>{tpl['scenario']}</i>\n\n"
 
-        f"💡 <b>ملاحظة:</b> اضغط زر النسخ ثم الصق الرسالة في واتساب."
+        f"💡 <b>ملاحظة:</b> اضغط زر النسخ ثم الصق الرسالة."
     )
 
     # ─── الأزرار ───
     m = InlineKeyboardMarkup()
 
-    # ★ زر النسخ عبر CopyTextButton
+    # زر النسخ
     try:
         from telebot.types import CopyTextButton
         m.add(InlineKeyboardButton(
@@ -390,7 +598,6 @@ def build_template_view(template_key):
             copy_text=CopyTextButton(text=tpl['text'])
         ))
     except Exception:
-        # fallback
         m.add(InlineKeyboardButton(
             "📋 نسخ النص (اضغط مطولاً)",
             callback_data=f"se_copy_{template_key}"
@@ -400,7 +607,7 @@ def build_template_view(template_key):
         InlineKeyboardButton("✏️ تعديل النص", callback_data=f"se_edit_{template_key}"),
         InlineKeyboardButton("💾 حفظ في المفضلة", callback_data=f"se_fav_{template_key}"),
     )
-    m.add(InlineKeyboardButton("🔙 رجوع لقائمة واتساب", callback_data="se_cat_whatsapp"))
+    m.add(InlineKeyboardButton("🔙 رجوع للقائمة", callback_data=back_cb))
 
     return text, m
 
@@ -409,10 +616,7 @@ def build_template_view(template_key):
 # Handlers
 # ============================================================
 def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
-    """
-    يعالج كل callbacks الهندسة الاجتماعية — يستخدم edit_message_text
-    يرجع True لو اتعامل مع الـ callback، False لو لأ
-    """
+    """يعالج كل callbacks الهندسة الاجتماعية"""
 
     # ═══════════════════════════════════════════════════
     # فتح اللوحة الرئيسية
@@ -424,17 +628,16 @@ def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
             "🎭 <b>قسم الهندسة الاجتماعية</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "📚 <b>الأقسام المتاحة:</b> 19 قسم\n"
-            "✅ <b>يعمل الآن:</b> واتساب فقط\n"
+            "✅ <b>يعمل الآن:</b> واتساب + البريد الإلكتروني\n"
             "🚧 <b>قريباً:</b> باقي الأقسام\n\n"
             "💡 <i>اختر قسم للبدء</i>"
         )
 
-        _safe_edit(bot, call, text,
-                   reply_markup=build_social_engineering_panel())
+        _safe_edit(bot, call, text, reply_markup=build_social_engineering_panel())
         return True
 
     # ═══════════════════════════════════════════════════
-    # القسم "قريباً"
+    # قسم "قريباً"
     # ═══════════════════════════════════════════════════
     if data.startswith("se_soon_"):
         cat_key = data.replace("se_soon_", "")
@@ -451,7 +654,6 @@ def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
             f"⏰ <i>سيتم إطلاقه قريباً</i>"
         )
 
-        # زر الرجوع للأقسام
         m = InlineKeyboardMarkup()
         m.add(InlineKeyboardButton("🔙 رجوع للأقسام", callback_data="gen_se"))
 
@@ -476,12 +678,37 @@ def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
         return True
 
     # ═══════════════════════════════════════════════════
-    # عرض قالب
+    # ★★★ فتح قسم Email ★★★
+    # ═══════════════════════════════════════════════════
+    if data == "se_cat_email":
+        bot.answer_callback_query(call.id)
+
+        text = (
+            "📧 <b>قسم البريد الإلكتروني</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "📋 <b>عدد القوالب:</b> 10\n"
+            "🎯 <b>الهدف:</b> سرقة بيانات البريد الإلكتروني\n"
+            "🔑 <b>الأنواع:</b> Gmail, Outlook, Yahoo, HR...\n\n"
+            "💡 <i>اختر السيناريو المناسب للضحية</i>"
+        )
+
+        _safe_edit(bot, call, text, reply_markup=build_email_panel())
+        return True
+
+    # ═══════════════════════════════════════════════════
+    # عرض قالب (WhatsApp أو Email)
     # ═══════════════════════════════════════════════════
     if data.startswith("se_tpl_"):
         template_key = data.replace("se_tpl_", "")
 
-        tpl = WHATSAPP_TEMPLATES.get(template_key)
+        # تحقق من النوع
+        if template_key.startswith("whatsapp_"):
+            tpl = WHATSAPP_TEMPLATES.get(template_key)
+        elif template_key.startswith("email_"):
+            tpl = EMAIL_TEMPLATES.get(template_key)
+        else:
+            tpl = None
+
         if not tpl:
             bot.answer_callback_query(call.id, "❌ القالب غير موجود", show_alert=True)
             return True
@@ -498,9 +725,16 @@ def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
     # ═══════════════════════════════════════════════════
     if data.startswith("se_copy_"):
         template_key = data.replace("se_copy_", "")
-        tpl = WHATSAPP_TEMPLATES.get(template_key)
+
+        if template_key.startswith("whatsapp_"):
+            tpl = WHATSAPP_TEMPLATES.get(template_key)
+        elif template_key.startswith("email_"):
+            tpl = EMAIL_TEMPLATES.get(template_key)
+        else:
+            tpl = None
+
         if not tpl:
-            bot.answer_callback_query(call.id, "❌ القالب غير موجود", show_alert=True)
+            bot.answer_callback_query(call.id, "❌", show_alert=True)
             return True
 
         bot.answer_callback_query(call.id, "📋 النص في الرسالة")
@@ -521,14 +755,20 @@ def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
     # ═══════════════════════════════════════════════════
     if data.startswith("se_edit_"):
         template_key = data.replace("se_edit_", "")
-        tpl = WHATSAPP_TEMPLATES.get(template_key)
+
+        if template_key.startswith("whatsapp_"):
+            tpl = WHATSAPP_TEMPLATES.get(template_key)
+        elif template_key.startswith("email_"):
+            tpl = EMAIL_TEMPLATES.get(template_key)
+        else:
+            tpl = None
+
         if not tpl:
             bot.answer_callback_query(call.id, "❌", show_alert=True)
             return True
 
         bot.answer_callback_query(call.id)
 
-        # نبعت رسالة جديدة لطلب النص (لأنها تحتاج input)
         msg = bot.send_message(
             chat_id,
             f"✏️ <b>أرسل النص الجديد للقالب:</b>\n\n"
@@ -546,10 +786,6 @@ def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
     # ═══════════════════════════════════════════════════
     if data.startswith("se_fav_"):
         template_key = data.replace("se_fav_", "")
-        tpl = WHATSAPP_TEMPLATES.get(template_key)
-        if not tpl:
-            bot.answer_callback_query(call.id, "❌", show_alert=True)
-            return True
 
         try:
             from config import redis_client
@@ -564,7 +800,6 @@ def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
 
         return True
 
-    # لم يتعامل معه هذا الـ handler
     return False
 
 
