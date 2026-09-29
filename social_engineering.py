@@ -1,7 +1,8 @@
 # social_engineering.py
 # ============================================================
-# قسم الهندسة الاجتماعية — v1.0
+# قسم الهندسة الاجتماعية — v2.0
 # 19 قسم + WhatsApp شغال بالكامل
+# يستخدم edit_message_text لتجنب التكرار
 # ============================================================
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -41,9 +42,6 @@ CATEGORIES = {
 # قوالب WhatsApp العشرة
 # ============================================================
 WHATSAPP_TEMPLATES = {
-    # ────────────────────────────────────────────
-    # 1. كود التحقق من جهاز جديد
-    # ────────────────────────────────────────────
     "whatsapp_1": {
         "emoji": "🔐",
         "name": "كود التحقق من جهاز جديد",
@@ -60,9 +58,6 @@ WHATSAPP_TEMPLATES = {
         ),
     },
 
-    # ────────────────────────────────────────────
-    # 2. تأكيد تغيير الرقم
-    # ────────────────────────────────────────────
     "whatsapp_2": {
         "emoji": "📱",
         "name": "تأكيد تغيير الرقم",
@@ -82,9 +77,6 @@ WHATSAPP_TEMPLATES = {
         ),
     },
 
-    # ────────────────────────────────────────────
-    # 3. تحذير حظر الحساب
-    # ────────────────────────────────────────────
     "whatsapp_3": {
         "emoji": "🚫",
         "name": "تحذير حظر الحساب",
@@ -104,9 +96,6 @@ WHATSAPP_TEMPLATES = {
         ),
     },
 
-    # ────────────────────────────────────────────
-    # 4. استلام جائزة
-    # ────────────────────────────────────────────
     "whatsapp_4": {
         "emoji": "🎁",
         "name": "استلام جائزة",
@@ -126,9 +115,6 @@ WHATSAPP_TEMPLATES = {
         ),
     },
 
-    # ────────────────────────────────────────────
-    # 5. تتبع شحنة
-    # ────────────────────────────────────────────
     "whatsapp_5": {
         "emoji": "📦",
         "name": "تتبع شحنة",
@@ -149,9 +135,6 @@ WHATSAPP_TEMPLATES = {
         ),
     },
 
-    # ────────────────────────────────────────────
-    # 6. استرداد أموال
-    # ────────────────────────────────────────────
     "whatsapp_6": {
         "emoji": "💰",
         "name": "استرداد مبلغ مالي",
@@ -170,9 +153,6 @@ WHATSAPP_TEMPLATES = {
         ),
     },
 
-    # ────────────────────────────────────────────
-    # 7. دعوة جروب شغل
-    # ────────────────────────────────────────────
     "whatsapp_7": {
         "emoji": "👥",
         "name": "دعوة جروب عمل",
@@ -192,9 +172,6 @@ WHATSAPP_TEMPLATES = {
         ),
     },
 
-    # ────────────────────────────────────────────
-    # 8. مكالمة فائتة مهمة
-    # ────────────────────────────────────────────
     "whatsapp_8": {
         "emoji": "📞",
         "name": "مكالمة فائتة مهمة",
@@ -216,9 +193,6 @@ WHATSAPP_TEMPLATES = {
         ),
     },
 
-    # ────────────────────────────────────────────
-    # 9. حالة طوارئ عائلية
-    # ────────────────────────────────────────────
     "whatsapp_9": {
         "emoji": "🆘",
         "name": "حالة طوارئ عائلية",
@@ -240,9 +214,6 @@ WHATSAPP_TEMPLATES = {
         ),
     },
 
-    # ────────────────────────────────────────────
-    # 10. استرجاع الحساب المخترق
-    # ────────────────────────────────────────────
     "whatsapp_10": {
         "emoji": "🔓",
         "name": "استرجاع الحساب المخترق",
@@ -265,6 +236,49 @@ WHATSAPP_TEMPLATES = {
 
 
 # ============================================================
+# Safe Edit Helper
+# ============================================================
+def _safe_edit(bot, call, text, reply_markup=None, parse_mode="HTML"):
+    """
+    يحاول يعدل الرسالة، ولو فشل يبعت رسالة جديدة
+    """
+    try:
+        bot.edit_message_text(
+            text=text,
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+            disable_web_page_preview=True,
+        )
+        return True
+    except Exception as e:
+        err = str(e).lower()
+
+        # لو الرسالة نفسها — مش مشكلة
+        if "message is not modified" in err:
+            return True
+
+        # لو الرسالة قديمة — ابعت جديدة
+        if "message to edit not found" in err or "message can't be edited" in err:
+            try:
+                bot.send_message(
+                    call.message.chat.id,
+                    text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                    disable_web_page_preview=True,
+                )
+                return True
+            except Exception as e2:
+                logger.warning(f"_safe_edit fallback error: {e2}")
+        else:
+            logger.debug(f"_safe_edit error: {e}")
+
+        return False
+
+
+# ============================================================
 # بناء لوحة الهندسة الاجتماعية الرئيسية
 # ============================================================
 def build_social_engineering_panel():
@@ -278,7 +292,6 @@ def build_social_engineering_panel():
     ))
 
     # الأقسام "قريباً" — 18 قسم
-    # ترتيبهم 2 في الصف
     soon_categories = [
         ("email", "📧 البريد الإلكتروني"),
         ("sms", "📱 الرسائل النصية"),
@@ -369,18 +382,15 @@ def build_template_view(template_key):
     # ─── الأزرار ───
     m = InlineKeyboardMarkup()
 
-    # ★ زر النسخ (يشتغل عبر URL)
-    # ملاحظة: تليجرام بيدعم copy_text في Bot API 6.8+
+    # ★ زر النسخ عبر CopyTextButton
     try:
         from telebot.types import CopyTextButton
-
-        # نسخ النص كامل
         m.add(InlineKeyboardButton(
             "📋 نسخ نص الرسالة",
             copy_text=CopyTextButton(text=tpl['text'])
         ))
     except Exception:
-        # fallback لو النسخة قديمة
+        # fallback
         m.add(InlineKeyboardButton(
             "📋 نسخ النص (اضغط مطولاً)",
             callback_data=f"se_copy_{template_key}"
@@ -400,7 +410,7 @@ def build_template_view(template_key):
 # ============================================================
 def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
     """
-    يعالج كل callbacks الهندسة الاجتماعية
+    يعالج كل callbacks الهندسة الاجتماعية — يستخدم edit_message_text
     يرجع True لو اتعامل مع الـ callback، False لو لأ
     """
 
@@ -419,8 +429,8 @@ def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
             "💡 <i>اختر قسم للبدء</i>"
         )
 
-        bot.send_message(chat_id, text, parse_mode="HTML",
-                         reply_markup=build_social_engineering_panel())
+        _safe_edit(bot, call, text,
+                   reply_markup=build_social_engineering_panel())
         return True
 
     # ═══════════════════════════════════════════════════
@@ -432,19 +442,20 @@ def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
         cat_name = cat.get("name", "القسم")
         cat_emoji = cat.get("emoji", "📁")
 
-        bot.answer_callback_query(call.id, "🚧 قريباً...", show_alert=True)
+        bot.answer_callback_query(call.id, "🚧 قريباً...")
 
-        # رسالة صغيرة
-        try:
-            bot.send_message(
-                chat_id,
-                f"{cat_emoji} <b>{cat_name}</b>\n\n"
-                f"🚧 <i>هذا القسم قيد التطوير</i>\n"
-                f"⏰ <i>سيتم إطلاقه قريباً</i>",
-                parse_mode="HTML"
-            )
-        except Exception as e:
-            logger.warning(f"se_soon message error: {e}")
+        text = (
+            f"{cat_emoji} <b>{cat_name}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🚧 <i>هذا القسم قيد التطوير</i>\n"
+            f"⏰ <i>سيتم إطلاقه قريباً</i>"
+        )
+
+        # زر الرجوع للأقسام
+        m = InlineKeyboardMarkup()
+        m.add(InlineKeyboardButton("🔙 رجوع للأقسام", callback_data="gen_se"))
+
+        _safe_edit(bot, call, text, reply_markup=m)
         return True
 
     # ═══════════════════════════════════════════════════
@@ -461,8 +472,7 @@ def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
             "💡 <i>اختر السيناريو المناسب للضحية</i>"
         )
 
-        bot.send_message(chat_id, text, parse_mode="HTML",
-                         reply_markup=build_whatsapp_panel())
+        _safe_edit(bot, call, text, reply_markup=build_whatsapp_panel())
         return True
 
     # ═══════════════════════════════════════════════════
@@ -480,12 +490,7 @@ def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
 
         text, m = build_template_view(template_key)
         if text and m:
-            try:
-                bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=m)
-            except Exception as e:
-                logger.exception(f"se_tpl_ send error: {e}")
-                # fallback: أرسل بدون reply_markup
-                bot.send_message(chat_id, text[:4000], parse_mode="HTML")
+            _safe_edit(bot, call, text, reply_markup=m)
         return True
 
     # ═══════════════════════════════════════════════════
@@ -498,17 +503,17 @@ def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
             bot.answer_callback_query(call.id, "❌ القالب غير موجود", show_alert=True)
             return True
 
-        bot.answer_callback_query(call.id, "📋 انسخ النص من الرسالة أدناه")
+        bot.answer_callback_query(call.id, "📋 النص في الرسالة")
 
-        try:
-            bot.send_message(
-                chat_id,
-                f"📋 <b>انسخ النص التالي:</b>\n\n"
-                f"<pre>{tpl['text']}</pre>",
-                parse_mode="HTML"
-            )
-        except Exception as e:
-            logger.warning(f"se_copy error: {e}")
+        text = (
+            f"📋 <b>انسخ النص التالي:</b>\n\n"
+            f"<pre>{tpl['text']}</pre>"
+        )
+
+        m = InlineKeyboardMarkup()
+        m.add(InlineKeyboardButton("🔙 رجوع للقالب", callback_data=f"se_tpl_{template_key}"))
+
+        _safe_edit(bot, call, text, reply_markup=m)
         return True
 
     # ═══════════════════════════════════════════════════
@@ -523,14 +528,13 @@ def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
 
         bot.answer_callback_query(call.id)
 
+        # نبعت رسالة جديدة لطلب النص (لأنها تحتاج input)
         msg = bot.send_message(
             chat_id,
             f"✏️ <b>أرسل النص الجديد للقالب:</b>\n\n"
-            f"<i>ملاحظة: تم إرسال النص الأصلي في الرسالة السابقة، "
-            f"يمكنك تعديله ونسخه</i>",
+            f"<i>ملاحظة: انسخ النص من الرسالة السابقة وعدّله ثم أرسله</i>",
             parse_mode="HTML"
         )
-        # نسجل الـ state
         bot.register_next_step_handler(
             msg,
             lambda m: _handle_edit_text(m, bot, template_key)
@@ -547,7 +551,6 @@ def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
             bot.answer_callback_query(call.id, "❌", show_alert=True)
             return True
 
-        # احفظ في Redis
         try:
             from config import redis_client
             if redis_client:
