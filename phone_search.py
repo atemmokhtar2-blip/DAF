@@ -1,7 +1,7 @@
 # phone_search.py
 # ============================================================
-# محرك البحث بالرقم — v1.0
-# دمج: phonenumbers + Truecaller + PhoneInfoga + WhatsApp + Telegram
+# محرك البحث بالرقم — v2.0
+# تحسينات: التعامل مع صيغ الأرقام + logging أفضل
 # ============================================================
 
 import os
@@ -14,14 +14,6 @@ import requests
 import threading
 from datetime import datetime
 
-try:
-    import phonenumbers
-    from phonenumbers import geocoder, carrier, timezone as pn_timezone
-    PHONENUMBERS_AVAILABLE = True
-except ImportError:
-    PHONENUMBERS_AVAILABLE = False
-    print("[PHONE] phonenumbers not installed")
-
 from config import redis_client, bot
 
 from logging_config import get_logger
@@ -31,49 +23,161 @@ logger = get_logger("phone_search")
 
 
 # ============================================================
+# phonenumbers
+# ============================================================
+try:
+    import phonenumbers
+    from phonenumbers import geocoder, carrier, timezone as pn_timezone
+    from phonenumbers import NumberParseException
+    PHONENUMBERS_AVAILABLE = True
+    logger.info("[+] phonenumbers loaded successfully")
+except Exception as e:
+    PHONENUMBERS_AVAILABLE = False
+    logger.error(f"[PHONE] phonenumbers not available: {e}")
+    NumberParseException = Exception
+
+
+# ============================================================
 # الإعدادات
 # ============================================================
 DEFAULT_REGION = "EG"
-CACHE_TTL = 3600 * 24 * 7   # أسبوع
+CACHE_TTL = 3600 * 24 * 7
 TRUECALLER_COOKIE = os.getenv("TRUECALLER_COOKIE", "")
 
-# ─── Rate Limiting ───
 _last_tc_request = 0
 _tc_lock = threading.Lock()
-TC_MIN_INTERVAL = 3  # 3 ثواني بين كل طلب
+TC_MIN_INTERVAL = 3
 
 
 # ============================================================
-# [1] التحليل الأساسي — phonenumbers
+# ★★★ تنظيف الرقم ★★★
+# ============================================================
+def clean_phone_number(phone):
+    """
+    ينظف الرقم ويرجعه في صيغة E164 (+201012345678)
+    """
+    if not phone:
+        return None, "رقم فارغ"
+
+    # شيل المسافات والرموز غير الأرقام والـ +
+    clean = re.sub(r'[^\d+]', '', str(phone).strip())
+
+    if not clean:
+        return None, "رقم غير صالح"
+
+    # ─── تحديد الصيغة ───
+    # لو مصري بدون +
+    if clean.startswith('0') and len(clean) == 11:
+        # 01012345678 → +201012345678
+        clean = '+20' + clean[1:]
+
+    # لو مصري بدون + وبدون 0
+    elif clean.startswith('1') and len(clean) == 10:
+        # 1012345678 → +201012345678
+        clean = '+20' + clean
+
+    # لو مصري بصيغة 20 بدون +
+    elif clean.startswith('20') and len(clean) == 12:
+        # 201012345678 → +201012345678
+        clean = '+' + clean
+
+    # لو فيه + مبدئي
+    elif clean.startswith('+'):
+        pass
+
+    # fallback — أضف +
+    elif not clean.startswith('+'):
+        clean = '+' + clean
+
+    # ─── تحقق نهائي ───
+    if len(clean) < 8 or len(clean) > 16:
+        return None, f"رقم غير صالح (طول: {len(clean)})"
+
+    return clean, None
+
+
+# ============================================================
+# [1] التحليل الأساسي
 # ============================================================
 def _basic_analysis(phone_number):
-    """
-    تحليل الرقم: البلد + الشركة + النوع
-    مجاني 100% — بدون APIs
-    """
+    """تحليل الرقم: البلد + الشركة + النوع"""
     if not PHONENUMBERS_AVAILABLE:
+        logger.warning("[PHONE] phonenumbers not available")
         return None
 
     try:
-        # تأكد من وجود +20 للرقم المصري
-        if not phone_number.startswith('+'):
-            if phone_number.startswith('0'):
-                phone_number = '+20' + phone_number[1:]
-            else:
-                phone_number = '+20' + phone_number
+        # ─── نظّف الرقم ───
+        clean, err = clean_phone_number(phone_number)
+        if err:
+            logger.warning(f"[PHONE] clean error: {err}")
+            return {'valid': False, 'error': err}
 
-        parsed = phonenumbers.parse(phone_number, None)
+        logger.info(f"[PHONE] Parsing: {clean}")
 
-        if not phonenumbers.is_valid_number(parsed):
+        # ─── parse ───
+        try:
+            parsed = phonenumbers.parse(clean, None)
+        except NumberParseException as e:
+            logger.warning(f"[PHONE] Parse error: {e}")
+            return {'valid': False, 'error': f'فشل تحليل الرقم: {e}'}
+        except Exception as e:
+            logger.exception(f"[PHONE] Parse exception: {e}")
+            return {'valid': False, 'error': f'خطأ: {str(e)[:100]}'}
+
+        # ─── التحقق من الصلاحية ───
+        is_valid = phonenumbers.is_valid_number(parsed)
+        is_possible = phonenumbers.is_possible_number(parsed)
+
+        logger.info(f"[PHONE] Valid: {is_valid} | Possible: {is_possible}")
+
+        if not is_valid:
+            e164 = phonenumbers.format_number(
+                parsed,
+                phonenumbers.PhoneNumberFormat.E164
+            )
             return {
                 'valid': False,
-                'e164': phonenumbers.format_number(
-                    parsed,
-                    phonenumbers.PhoneNumberFormat.E164
-                ),
+                'error': 'رقم غير صالح',
+                'e164': e164,
+                'is_possible': is_possible,
             }
 
-        # ─── Collect Info ───
+        # ─── جمع البيانات ───
+        try:
+            country_ar = geocoder.country_name_for_number(parsed, "ar")
+        except Exception:
+            country_ar = "غير معروف"
+
+        try:
+            country_en = geocoder.country_name_for_number(parsed, "en")
+        except Exception:
+            country_en = "Unknown"
+
+        try:
+            location_ar = geocoder.description_for_number(parsed, "ar")
+        except Exception:
+            location_ar = ""
+
+        try:
+            location_en = geocoder.description_for_number(parsed, "en")
+        except Exception:
+            location_en = ""
+
+        try:
+            carrier_en = carrier.name_for_number(parsed, "en")
+        except Exception:
+            carrier_en = ""
+
+        try:
+            carrier_ar = carrier.name_for_number(parsed, "ar")
+        except Exception:
+            carrier_ar = ""
+
+        try:
+            timezones = list(pn_timezone.time_zones_for_number(parsed))
+        except Exception:
+            timezones = []
+
         result = {
             'valid': True,
             'e164': phonenumbers.format_number(
@@ -90,47 +194,46 @@ def _basic_analysis(phone_number):
             ),
             'country_code': parsed.country_code,
             'national_number': parsed.national_number,
-            'country': geocoder.country_name_for_number(parsed, "ar"),
-            'country_en': geocoder.country_name_for_number(parsed, "en"),
-            'location': geocoder.description_for_number(parsed, "ar"),
-            'location_en': geocoder.description_for_number(parsed, "en"),
-            'carrier': carrier.name_for_number(parsed, "en"),
-            'carrier_ar': carrier.name_for_number(parsed, "ar"),
-            'timezones': list(pn_timezone.time_zones_for_number(parsed)),
+            'country': country_ar or country_en or "غير معروف",
+            'country_en': country_en or country_ar or "Unknown",
+            'location': location_ar or location_en or "",
+            'location_en': location_en or location_ar or "",
+            'carrier': carrier_en or carrier_ar or "غير معروف",
+            'carrier_ar': carrier_ar or carrier_en or "غير معروف",
+            'timezones': timezones,
         }
 
         # ─── Type ───
-        num_type = phonenumbers.number_type(parsed)
-        type_map = {
-            phonenumbers.PhoneNumberType.MOBILE: "موبايل",
-            phonenumbers.PhoneNumberType.FIXED_LINE: "أرضي",
-            phonenumbers.PhoneNumberType.FIXED_LINE_OR_MOBILE: "أرضي/موبايل",
-            phonenumbers.PhoneNumberType.TOLL_FREE: "مجاني",
-            phonenumbers.PhoneNumberType.PREMIUM_RATE: "خدمة مدفوعة",
-            phonenumbers.PhoneNumberType.VOIP: "VoIP",
-            phonenumbers.PhoneNumberType.PERSONAL_NUMBER: "رقم شخصي",
-            phonenumbers.PhoneNumberType.PAGER: "بيجر",
-            phonenumbers.PhoneNumberType.UAN: "UAN",
-            phonenumbers.PhoneNumberType.VOICEMAIL: "بريد صوتي",
-            phonenumbers.PhoneNumberType.UNKNOWN: "غير معروف",
-        }
-        result['type'] = type_map.get(num_type, "غير معروف")
+        try:
+            num_type = phonenumbers.number_type(parsed)
+            type_map = {
+                phonenumbers.PhoneNumberType.MOBILE: "موبايل",
+                phonenumbers.PhoneNumberType.FIXED_LINE: "أرضي",
+                phonenumbers.PhoneNumberType.FIXED_LINE_OR_MOBILE: "أرضي/موبايل",
+                phonenumbers.PhoneNumberType.TOLL_FREE: "مجاني",
+                phonenumbers.PhoneNumberType.PREMIUM_RATE: "خدمة مدفوعة",
+                phonenumbers.PhoneNumberType.VOIP: "VoIP",
+                phonenumbers.PhoneNumberType.PERSONAL_NUMBER: "رقم شخصي",
+                phonenumbers.PhoneNumberType.PAGER: "بيجر",
+                phonenumbers.PhoneNumberType.UAN: "UAN",
+                phonenumbers.PhoneNumberType.VOICEMAIL: "بريد صوتي",
+                phonenumbers.PhoneNumberType.UNKNOWN: "غير معروف",
+            }
+            result['type'] = type_map.get(num_type, "غير معروف")
+        except Exception:
+            result['type'] = "غير معروف"
 
         return result
 
     except Exception as e:
-        logger.warning(f"basic_analysis error: {e}")
-        return None
+        logger.exception(f"[PHONE] basic_analysis error: {e}")
+        return {'valid': False, 'error': f'خطأ غير متوقع: {str(e)[:100]}'}
 
 
 # ============================================================
 # [2] Truecaller Search
 # ============================================================
 def _truecaller_search(phone_number):
-    """
-    بحث في Truecaller باستخدام Cookie
-    يرجع: الاسم + الصورة + Spam Reports
-    """
     global _last_tc_request
 
     if not TRUECALLER_COOKIE:
@@ -138,23 +241,22 @@ def _truecaller_search(phone_number):
         return None
 
     try:
+        clean, err = clean_phone_number(phone_number)
+        if err:
+            return None
+
         with _tc_lock:
-            # Rate limiting
             elapsed = time.time() - _last_tc_request
             if elapsed < TC_MIN_INTERVAL:
                 time.sleep(TC_MIN_INTERVAL - elapsed)
             _last_tc_request = time.time()
 
-        # تأكد من +20
-        if not phone_number.startswith('+'):
-            if phone_number.startswith('0'):
-                phone_number = '+20' + phone_number[1:]
-            else:
-                phone_number = '+20' + phone_number
+        encoded = requests.utils.quote(clean)
 
-        encoded = requests.utils.quote(phone_number)
-
-        url = f"https://search5-noneu.truecaller.com/v2/search?q={encoded}&countryCode=EG&type=4&encoding=json"
+        url = (
+            f"https://search5-noneu.truecaller.com/v2/search"
+            f"?q={encoded}&countryCode=EG&type=4&encoding=json"
+        )
 
         headers = {
             'User-Agent': 'Truecaller/14.7.8 (Android; 13)',
@@ -182,7 +284,6 @@ def _truecaller_search(phone_number):
             'addresses': [],
         }
 
-        # ─── Parse Data ───
         if data.get('data'):
             entry = data['data'][0]
             result['name'] = entry.get('name')
@@ -194,7 +295,6 @@ def _truecaller_search(phone_number):
             if entry.get('image'):
                 result['photo'] = entry['image']
 
-            # Additional phones
             for p in entry.get('phones', []):
                 if p.get('e164'):
                     result['phones'].append({
@@ -214,25 +314,19 @@ def _truecaller_search(phone_number):
 
 
 # ============================================================
-# [3] OSINT Footprints (Google Dorks)
+# [3] OSINT Footprints
 # ============================================================
 def _osint_footprints(phone_number):
-    """
-    روابط بحث جاهزة لكل المنصات
-    """
-    if not phone_number.startswith('+'):
-        if phone_number.startswith('0'):
-            phone_number = '+20' + phone_number[1:]
-        else:
-            phone_number = '+20' + phone_number
+    clean, err = clean_phone_number(phone_number)
+    if err:
+        clean = phone_number
 
-    # نسخة بدون + للبحث في المنصات
-    digits_only = phone_number.replace('+', '')
-    local = '0' + digits_only[2:]  # 01012345678
+    digits_only = clean.replace('+', '')
+    local = '0' + digits_only[2:] if digits_only.startswith('20') else digits_only
 
     return {
         'google': [
-            f'"{phone_number}"',
+            f'"{clean}"',
             f'"{local}"',
             f'"{local}" site:facebook.com',
             f'"{local}" site:instagram.com',
@@ -240,19 +334,16 @@ def _osint_footprints(phone_number):
             f'"{local}" site:tiktok.com',
             f'"{local}" site:linkedin.com',
             f'"{local}" filetype:pdf',
-            f'"{local}" filetype:doc',
             f'"{local}" pastebin',
-            f'"{local}" -site:facebook.com -site:instagram.com',
         ],
         'facebook_search': f'https://www.facebook.com/search/top?q={local}',
         'instagram_search': f'https://www.instagram.com/{local}',
         'twitter_search': f'https://twitter.com/search?q={local}',
         'tiktok_search': f'https://www.tiktok.com/search/user?q={local}',
         'whatsapp_direct': f'https://wa.me/{digits_only}',
-        'telegram_direct': f'https://t.me/{phone_number}',
+        'telegram_direct': f'https://t.me/{clean}',
         'truecaller_web': f'https://www.truecaller.com/search/eg/{digits_only}',
         'sync_me': f'https://sync.me/search/?number={digits_only}',
-        'getcontact': f'https://www.getcontact.com/',
     }
 
 
@@ -260,17 +351,11 @@ def _osint_footprints(phone_number):
 # [4] WhatsApp Check
 # ============================================================
 def _check_whatsapp(phone_number):
-    """
-    يفحص هل الرقم نشط على WhatsApp
-    (بدون إرسال رسالة — فقط فحص عبر wa.me)
-    """
-    if not phone_number.startswith('+'):
-        if phone_number.startswith('0'):
-            phone_number = '+20' + phone_number[1:]
-        else:
-            phone_number = '+20' + phone_number
+    clean, err = clean_phone_number(phone_number)
+    if err:
+        return None
 
-    digits_only = phone_number.replace('+', '')
+    digits_only = clean.replace('+', '')
 
     try:
         r = requests.get(
@@ -279,7 +364,6 @@ def _check_whatsapp(phone_number):
             headers={'User-Agent': 'Mozilla/5.0'},
             allow_redirects=True,
         )
-
         if 'api.whatsapp.com' in r.url or 'wa.me' in r.url:
             if 'invalid' not in r.text.lower():
                 return True
@@ -292,19 +376,13 @@ def _check_whatsapp(phone_number):
 # [5] Telegram Check
 # ============================================================
 def _check_telegram(phone_number):
-    """
-    يفحص هل الرقم نشط على Telegram
-    """
-    if not phone_number.startswith('+'):
-        if phone_number.startswith('0'):
-            phone_number = '+20' + phone_number[1:]
-        else:
-            phone_number = '+20' + phone_number
+    clean, err = clean_phone_number(phone_number)
+    if err:
+        return None
 
-    # طريقة غير مباشرة: نجرّب t.me/+<number>
     try:
         r = requests.get(
-            f'https://t.me/{phone_number}',
+            f'https://t.me/{clean}',
             timeout=8,
             headers={'User-Agent': 'Mozilla/5.0'},
         )
@@ -316,21 +394,18 @@ def _check_telegram(phone_number):
 
 
 # ============================================================
-# المحرك الرئيسي
+# ★★★ المحرك الرئيسي ★★★
 # ============================================================
 def search_phone(phone_number, chat_id=None):
-    """
-    البحث الشامل بالرقم
-    يرجع dict فيه كل المعلومات
-    """
-    # Clean
-    clean = re.sub(r'[^0-9+]', '', phone_number)
+    """البحث الشامل بالرقم"""
 
-    if not clean:
-        return {'error': 'رقم غير صالح'}
+    # ─── تنظيف ───
+    clean, err = clean_phone_number(phone_number)
+    if err:
+        logger.warning(f"[PHONE] Search rejected: {err} | input={phone_number}")
+        return {'error': err}
 
-    if len(clean) < 8:
-        return {'error': 'الرقم قصير جداً'}
+    logger.info(f"[PHONE] Starting search: {clean}")
 
     # ─── Cache ───
     cache_key = f"phone_search:{clean}"
@@ -338,7 +413,7 @@ def search_phone(phone_number, chat_id=None):
         try:
             cached = redis_client.get(cache_key)
             if cached:
-                logger.info(f"[Phone] Cache hit: {clean}")
+                logger.info(f"[PHONE] Cache hit: {clean}")
                 return json.loads(cached)
         except Exception:
             pass
@@ -350,33 +425,40 @@ def search_phone(phone_number, chat_id=None):
     }
 
     # ─── [1] Basic ───
-    logger.info(f"[Phone] Basic analysis: {clean}")
+    logger.info(f"[PHONE] Basic analysis: {clean}")
     basic = _basic_analysis(clean)
-    if not basic or not basic.get('valid'):
-        return {'error': 'رقم غير صالح', 'basic': basic}
+
+    if not basic:
+        return {'error': 'phonenumbers library not available on server'}
+
+    if not basic.get('valid'):
+        return {
+            'error': basic.get('error', 'رقم غير صالح'),
+            'basic': basic,
+        }
 
     result['basic'] = basic
 
     # ─── [2] Truecaller ───
-    logger.info(f"[Phone] Truecaller: {clean}")
+    logger.info(f"[PHONE] Truecaller: {clean}")
     tc = _truecaller_search(clean)
     if tc:
         result['truecaller'] = tc
 
-    # ─── [3] OSINT Footprints ───
+    # ─── [3] Footprints ───
     result['footprints'] = _osint_footprints(clean)
 
     # ─── [4] WhatsApp ───
-    logger.info(f"[Phone] WhatsApp check: {clean}")
+    logger.info(f"[PHONE] WhatsApp: {clean}")
     wa = _check_whatsapp(clean)
     result['whatsapp'] = wa
 
     # ─── [5] Telegram ───
-    logger.info(f"[Phone] Telegram check: {clean}")
+    logger.info(f"[PHONE] Telegram: {clean}")
     tg = _check_telegram(clean)
     result['telegram'] = tg
 
-    # ─── Cache Result ───
+    # ─── Cache ───
     if redis_client:
         try:
             redis_client.setex(
@@ -387,7 +469,7 @@ def search_phone(phone_number, chat_id=None):
         except Exception as e:
             logger.warning(f"Cache save error: {e}")
 
-    # ─── Save History ───
+    # ─── History ───
     if chat_id and redis_client:
         try:
             redis_client.lpush(
@@ -407,88 +489,75 @@ def search_phone(phone_number, chat_id=None):
 
 
 # ============================================================
-# تنسيق النتيجة للبوت
+# تنسيق النتيجة
 # ============================================================
 def format_result_for_telegram(result):
-    """
-    يحوّل نتيجة البحث لرسالة تليجرام منسقة
-    """
     if 'error' in result:
         return f"❌ <b>خطأ:</b> {result['error']}"
 
-    basic = result.get('basic', {})
+    basic = result.get('basic', {}) or {}
     tc = result.get('truecaller') or {}
     fp = result.get('footprints', {})
     wa = result.get('whatsapp')
     tg = result.get('telegram')
 
     lines = [
-        f"🔎 <b>نتيجة البحث</b>",
-        f"━━━━━━━━━━━━━━━━━━━━",
-        f"",
+        "🔎 <b>نتيجة البحث</b>",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "",
         f"📱 <b>الرقم:</b> <code>{basic.get('e164', result.get('query'))}</code>",
         f"🌍 <b>البلد:</b> {basic.get('country', '?')} ({basic.get('country_en', '?')})",
         f"📡 <b>الشركة:</b> {basic.get('carrier', 'غير معروف')}",
         f"📞 <b>النوع:</b> {basic.get('type', 'غير معروف')}",
-        f"🗺️ <b>الموقع:</b> {basic.get('location', 'غير معروف')}",
-        f"",
-        f"━━━━━━━━━━━━━━━━━━━━",
     ]
 
-    # ─── Truecaller Info ───
-    if tc:
-        name = tc.get('name')
-        if name:
-            lines.append(f"👤 <b>الاسم:</b> <code>{name}</code>")
+    if basic.get('location'):
+        lines.append(f"🗺️ <b>الموقع:</b> {basic.get('location')}")
 
-        spam_score = tc.get('spam_score', 0)
-        if spam_score:
-            emoji = "⚠️" if spam_score < 50 else "🚨"
-            lines.append(f"{emoji} <b>بلاغات Spam:</b> {spam_score}")
+    lines.append("")
+    lines.append("━━━━━━━━━━━━━━━━━━━━")
 
-        tc_carrier = tc.get('carrier')
-        if tc_carrier and tc_carrier != basic.get('carrier'):
-            lines.append(f"📡 <b>الشركة (TC):</b> {tc_carrier}")
+    # ─── Truecaller ───
+    if tc and tc.get('name'):
+        lines.append(f"👤 <b>الاسم:</b> <code>{tc['name']}</code>")
 
-        tc_location = tc.get('location')
-        if tc_location:
-            lines.append(f"📍 <b>الموقع (TC):</b> {tc_location}")
+        if tc.get('spam_score', 0):
+            emoji = "⚠️" if tc['spam_score'] < 50 else "🚨"
+            lines.append(f"{emoji} <b>بلاغات Spam:</b> {tc['spam_score']}")
+
+        if tc.get('carrier') and tc['carrier'] != basic.get('carrier'):
+            lines.append(f"📡 <b>الشركة (TC):</b> {tc['carrier']}")
+
+        if tc.get('location'):
+            lines.append(f"📍 <b>الموقع (TC):</b> {tc['location']}")
 
         if tc.get('addresses'):
-            lines.append(f"")
-            lines.append(f"🏠 <b>العناوين:</b>")
+            lines.append("")
+            lines.append("🏠 <b>العناوين:</b>")
             for addr in tc['addresses'][:3]:
                 lines.append(f"  • {addr}")
-
-        if tc.get('phones') and len(tc['phones']) > 1:
-            lines.append(f"")
-            lines.append(f"📞 <b>أرقام إضافية:</b>")
-            for p in tc['phones'][:3]:
-                if p['e164'] != result.get('query'):
-                    lines.append(f"  • <code>{p['e164']}</code>")
-
-        lines.append(f"")
-        lines.append(f"━━━━━━━━━━━━━━━━━━━━")
     else:
-        lines.append(f"")
-        lines.append(f"👤 <b>Truecaller:</b> لا توجد بيانات (مطلوب Cookie)")
-        lines.append(f"━━━━━━━━━━━━━━━━━━━━")
+        lines.append("")
+        lines.append("👤 <b>Truecaller:</b> <i>لا توجد بيانات</i>")
 
-    # ─── WhatsApp / Telegram ───
+    lines.append("")
+    lines.append("━━━━━━━━━━━━━━━━━━━━")
+
+    # ─── WhatsApp/Telegram ───
     if wa is True:
-        lines.append(f"✅ <b>WhatsApp:</b> نشط")
+        lines.append("✅ <b>WhatsApp:</b> نشط")
     elif wa is False:
-        lines.append(f"❌ <b>WhatsApp:</b> غير نشط")
+        lines.append("❌ <b>WhatsApp:</b> غير نشط")
 
     if tg is True:
-        lines.append(f"✅ <b>Telegram:</b> نشط")
+        lines.append("✅ <b>Telegram:</b> نشط")
     elif tg is False:
-        lines.append(f"❌ <b>Telegram:</b> غير نشط")
+        lines.append("❌ <b>Telegram:</b> غير نشط")
 
     # ─── Google Dorks ───
-    lines.append(f"")
-    lines.append(f"━━━━━━━━━━━━━━━━━━━━")
-    lines.append(f"🔍 <b>Google Dorks (اضغط للبحث):</b>")
+    lines.append("")
+    lines.append("━━━━━━━━━━━━━━━━━━━━")
+    lines.append("🔍 <b>Google Dorks:</b>")
 
     dorks = fp.get('google', [])
     for i, dork in enumerate(dorks[:5], 1):
@@ -496,10 +565,10 @@ def format_result_for_telegram(result):
         lines.append(f"  {i}. <a href='https://www.google.com/search?q={encoded}'>{dork[:50]}</a>")
 
     # ─── Direct Links ───
-    lines.append(f"")
-    lines.append(f"━━━━━━━━━━━━━━━━━━━━")
-    lines.append(f"🔗 <b>روابط مباشرة:</b>")
-    lines.append(f"  • <a href='{fp.get('whatsapp_direct', '#')}'>WhatsApp Direct</a>")
+    lines.append("")
+    lines.append("━━━━━━━━━━━━━━━━━━━━")
+    lines.append("🔗 <b>روابط مباشرة:</b>")
+    lines.append(f"  • <a href='{fp.get('whatsapp_direct', '#')}'>WhatsApp</a>")
     lines.append(f"  • <a href='{fp.get('facebook_search', '#')}'>Facebook Search</a>")
     lines.append(f"  • <a href='{fp.get('truecaller_web', '#')}'>Truecaller Web</a>")
     lines.append(f"  • <a href='{fp.get('sync_me', '#')}'>Sync.me</a>")
