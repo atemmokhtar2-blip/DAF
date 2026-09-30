@@ -1,15 +1,22 @@
 # imports_manager.py
 # ============================================================
 # استيراد كل الأدوات مع Fallback آمن
-# v8 — مع Silent Collector
+# v9 — مع Phone Search
 # ============================================================
 
 import io
+import json
 from telebot.types import InlineKeyboardMarkup
 
 from logging_config import get_logger
 
 logger = get_logger("imports_manager")
+
+# استيراد Redis
+try:
+    from config import redis_client
+except Exception:
+    redis_client = None
 
 
 # ============================================================
@@ -115,7 +122,7 @@ except Exception as e:
 
 
 # ============================================================
-# ★★★ Silent Collector
+# Silent Collector
 # ============================================================
 try:
     from silent_collector import (
@@ -140,6 +147,44 @@ except Exception as e:
         return None
 
     def get_user_silent_sessions(*a, **kw):
+        return []
+
+
+# ============================================================
+# ★★★ Phone Search
+# ============================================================
+try:
+    from phone_search import (
+        search_phone,
+        format_result_for_telegram,
+    )
+    PHONE_SEARCH_ENABLED = True
+    logger.info("[+] phone_search imported")
+except Exception as e:
+    logger.exception(f"phone_search: {e}")
+    PHONE_SEARCH_ENABLED = False
+
+    def search_phone(*a, **kw):
+        return {'error': 'Phone search disabled'}
+
+    def format_result_for_telegram(r):
+        return "❌ Phone search disabled"
+
+
+def get_user_phone_searches(chat_id, limit=10):
+    """يرجع سجل بحثات الرقم"""
+    if not redis_client:
+        return []
+    try:
+        items = redis_client.lrange(f"phone_searches:{chat_id}", 0, limit - 1)
+        result = []
+        for item in items:
+            try:
+                result.append(json.loads(item) if isinstance(item, str) else item)
+            except Exception:
+                pass
+        return result
+    except Exception:
         return []
 
 
@@ -254,7 +299,7 @@ except Exception as e:
 
     PRICING_PLANS = {}
     FREE_TRIAL_USES = 3
-    AVAILABLE_TOOLS = ["fb", "ig", "apk", "wa", "silent"]
+    AVAILABLE_TOOLS = ["fb", "ig", "apk", "wa", "silent", "phone_search"]
 
     def is_admin(uid):
         return False
@@ -307,6 +352,7 @@ except Exception as e:
 # ============================================================
 logger.info(
     f"Imports Summary | "
+    f"PHONE_SEARCH={PHONE_SEARCH_ENABLED} | "
     f"SILENT={SILENT_ENABLED} | "
     f"WA={WA_ENABLED} | "
     f"APK_MGR={APK_MANAGER_ENABLED} | "
