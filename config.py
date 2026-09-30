@@ -19,7 +19,7 @@ logger = get_logger("config")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # ★★★ الرابطين منفصلين ★★★
-PUBLIC_URL = os.getenv("PUBLIC_URL", "https://sec.h42536974.workers.dev")
+PUBLIC_URL = os.getenv("PUBLIC_URL", "https://icy-sc.h42536974.workers.dev")
 RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-e34a.up.railway.app")
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
