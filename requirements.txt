@@ -4,3 +4,4 @@ requests
 Flask
 pyTelegramBotAPI
 psutil
+phonenumbers==8.13.27
