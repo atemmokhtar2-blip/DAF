@@ -26,47 +26,48 @@ from . import admin as admin_cb
 from . import misc as misc_cb
 
 
-# ─── ترتيب الفحص (الأهم أولاً) ───
-# كل عنصر: (دالة الفحص, دالة التنفيذ)
+# ══════════════════════════════════════════════════
+# ★ ترتيب الفحص (الأهم أولاً)
+# ══════════════════════════════════════════════════
 ROUTES = [
-    # misc (first — noop, back)
+    # ─── 1. misc (noop, back) ───
     (lambda d: d == "noop", misc_cb.handle),
     (lambda d: d == "back_to_main", misc_cb.handle),
 
-    # help
+    # ─── 2. help ───
     (lambda d: d == "help_guide" or d.startswith("help_page_"), help_cb.handle),
 
-    # search
+    # ─── 3. search ───
     (lambda d: d == "search_menu" or d.startswith("search_"), search_cb.handle),
 
-    # facebook
+    # ─── 4. facebook ───
     (lambda d: d == "gen_fb" or d.startswith("fb_site_") or d.startswith("fb_stats_"), fb_cb.handle),
 
-    # instagram
+    # ─── 5. instagram ───
     (lambda d: d == "gen_ig" or d.startswith("ig_site_") or d.startswith("ig_stats_"), ig_cb.handle),
 
-    # silent
+    # ─── 6. silent ───
     (lambda d: d in ("gen_silent", "silent_new", "silent_stats", "silent_recent"), silent_cb.handle),
 
-    # dashboard
+    # ─── 7. dashboard ───
     (lambda d: d == "open_dashboard", dash_cb.handle),
 
-    # payment
+    # ─── 8. payment ───
     (lambda d: d in ("payment_menu", "show_plans", "my_account") or d.startswith("buy_plan_"), payment_cb.handle),
 
-    # updates
+    # ─── 9. updates ───
     (lambda d: d.startswith("upd_"), upd_cb.handle),
 
-    # admin ★
+    # ─── 10. ★ admin (قبل victim_commands و v_) ★ ───
     (lambda d: d == "admin_panel" or d.startswith("admin_"), admin_cb.handle),
 
-    # victim commands (vcmd_)
+    # ─── 11. victim commands (vcmd_) ───
     (lambda d: d.startswith("vcmd_"), vcmd_cb.handle),
 
-    # apk commands (apk_cmd_)
+    # ─── 12. apk commands (apk_cmd_) ───
     (lambda d: d.startswith("apk_cmd_"), apk_cmd_cb.handle),
 
-    # victims (v_*)
+    # ─── 13. victims (v_*) ───
     (lambda d: d.startswith("v_"), victims_cb.handle),
 ]
 
