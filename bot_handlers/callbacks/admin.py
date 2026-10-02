@@ -1,6 +1,7 @@
 # bot_handlers/callbacks/admin.py
 # ============================================================
 # ★ معالجات الأدمن الكاملة
+# يستخدم admin_system للميزات المتطورة
 # ============================================================
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -36,30 +37,110 @@ def handle(call, chat_id, user_id, data):
         bot.answer_callback_query(call.id, "❌ للأدمن فقط", show_alert=True)
         return
 
-    # ─── اللوحة الرئيسية ───
+    # ══════════════════════════════════════════════════
+    # ★ اللوحة الرئيسية
+    # ══════════════════════════════════════════════════
     if data == "admin_panel":
         bot.answer_callback_query(call.id)
-        safe_edit(call, "👑 <b>لوحة تحكم الأدمن</b>", reply_markup=build_admin_menu())
+
+        # استخدم اللوحة المتطورة لو متاحة
+        try:
+            from admin_system import build_advanced_admin_menu
+            menu = build_advanced_admin_menu()
+        except Exception as e:
+            logger.warning(f"build_advanced_admin_menu failed, fallback: {e}")
+            menu = build_admin_menu()
+
+        safe_edit(call, "👑 <b>لوحة تحكم الأدمن</b>", reply_markup=menu)
         return
 
-    # ─── التحديثات ───
+    # ══════════════════════════════════════════════════
+    # ⚙️ إدارة التحديثات
+    # ══════════════════════════════════════════════════
     if data == "admin_updates":
         bot.answer_callback_query(call.id, "⚙️ جاري الفتح...")
         from ..keyboards import build_update_panel
         safe_edit(call, "⚙️ <b>إدارة التحديثات</b>", reply_markup=build_update_panel())
         return
 
-    # ─── المستخدمون (مع pagination) ───
+    # ══════════════════════════════════════════════════
+    # 🛠️ الصيانة — معطّلة حالياً
+    # ══════════════════════════════════════════════════
+    if data == "admin_maintenance_on" or data == "admin_maintenance_off":
+        bot.answer_callback_query(
+            call.id,
+            "⚠️ نظام الصيانة معطّل حالياً",
+            show_alert=True
+        )
+        return
+
+    # ══════════════════════════════════════════════════
+    # 🔴 المراقبة المباشرة
+    # ══════════════════════════════════════════════════
+    if data == "admin_live":
+        _handle_live(call)
+        return
+
+    # ══════════════════════════════════════════════════
+    # 📊 إحصائيات حية
+    # ══════════════════════════════════════════════════
+    if data == "admin_adv_stats":
+        _handle_adv_stats(call)
+        return
+
+    # ══════════════════════════════════════════════════
+    # 📈 تحليلات عميقة
+    # ══════════════════════════════════════════════════
+    if data == "admin_analytics":
+        _handle_analytics(call)
+        return
+
+    # ══════════════════════════════════════════════════
+    # 👑 أكثر المستخدمين
+    # ══════════════════════════════════════════════════
+    if data == "admin_top_users":
+        _handle_top_users(call)
+        return
+
+    # ══════════════════════════════════════════════════
+    # 📋 سجل الأحداث
+    # ══════════════════════════════════════════════════
+    if data == "admin_events":
+        _handle_events(call)
+        return
+
+    # ══════════════════════════════════════════════════
+    # 📡 سجل الأنشطة
+    # ══════════════════════════════════════════════════
+    if data == "admin_activity_log":
+        _handle_activity_log(call)
+        return
+
+    # ══════════════════════════════════════════════════
+    # 🧹 تنظيف Redis
+    # ══════════════════════════════════════════════════
+    if data == "admin_clean_redis":
+        _handle_clean_redis(call)
+        return
+
+    # ══════════════════════════════════════════════════
+    # 📥 تصدير
+    # ══════════════════════════════════════════════════
+    if data == "admin_export":
+        _handle_export(call, chat_id)
+        return
+
+    # ══════════════════════════════════════════════════
+    # 👥 المستخدمون
+    # ══════════════════════════════════════════════════
     if data.startswith("admin_users_"):
         _handle_users_list(call, data)
         return
 
-    # ─── تفاصيل مستخدم ───
     if data.startswith("admin_user_"):
         _handle_user_detail(call, data)
         return
 
-    # ─── إجراءات المستخدم ───
     if data.startswith("admin_ban_user_"):
         _handle_ban(call, data)
         return
@@ -92,19 +173,31 @@ def handle(call, chat_id, user_id, data):
         _handle_msg_user(call, chat_id, data)
         return
 
-    # ─── إحصائيات ───
+    # ══════════════════════════════════════════════════
+    # 📊 إحصائيات (القديمة)
+    # ══════════════════════════════════════════════════
     if data == "admin_stats":
         bot.answer_callback_query(call.id)
+        try:
+            from admin_system import build_admin_stats_text as adv_stats
+            text = adv_stats()
+        except Exception:
+            text = build_admin_stats_text()
         m = InlineKeyboardMarkup()
         m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
-        safe_edit(call, build_admin_stats_text(), reply_markup=m)
+        safe_edit(call, text, reply_markup=m)
         return
 
+    # ══════════════════════════════════════════════════
+    # 🆕 آخر المسجلين
+    # ══════════════════════════════════════════════════
     if data == "admin_recent":
         _handle_recent(call)
         return
 
-    # ─── بحث ───
+    # ══════════════════════════════════════════════════
+    # 🔍 بحث
+    # ══════════════════════════════════════════════════
     if data == "admin_search":
         bot.answer_callback_query(call.id)
         msg = bot.send_message(chat_id, "🔍 <b>أرسل ID أو username:</b>", parse_mode="HTML")
@@ -112,7 +205,9 @@ def handle(call, chat_id, user_id, data):
         bot.register_next_step_handler(msg, admin_search_handler)
         return
 
-    # ─── رسالة جماعية ───
+    # ══════════════════════════════════════════════════
+    # 📢 رسالة جماعية
+    # ══════════════════════════════════════════════════
     if data == "admin_broadcast":
         bot.answer_callback_query(call.id)
         msg = bot.send_message(chat_id, "📢 <b>أرسل الرسالة:</b>", parse_mode="HTML")
@@ -120,7 +215,9 @@ def handle(call, chat_id, user_id, data):
         bot.register_next_step_handler(msg, admin_broadcast_handler)
         return
 
-    # ─── حظر / فك حظر ───
+    # ══════════════════════════════════════════════════
+    # 🚫 حظر / فك حظر
+    # ══════════════════════════════════════════════════
     if data == "admin_ban":
         bot.answer_callback_query(call.id)
         msg = bot.send_message(chat_id, "🚫 <b>أرسل ID للحظر:</b>", parse_mode="HTML")
@@ -142,7 +239,9 @@ def handle(call, chat_id, user_id, data):
         bot.register_next_step_handler(msg, admin_delete_handler)
         return
 
-    # ─── منح VIP ───
+    # ══════════════════════════════════════════════════
+    # 💎 منح VIP
+    # ══════════════════════════════════════════════════
     if data == "admin_grant_vip":
         bot.answer_callback_query(call.id)
         msg = bot.send_message(chat_id, "💎 <b>أرسل ID لمنح VIP:</b>", parse_mode="HTML")
@@ -150,7 +249,9 @@ def handle(call, chat_id, user_id, data):
         bot.register_next_step_handler(msg, admin_grant_vip_handler)
         return
 
-    # ─── نجوم ───
+    # ══════════════════════════════════════════════════
+    # ⭐ نجوم
+    # ══════════════════════════════════════════════════
     if data == "admin_give_stars":
         bot.answer_callback_query(call.id)
         msg = bot.send_message(
@@ -162,7 +263,9 @@ def handle(call, chat_id, user_id, data):
         bot.register_next_step_handler(msg, admin_give_stars_handler)
         return
 
-    # ─── إعطاء اشتراك (من اللوحة) ───
+    # ══════════════════════════════════════════════════
+    # ➕ إعطاء اشتراك
+    # ══════════════════════════════════════════════════
     if data == "admin_add_sub":
         bot.answer_callback_query(call.id)
         msg = bot.send_message(
@@ -175,58 +278,16 @@ def handle(call, chat_id, user_id, data):
         bot.register_next_step_handler(msg, _admin_add_sub_step)
         return
 
-    # ─── أحداث ───
-    if data == "admin_events":
-        _handle_events(call)
-        return
-
-    # ─── سجل الأنشطة ───
-    if data == "admin_activity_log":
-        _handle_activity_log(call)
-        return
-
-    # ─── تنظيف Redis ───
-    if data == "admin_clean_redis":
-        _handle_clean_redis(call)
-        return
-
-    # ─── تصدير ───
-    if data == "admin_export":
-        _handle_export(call, chat_id)
-        return
-
-    # ─── إعدادات ───
+    # ══════════════════════════════════════════════════
+    # 🔧 إعدادات النظام
+    # ══════════════════════════════════════════════════
     if data == "admin_settings":
         _handle_settings(call)
         return
 
-    # ─── صيانة ───
-    if data == "admin_maintenance_on":
-        _handle_maint_on(call, user_id)
-        return
-
-    if data == "admin_maintenance_off":
-        _handle_maint_off(call, user_id)
-        return
-
-    # ─── مراقبة ───
-    if data == "admin_live":
-        _handle_live(call)
-        return
-
-    if data == "admin_adv_stats":
-        _handle_adv_stats(call)
-        return
-
-    if data == "admin_analytics":
-        _handle_analytics(call)
-        return
-
-    if data == "admin_top_users":
-        _handle_top_users(call)
-        return
-
-    # ─── غير معروف ───
+    # ══════════════════════════════════════════════════
+    # غير معروف
+    # ══════════════════════════════════════════════════
     logger.warning(f"Unknown admin callback: {data}")
     bot.answer_callback_query(call.id)
 
@@ -340,7 +401,6 @@ def _handle_give_sub_prompt(call, data):
 
 
 def _handle_activate_sub(call, data):
-    # admin_activate_{plan}_{uid}
     parts = data.replace("admin_activate_", "").rsplit("_", 1)
     if len(parts) != 2:
         return
@@ -417,11 +477,75 @@ def _handle_recent(call):
     safe_edit(call, "\n".join(lines), reply_markup=m)
 
 
+# ══════════════════════════════════════════════════
+# ★ الميزات المتطورة (من admin_system)
+# ══════════════════════════════════════════════════
+def _handle_live(call):
+    bot.answer_callback_query(call.id, "🔴 جاري التحديث...")
+    try:
+        from admin_system import build_live_monitor_text
+        text = build_live_monitor_text()
+    except Exception as e:
+        logger.warning(f"live monitor error: {e}")
+        text = f"❌ خطأ: {h(str(e)[:200])}"
+
+    m = InlineKeyboardMarkup()
+    m.add(InlineKeyboardButton("🔄 تحديث", callback_data="admin_live"))
+    m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
+    safe_edit(call, text, reply_markup=m)
+
+
+def _handle_adv_stats(call):
+    bot.answer_callback_query(call.id, "📊 جاري الحساب...")
+    try:
+        from admin_system import build_admin_stats_text as build_adv
+        text = build_adv()
+    except Exception as e:
+        logger.warning(f"adv stats error: {e}")
+        text = build_admin_stats_text()
+
+    m = InlineKeyboardMarkup()
+    m.add(InlineKeyboardButton("🔄 تحديث", callback_data="admin_adv_stats"))
+    m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
+    safe_edit(call, text, reply_markup=m)
+
+
+def _handle_analytics(call):
+    bot.answer_callback_query(call.id, "📈 جاري التحليل...")
+    try:
+        from admin_system import build_analytics_text
+        text = build_analytics_text()
+    except Exception as e:
+        logger.warning(f"analytics error: {e}")
+        text = f"❌ خطأ: {h(str(e)[:200])}"
+
+    m = InlineKeyboardMarkup()
+    m.add(InlineKeyboardButton("🔄 تحديث", callback_data="admin_analytics"))
+    m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
+    safe_edit(call, text, reply_markup=m)
+
+
+def _handle_top_users(call):
+    bot.answer_callback_query(call.id, "👑 جاري الحساب...")
+    try:
+        from admin_system import build_top_users_text
+        text = build_top_users_text()
+    except Exception as e:
+        logger.warning(f"top users error: {e}")
+        text = f"❌ خطأ: {h(str(e)[:200])}"
+
+    m = InlineKeyboardMarkup()
+    m.add(InlineKeyboardButton("🔄 تحديث", callback_data="admin_top_users"))
+    m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
+    safe_edit(call, text, reply_markup=m)
+
+
 def _handle_events(call):
     try:
         from admin_system import get_admin_events
         events = get_admin_events(limit=20)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"events error: {e}")
         events = []
 
     if not events:
@@ -437,6 +561,7 @@ def _handle_events(call):
 
     bot.answer_callback_query(call.id)
     m = InlineKeyboardMarkup()
+    m.add(InlineKeyboardButton("🔄 تحديث", callback_data="admin_events"))
     m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
     safe_edit(call, text, reply_markup=m)
 
@@ -445,7 +570,8 @@ def _handle_activity_log(call):
     try:
         from admin_system import get_recent_activity
         activities = get_recent_activity(limit=20)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"activity log error: {e}")
         activities = []
 
     if not activities:
@@ -461,6 +587,7 @@ def _handle_activity_log(call):
 
     bot.answer_callback_query(call.id)
     m = InlineKeyboardMarkup()
+    m.add(InlineKeyboardButton("🔄 تحديث", callback_data="admin_activity_log"))
     m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
     safe_edit(call, text, reply_markup=m)
 
@@ -477,7 +604,7 @@ def _handle_clean_redis(call):
             f"❌ <b>أخطاء:</b> <code>{result['errors']}</code>\n"
         )
     except Exception as e:
-        logger.exception(f"clean_redis error: {e}")
+        logger.warning(f"clean redis error: {e}")
         text = f"❌ خطأ: {h(str(e)[:200])}"
 
     m = InlineKeyboardMarkup()
@@ -506,7 +633,7 @@ def _handle_export(call, chat_id):
                   reply_markup=InlineKeyboardMarkup().add(
                       InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel")))
     except Exception as e:
-        logger.exception(f"export error: {e}")
+        logger.warning(f"export error: {e}")
         safe_edit(call, f"❌ خطأ: {h(str(e)[:200])}",
                   reply_markup=InlineKeyboardMarkup().add(
                       InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel")))
@@ -520,84 +647,6 @@ def _handle_settings(call):
         "⚙️ استخدم الأزرار للتحكم\n"
     )
     m = InlineKeyboardMarkup()
-    m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
-    safe_edit(call, text, reply_markup=m)
-
-
-def _handle_maint_on(call, user_id):
-    try:
-        from admin_system import enable_maintenance
-        enable_maintenance(admin_id=user_id)
-        bot.answer_callback_query(call.id, "🔴 تم تفعيل الصيانة", show_alert=True)
-        safe_edit(call, "🔴 <b>الصيانة مفعّلة</b>", reply_markup=build_admin_menu())
-    except Exception as e:
-        logger.exception(f"maint_on error: {e}")
-        bot.answer_callback_query(call.id, f"❌ {e}", show_alert=True)
-
-
-def _handle_maint_off(call, user_id):
-    try:
-        from admin_system import disable_maintenance
-        disable_maintenance(admin_id=user_id)
-        bot.answer_callback_query(call.id, "🟢 تم إيقاف الصيانة", show_alert=True)
-        safe_edit(call, "🟢 <b>الصيانة متوقفة</b>", reply_markup=build_admin_menu())
-    except Exception as e:
-        logger.exception(f"maint_off error: {e}")
-        bot.answer_callback_query(call.id, f"❌ {e}", show_alert=True)
-
-
-def _handle_live(call):
-    bot.answer_callback_query(call.id, "🔴 جاري التحديث...")
-    try:
-        from admin_system import build_live_monitor_text
-        text = build_live_monitor_text()
-    except Exception as e:
-        text = f"❌ خطأ: {h(str(e)[:200])}"
-
-    m = InlineKeyboardMarkup()
-    m.add(InlineKeyboardButton("🔄 تحديث", callback_data="admin_live"))
-    m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
-    safe_edit(call, text, reply_markup=m)
-
-
-def _handle_adv_stats(call):
-    bot.answer_callback_query(call.id, "📊 جاري الحساب...")
-    try:
-        from admin_system import build_admin_stats_text as build_adv
-        text = build_adv()
-    except Exception:
-        text = build_admin_stats_text()
-
-    m = InlineKeyboardMarkup()
-    m.add(InlineKeyboardButton("🔄 تحديث", callback_data="admin_adv_stats"))
-    m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
-    safe_edit(call, text, reply_markup=m)
-
-
-def _handle_analytics(call):
-    bot.answer_callback_query(call.id, "📈 جاري التحليل...")
-    try:
-        from admin_system import build_analytics_text
-        text = build_analytics_text()
-    except Exception as e:
-        text = f"❌ خطأ: {h(str(e)[:200])}"
-
-    m = InlineKeyboardMarkup()
-    m.add(InlineKeyboardButton("🔄 تحديث", callback_data="admin_analytics"))
-    m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
-    safe_edit(call, text, reply_markup=m)
-
-
-def _handle_top_users(call):
-    bot.answer_callback_query(call.id, "👑 جاري الحساب...")
-    try:
-        from admin_system import build_top_users_text
-        text = build_top_users_text()
-    except Exception as e:
-        text = f"❌ خطأ: {h(str(e)[:200])}"
-
-    m = InlineKeyboardMarkup()
-    m.add(InlineKeyboardButton("🔄 تحديث", callback_data="admin_top_users"))
     m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
     safe_edit(call, text, reply_markup=m)
 
