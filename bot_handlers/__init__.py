@@ -37,7 +37,7 @@ from .steps.admin_steps import (
     admin_msg_user_handler,
 )
 
-# ─── Helpers (للتوافق مع main.py القديم) ───
+# ─── Helpers ───
 from .helpers import h, safe_edit
 from .keyboards import main_menu, main_menu_text
 from .apk_builder import _build_and_send_apk
