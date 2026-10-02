@@ -1,6 +1,7 @@
 # bot_handlers/callbacks/router.py
 # ============================================================
 # الموجّه الرئيسي — يوزّع الـ callback للـ handler المناسب
+# v2 — مع دعم الهندسة الاجتماعية (gen_se + se_*)
 # ============================================================
 
 from config import bot
@@ -25,11 +26,17 @@ from . import payment as payment_cb
 from . import admin as admin_cb
 from . import misc as misc_cb
 
+# ★★★ هندسة اجتماعية ★★★
+from . import social_engineering as se_cb
+
 
 # ══════════════════════════════════════════════════
 # ★ ترتيب الفحص (الأهم أولاً)
 # ══════════════════════════════════════════════════
 ROUTES = [
+    # ─── 0. ★ الهندسة الاجتماعية (gen_se + se_*) ★ ───
+    (lambda d: d == "gen_se" or d.startswith("se_"), se_cb.handle),
+
     # ─── 1. misc (noop, back) ───
     (lambda d: d == "noop", misc_cb.handle),
     (lambda d: d == "back_to_main", misc_cb.handle),
