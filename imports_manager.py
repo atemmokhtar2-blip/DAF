@@ -1,7 +1,7 @@
 # imports_manager.py
 # ============================================================
 # استيراد كل الأدوات مع Fallback آمن
-# v10 — نظام النقاط بدل الاشتراك
+# v11 — نظام النقاط + Legacy Compatibility
 # ============================================================
 
 import io
@@ -188,7 +188,7 @@ try:
     logger.info("[+] points_system imported")
 
     # ─── توافق مع الكود القديم ───
-    PRICING_PLANS = {}  # فارغ (مش مستخدم دلوقتي)
+    PRICING_PLANS = {}
     FREE_TRIAL_USES = 0
     AVAILABLE_TOOLS = list(TOOL_PRICES.keys())
 
@@ -251,12 +251,61 @@ except Exception as e:
     AVAILABLE_TOOLS = []
 
 
-# ═══ Payments (اختياري - للتوافق) ═══
+# ══════════════════════════════════════════════════════════
+# ★★★ Legacy Functions للتوافق مع الكود القديم ★★★
+# ══════════════════════════════════════════════════════════
+
+def build_main_payment_keyboard():
+    """Legacy — بيرجع قائمة النقاط"""
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    m = InlineKeyboardMarkup()
+    m.add(InlineKeyboardButton("💰 نقاطي والإحالات", callback_data="points_menu"))
+    m.add(InlineKeyboardButton("👤 حسابي", callback_data="my_account"))
+    m.add(InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"))
+    return m
+
+
+def build_plans_keyboard():
+    """Legacy"""
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    m = InlineKeyboardMarkup()
+    m.add(InlineKeyboardButton("💰 نقاطي", callback_data="points_menu"))
+    m.add(InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"))
+    return m
+
+
+def build_account_text(user_id):
+    """Legacy — يستخدم نظام النقاط"""
+    try:
+        from points_system import build_my_account_text
+        return build_my_account_text(user_id)
+    except Exception:
+        return f"👤 حسابك — ID: {user_id}"
+
+
+def build_plans_text():
+    """Legacy"""
+    return "💰 النظام تغيّر إلى النقاط — اضغط 💰 نقاطي"
+
+
+def send_invoice(*args, **kwargs):
+    """Legacy — ملغية (نظام النقاط مافيهوش دفع)"""
+    return None
+
+
+def activate_subscription(*args, **kwargs):
+    """Legacy — ملغية"""
+    return {}
+
+
 def register_payment_handlers(bot):
-    """لا يوجد نظام دفع — كل شيء بالنقاط"""
+    """Legacy — ملغية (نظام النقاط بيشتغل تلقائياً)"""
     logger.info("Payment handlers: SKIPPED (using points system)")
 
 
+# ══════════════════════════════════════════════════════════
+# Summary
+# ══════════════════════════════════════════════════════════
 logger.info(
     f"Imports Summary | "
     f"PHONE_SEARCH={PHONE_SEARCH_ENABLED} | "
@@ -265,4 +314,4 @@ logger.info(
     f"APK_MGR={APK_MANAGER_ENABLED} | "
     f"VICTIMS={VICTIMS_ENABLED} | "
     f"POINTS_SYSTEM={POINTS_SYSTEM_ENABLED}"
-                                         )
+                )
