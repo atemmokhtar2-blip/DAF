@@ -1,4 +1,8 @@
 # bot_handlers/callbacks/silent.py
+# ============================================================
+# Silent Collector — مع تأكيد الأدوات
+# ============================================================
+
 from config import bot
 from imports_manager import (
     can_use_tool, consume_usage,
@@ -14,24 +18,31 @@ logger = get_logger("bot_handlers.callbacks.silent")
 
 
 def handle(call, chat_id, user_id, data):
+
+    # ═══════════════════════════════════════════════════
+    # 🎯 طلب Silent → تأكيد
+    # ═══════════════════════════════════════════════════
     if data in ("gen_silent", "silent_new"):
-        check = can_use_tool(chat_id, "silent")
-        if not check["allowed"]:
-            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
-            safe_edit(
-                call,
-                deny_message(check["reason"], chat_id, "silent", check),
-                reply_markup=main_menu(user_id)
-            )
-            return
-        consume_usage(chat_id, "silent")
         bot.answer_callback_query(call.id)
+        try:
+            from points_system import (
+                build_tool_confirm_text,
+                build_tool_confirm_keyboard,
+            )
+            text, can_proceed = build_tool_confirm_text(user_id, "silent")
+            m = build_tool_confirm_keyboard("silent", can_proceed)
+            safe_edit(call, text, reply_markup=m)
+            return
+        except Exception as e:
+            logger.exception(f"tool_confirm silent error: {e}")
+            _start_silent(call, chat_id, user_id, data)
+            return
 
-        prompt = SILENT_PROMPT if data == "gen_silent" else SILENT_NEW_PROMPT
-        msg = bot.send_message(chat_id, prompt, parse_mode="HTML")
-
-        from ..steps.silent_steps import silent_label_handler
-        bot.register_next_step_handler(msg, silent_label_handler)
+    # ═══════════════════════════════════════════════════
+    # بعد التأكيد → ينفذ
+    # ═══════════════════════════════════════════════════
+    if data == "silent_start":
+        _start_silent(call, chat_id, user_id, "gen_silent")
         return
 
     if data == "silent_stats":
@@ -80,3 +91,37 @@ def handle(call, chat_id, user_id, data):
             safe_edit(call, f"❌ خطأ: {h(str(e)[:200])}",
                       reply_markup=silent_collector_panel())
         return
+
+
+def _start_silent(call, chat_id, user_id, data):
+    """يبدأ عملية Silent بعد التأكيد"""
+    bot.answer_callback_query(call.id, "✅ جاري البدء...")
+
+    # ─── تحقق واخصم ───
+    check = can_use_tool(user_id, "silent")
+    if not check["allowed"]:
+        if check["reason"] == "insufficient_points":
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+            m = InlineKeyboardMarkup()
+            m.add(InlineKeyboardButton("💰 نقاطي", callback_data="points_menu"))
+            m.add(InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"))
+            safe_edit(
+                call,
+                f"❌ <b>رصيدك غير كافي!</b>\n"
+                f"━━━━━━━━━━━━━━━━━━\n\n"
+                f"💰 <b>المطلوب:</b> <code>{check.get('cost', 0)}</code> نقطة\n"
+                f"💎 <b>رصيدك:</b> <code>{check.get('balance', 0)}</code> نقطة\n"
+                f"⚠️ <b>ناقصك:</b> <code>{check.get('needed', 0)}</code> نقطة",
+                reply_markup=m
+            )
+            return
+        safe_edit(call, "❌ لا يمكن استخدام الأداة", reply_markup=main_menu(user_id))
+        return
+
+    consume_usage(user_id, "silent")
+
+    prompt = SILENT_NEW_PROMPT if data == "silent_new" else SILENT_PROMPT
+    msg = bot.send_message(chat_id, prompt, parse_mode="HTML")
+
+    from ..steps.silent_steps import silent_label_handler
+    bot.register_next_step_handler(msg, silent_label_handler)
