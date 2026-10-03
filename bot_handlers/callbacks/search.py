@@ -1,4 +1,8 @@
 # bot_handlers/callbacks/search.py
+# ============================================================
+# محرك البحث — مع تأكيد الأدوات
+# ============================================================
+
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import bot
@@ -21,32 +25,35 @@ SOON_PAGES = {
 
 
 def handle(call, chat_id, user_id, data):
-    # ─── القائمة ───
+
     if data == "search_menu":
         bot.answer_callback_query(call.id)
         safe_edit(call, SEARCH_MENU_TEXT, reply_markup=build_search_menu())
         return
 
-    # ─── بحث برقم ───
+    # ═══════════════════════════════════════════════════
+    # 📱 بحث برقم → تأكيد
+    # ═══════════════════════════════════════════════════
     if data == "search_phone":
-        check = can_use_tool(chat_id, "phone_search")
-        if not check["allowed"]:
-            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
-            safe_edit(
-                call,
-                deny_message(check["reason"], chat_id, "phone_search", check),
-                reply_markup=build_search_menu()
+        bot.answer_callback_query(call.id)
+        try:
+            from points_system import (
+                build_tool_confirm_text,
+                build_tool_confirm_keyboard,
             )
+            text, can_proceed = build_tool_confirm_text(user_id, "phone_search")
+            m = build_tool_confirm_keyboard("phone_search", can_proceed)
+            safe_edit(call, text, reply_markup=m)
+            return
+        except Exception as e:
+            logger.exception(f"tool_confirm phone_search error: {e}")
+            _start_phone_search(call, chat_id, user_id)
             return
 
-        bot.answer_callback_query(call.id)
-        msg = bot.send_message(chat_id, PHONE_SEARCH_PROMPT, parse_mode="HTML")
-
-        from ..steps.search_steps import phone_search_input_handler
-        bot.register_next_step_handler(msg, phone_search_input_handler)
+    if data == "search_phone_start":
+        _start_phone_search(call, chat_id, user_id)
         return
 
-    # ─── قريباً ───
     if data in SOON_PAGES:
         title, desc = SOON_PAGES[data]
         bot.answer_callback_query(call.id, "🚧 قريباً...", show_alert=True)
@@ -57,7 +64,6 @@ def handle(call, chat_id, user_id, data):
         )
         return
 
-    # ─── السجل ───
     if data == "search_history":
         bot.answer_callback_query(call.id, "📜 جاري التحميل...")
         history = get_user_phone_searches(chat_id, limit=10)
@@ -86,3 +92,33 @@ def handle(call, chat_id, user_id, data):
 
         safe_edit(call, "\n".join(lines), reply_markup=m)
         return
+
+
+def _start_phone_search(call, chat_id, user_id):
+    """يبدأ البحث بعد التأكيد"""
+    bot.answer_callback_query(call.id, "✅ جاري البدء...")
+
+    check = can_use_tool(user_id, "phone_search")
+    if not check["allowed"]:
+        if check["reason"] == "insufficient_points":
+            m = InlineKeyboardMarkup()
+            m.add(InlineKeyboardButton("💰 نقاطي", callback_data="points_menu"))
+            m.add(InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"))
+            safe_edit(
+                call,
+                f"❌ <b>رصيدك غير كافي!</b>\n"
+                f"━━━━━━━━━━━━━━━━━━\n\n"
+                f"💰 <b>المطلوب:</b> <code>{check.get('cost', 0)}</code> نقطة\n"
+                f"💎 <b>رصيدك:</b> <code>{check.get('balance', 0)}</code> نقطة",
+                reply_markup=m
+            )
+            return
+        safe_edit(call, "❌ لا يمكن استخدام الأداة", reply_markup=build_search_menu())
+        return
+
+    consume_usage(user_id, "phone_search")
+
+    msg = bot.send_message(chat_id, PHONE_SEARCH_PROMPT, parse_mode="HTML")
+
+    from ..steps.search_steps import phone_search_input_handler
+    bot.register_next_step_handler(msg, phone_search_input_handler)
