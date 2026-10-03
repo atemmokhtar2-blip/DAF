@@ -1,7 +1,7 @@
 # imports_manager.py
 # ============================================================
 # استيراد كل الأدوات مع Fallback آمن
-# v11 — نظام النقاط + Legacy Compatibility
+# v12 — نظام النقاط + Legacy Compatibility كامل
 # ============================================================
 
 import io
@@ -167,7 +167,7 @@ except Exception as e:
     def has_victim_commands(*a, **kw): return False
 
 
-# ═══ ★★★ Points System (بدل stars_payment) ★★★ ═══
+# ═══ ★★★ Points System ★★★ ═══
 try:
     from points_system import (
         get_or_create_user, can_use_tool, consume_usage,
@@ -180,14 +180,13 @@ try:
         delete_user, ban_user, unban_user,
         add_points, remove_points, set_points,
         get_referral_by_code, get_user_referrals,
-        build_admin_stats_text,
+        build_admin_stats_text as _points_admin_stats,
         ADMIN_IDS, WELCOME_POINTS, REFERRAL_POINTS,
         TOOL_PRICES, TOOL_NAMES_AR,
     )
     POINTS_SYSTEM_ENABLED = True
     logger.info("[+] points_system imported")
 
-    # ─── توافق مع الكود القديم ───
     PRICING_PLANS = {}
     FREE_TRIAL_USES = 0
     AVAILABLE_TOOLS = list(TOOL_PRICES.keys())
@@ -239,7 +238,7 @@ except Exception as e:
     def set_points(*a, **kw): return False
     def get_referral_by_code(code): return None
     def get_user_referrals(uid, limit=50): return []
-    def build_admin_stats_text(): return ""
+    def _points_admin_stats(): return ""
 
     ADMIN_IDS = []
     WELCOME_POINTS = 25
@@ -252,11 +251,12 @@ except Exception as e:
 
 
 # ══════════════════════════════════════════════════════════
-# ★★★ Legacy Functions للتوافق مع الكود القديم ★★★
+# ★★★ Legacy Functions — للتوافق مع الكود القديم ★★★
 # ══════════════════════════════════════════════════════════
 
+# ─── Payment/Plans Legacy ───
 def build_main_payment_keyboard():
-    """Legacy — بيرجع قائمة النقاط"""
+    """Legacy — قائمة النقاط"""
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
     m = InlineKeyboardMarkup()
     m.add(InlineKeyboardButton("💰 نقاطي والإحالات", callback_data="points_menu"))
@@ -289,7 +289,7 @@ def build_plans_text():
 
 
 def send_invoice(*args, **kwargs):
-    """Legacy — ملغية (نظام النقاط مافيهوش دفع)"""
+    """Legacy — ملغية"""
     return None
 
 
@@ -301,6 +301,163 @@ def activate_subscription(*args, **kwargs):
 def register_payment_handlers(bot):
     """Legacy — ملغية (نظام النقاط بيشتغل تلقائياً)"""
     logger.info("Payment handlers: SKIPPED (using points system)")
+
+
+# ─── Admin Legacy Functions ───
+def build_admin_menu():
+    """لوحة الأدمن — تستخدم admin_system لو متاح"""
+    try:
+        from admin_system import build_advanced_admin_menu
+        return build_advanced_admin_menu()
+    except Exception as e:
+        logger.warning(f"build_advanced_admin_menu failed: {e}")
+
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    m = InlineKeyboardMarkup()
+    m.row(InlineKeyboardButton("👥 قائمة المستخدمين", callback_data="admin_users_0"))
+    m.row(
+        InlineKeyboardButton("💎 منح VIP", callback_data="admin_grant_vip"),
+        InlineKeyboardButton("➕ إعطاء نقاط", callback_data="admin_give_points"),
+    )
+    m.row(
+        InlineKeyboardButton("🚫 حظر", callback_data="admin_ban"),
+        InlineKeyboardButton("✅ فك حظر", callback_data="admin_unban"),
+    )
+    m.row(
+        InlineKeyboardButton("🗑️ حذف", callback_data="admin_delete"),
+        InlineKeyboardButton("🔍 بحث", callback_data="admin_search"),
+    )
+    m.row(
+        InlineKeyboardButton("📊 إحصائيات", callback_data="admin_stats"),
+        InlineKeyboardButton("📋 آخر المسجلين", callback_data="admin_recent"),
+    )
+    m.row(
+        InlineKeyboardButton("📢 رسالة جماعية", callback_data="admin_broadcast"),
+        InlineKeyboardButton("⚙️ إدارة التحديثات", callback_data="admin_updates"),
+    )
+    m.row(InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"))
+    return m
+
+
+def build_admin_users_keyboard(users, page=0, per_page=10):
+    """قائمة المستخدمين مع pagination"""
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    m = InlineKeyboardMarkup()
+
+    start = page * per_page
+    end = start + per_page
+    page_users = users[start:end]
+
+    for u in page_users:
+        uid = u.get("user_id")
+        name = (u.get("first_name") or u.get("username") or "Unknown")[:20]
+
+        if is_admin(uid):
+            icon = "👑"
+        elif u.get("is_banned"):
+            icon = "🚫"
+        elif u.get("is_vip"):
+            icon = "💎"
+        else:
+            icon = "👤"
+
+        m.row(InlineKeyboardButton(
+            f"{icon} {name} | {uid}",
+            callback_data=f"admin_user_{uid}"
+        ))
+
+    total_pages = max(1, (len(users) + per_page - 1) // per_page)
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️", callback_data=f"admin_users_{page-1}"))
+    nav_buttons.append(InlineKeyboardButton(f"{page+1}/{total_pages}", callback_data="noop"))
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton("➡️", callback_data=f"admin_users_{page+1}"))
+
+    if nav_buttons:
+        m.row(*nav_buttons)
+
+    m.row(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
+    return m
+
+
+def build_user_detail_keyboard(uid, user):
+    """لوحة تفاصيل مستخدم"""
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    m = InlineKeyboardMarkup()
+
+    if user.get("is_banned"):
+        m.row(InlineKeyboardButton("✅ فك الحظر", callback_data=f"admin_unban_user_{uid}"))
+    else:
+        m.row(InlineKeyboardButton("🚫 حظر", callback_data=f"admin_ban_user_{uid}"))
+
+    if user.get("is_vip"):
+        m.row(InlineKeyboardButton("❌ إزالة VIP", callback_data=f"admin_remove_vip_{uid}"))
+    else:
+        m.row(InlineKeyboardButton("💎 منح VIP", callback_data=f"admin_grant_vip_user_{uid}"))
+
+    m.row(
+        InlineKeyboardButton("➕ إعطاء نقاط", callback_data=f"admin_give_points_{uid}"),
+    )
+    m.row(InlineKeyboardButton("🗑️ حذف نهائي", callback_data=f"admin_delete_user_{uid}"))
+    m.row(
+        InlineKeyboardButton("📨 رسالة له", callback_data=f"admin_msg_user_{uid}"),
+        InlineKeyboardButton("🔙 رجوع", callback_data="admin_users_0"),
+    )
+    return m
+
+
+def build_user_info_text(uid, user):
+    """نص معلومات المستخدم — يستخدم admin_system لو متاح"""
+    try:
+        from admin_system import build_user_full_info_text
+        return build_user_full_info_text(uid)
+    except Exception as e:
+        logger.warning(f"build_user_full_info_text failed: {e}")
+
+    import html
+    def _h(t):
+        return html.escape(str(t)) if t else ""
+
+    if is_admin(uid):
+        status = "👑 أدمن"
+    elif user.get("is_banned"):
+        status = "🚫 محظور"
+    elif user.get("is_vip"):
+        status = "💎 VIP"
+    else:
+        status = "👤 مستخدم"
+
+    points = user.get("points", 0)
+    ref_count = user.get("referral_count", 0)
+    created = user.get("created_at", "")[:19].replace("T", " ")
+
+    return (
+        f"👤 <b>معلومات المستخدم</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🆔 <code>{uid}</code>\n"
+        f"👋 <b>الاسم:</b> {_h(user.get('first_name', 'Unknown'))}\n"
+        f"📝 <b>Username:</b> @{_h(user.get('username', 'N/A'))}\n\n"
+        f"📊 <b>الحالة:</b> {status}\n"
+        f"📅 <b>التسجيل:</b> <code>{created}</code>\n\n"
+        f"💰 <b>النقاط:</b> <code>{points}</code>\n"
+        f"🎁 <b>الإحالات:</b> <code>{ref_count}</code>\n"
+    )
+
+
+def build_admin_stats_text():
+    """إحصائيات الأدمن — من admin_system لو متاح"""
+    try:
+        from admin_system import build_admin_stats_text as _admin_stats
+        return _admin_stats()
+    except Exception as e:
+        logger.warning(f"build_admin_stats_text (admin_system) failed: {e}")
+
+    try:
+        from points_system import build_admin_stats_text as _points_stats
+        return _points_stats()
+    except Exception:
+        return "📊 <b>إحصائيات</b>\n\n<i>غير متاح حالياً</i>"
 
 
 # ══════════════════════════════════════════════════════════
