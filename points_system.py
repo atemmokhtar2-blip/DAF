@@ -1,6 +1,7 @@
 # points_system.py
 # ============================================================
 # نظام النقاط + الإحالات — بديل نظام الاشتراك المدفوع
+# v2 — مع is_vip
 # ============================================================
 
 import html
@@ -103,6 +104,14 @@ def _generate_ref_code():
 
 def is_admin(user_id):
     return int(user_id) in ADMIN_IDS
+
+
+def is_vip(user_id):
+    """يتحقق لو المستخدم VIP"""
+    user = get_user(user_id)
+    if not user:
+        return False
+    return user.get("is_vip", False)
 
 
 # ============================================================
@@ -280,7 +289,6 @@ def _add_referral_points(referrer_id, new_user_id, new_user_name):
             "points": REFERRAL_POINTS,
             "date": datetime.utcnow().isoformat(),
         })
-        # احتفظ بآخر 50 حدث
         referrer["history"] = referrer["history"][-50:]
 
         # ─── مكافآت تلقائية ───
@@ -453,34 +461,26 @@ def set_points(user_id, amount, reason=""):
 
 
 # ============================================================
-# [6] التحقق من الصلاحيات (بدل الاشتراك المدفوع)
+# [6] التحقق من الصلاحيات
 # ============================================================
 def can_use_tool(user_id, tool):
-    """
-    يتحقق لو المستخدم يقدر يستخدم الأداة
-    بيرجع: {allowed, reason, cost, balance, remaining}
-    """
+    """يتحقق لو المستخدم يقدر يستخدم الأداة"""
     user = get_or_create_user(user_id)
 
     if user.get("is_banned"):
         return {"allowed": False, "reason": "banned"}
 
-    # الأدمن: كل شيء مجاني
     if is_admin(user_id):
         return {"allowed": True, "reason": "admin", "cost": 0, "balance": 999999}
 
-    # VIP: كل شيء مجاني
     if user.get("is_vip"):
         return {"allowed": True, "reason": "vip", "cost": 0, "balance": user.get("points", 0)}
 
-    # السعر
     cost = TOOL_PRICES.get(tool, 0)
 
-    # الأدوات المجانية
     if cost == 0:
         return {"allowed": True, "reason": "free", "cost": 0, "balance": user.get("points", 0)}
 
-    # تحقق من الرصيد
     balance = user.get("points", 0)
 
     if balance >= cost:
@@ -521,7 +521,6 @@ def consume_usage(user_id, tool):
     if balance < cost:
         return False
 
-    # ─── اخصم النقاط ───
     user["points"] = balance - cost
     user["total_points_spent"] = user.get("total_points_spent", 0) + cost
 
@@ -594,7 +593,6 @@ def build_points_menu_text(user_id):
     total_earned = user.get("total_points_earned", 0)
     total_spent = user.get("total_points_spent", 0)
 
-    # ─── الرابط ───
     bot_username = "K_J6bot"
     try:
         from config import bot as cfg_bot
@@ -606,7 +604,6 @@ def build_points_menu_text(user_id):
 
     ref_link = f"https://t.me/{bot_username}?start=ref_{ref_code}"
 
-    # ─── مكافأة الإحالة القادمة ───
     next_bonus = ""
     if ref_count < 5:
         next_bonus = f"🎯 باقي {5 - ref_count} إحالات لتحصل على +{REFERRAL_BONUS_5} نقطة"
@@ -644,7 +641,6 @@ def build_my_account_text(user_id):
     ref_count = user.get("referral_count", 0)
     created = user.get("created_at", "")[:19].replace("T", " ")
 
-    # ─── حالة الحساب ───
     if is_admin(user_id):
         status = "👑 أدمن"
     elif user.get("is_banned"):
@@ -816,4 +812,4 @@ def build_admin_stats_text():
 
         f"━━━ 👑 الأدمن ━━━\n"
         f"<code>{len(ADMIN_IDS)}</code>"
-    )
+                      )
