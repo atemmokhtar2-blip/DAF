@@ -95,6 +95,14 @@ except Exception as e:
     def init_apk_update_routes(app, bot):
         pass
 
+# ═══ Admin Tools ═══
+try:
+    from admin_tools import init_admin_tools
+    init_admin_tools(app, bot)
+    logger.info("[+] Init: admin tools")
+except Exception as e:
+    logger.exception(f"[-] Admin Tools init failed: {e}")
+
 # ============================================================
 # [6] Fake Sites
 # ============================================================
