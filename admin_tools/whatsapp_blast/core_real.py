@@ -1,7 +1,5 @@
 # admin_tools/whatsapp_blast/core_real.py
 # ============================================================
-# WhatsApp Blast — Real Worker Client
-# ============================================================
 
 import os
 import json
@@ -16,7 +14,6 @@ from monitoring import metrics
 logger = get_logger("admin_tools.whatsapp_blast.core_real")
 
 
-# ─── Worker Config ───
 WORKER_URL = os.getenv("WA_WORKER_URL", "").strip()
 WORKER_SECRET = os.getenv("WA_WORKER_SECRET", "").strip()
 
@@ -29,7 +26,6 @@ def _worker_headers():
 
 
 def _worker_request(method, path, data=None, timeout=30):
-    """HTTP request to worker"""
     if not WORKER_URL:
         return {"error": "WORKER_URL not configured"}
 
@@ -45,47 +41,35 @@ def _worker_request(method, path, data=None, timeout=30):
             return {"error": f"HTTP {r.status_code}", "body": r.text[:500]}
 
         return r.json()
-
     except Exception as e:
         logger.exception(f"Worker request failed: {e}")
         return {"error": str(e)}
 
 
-# ============================================================
-# Public API
-# ============================================================
 def worker_health():
-    """فحص الاتصال بالـ worker"""
     return _worker_request("GET", "/health", timeout=10)
 
 
 def worker_init(session_name="default"):
-    """يفعّل الجلسة"""
     return _worker_request("POST", "/init", {"session_name": session_name}, timeout=120)
 
 
 def worker_get_qr():
-    """يرجع الـ QR الحالي"""
     return _worker_request("GET", "/qr", timeout=15)
 
 
 def worker_get_contacts():
-    """يرجع كل جهات الاتصال"""
     return _worker_request("GET", "/contacts", timeout=60)
 
 
 def worker_send_message(to, message):
-    """يبعت رسالة واحدة"""
     return _worker_request("POST", "/send", {"to": to, "message": message})
 
 
 def worker_send_file(to, file_url, filename=None, caption=None):
-    """يبعت ملف"""
     return _worker_request("POST", "/send_file", {
-        "to": to,
-        "file_url": file_url,
-        "filename": filename,
-        "caption": caption
+        "to": to, "file_url": file_url,
+        "filename": filename, "caption": caption
     }, timeout=60)
 
 
@@ -93,36 +77,28 @@ def worker_bulk_blast(contacts, message=None, file_url=None,
                        filename=None, caption=None,
                        delay_min=3000, delay_max=8000,
                        session_id=None):
-    """يبعت لعشرات/مئات"""
     return _worker_request("POST", "/blast", {
-        "contacts": contacts,
-        "message": message,
-        "file_url": file_url,
-        "filename": filename,
-        "caption": caption,
-        "delay_min": delay_min,
-        "delay_max": delay_max,
-        "session_id": session_id
+        "contacts": contacts, "message": message,
+        "file_url": file_url, "filename": filename,
+        "caption": caption, "delay_min": delay_min,
+        "delay_max": delay_max, "session_id": session_id
     }, timeout=30)
 
 
 def worker_blast_status(blast_id):
-    """حالة الإرسال"""
     return _worker_request("GET", f"/blast/{blast_id}", timeout=15)
 
 
 def worker_stop_blast(blast_id):
-    """يوقف الإرسال"""
     return _worker_request("POST", f"/blast/{blast_id}/stop")
 
 
 def worker_logout():
-    """تسجيل خروج"""
     return _worker_request("POST", "/logout", timeout=30)
 
 
 # ============================================================
-# Session State Manager
+# Sessions
 # ============================================================
 _sessions = {}
 _sessions_lock = threading.Lock()
