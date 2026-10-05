@@ -1,7 +1,5 @@
 # admin_tools/whatsapp_blast/bot_handlers_real.py
 # ============================================================
-# Real WhatsApp Blast — Telegram Handlers
-# ============================================================
 
 import io
 import qrcode
@@ -22,7 +20,6 @@ from .core_real import (
 logger = get_logger("admin_tools.whatsapp_blast.bot_real")
 
 
-# ─── Admin IDs ───
 try:
     from points_system import ADMIN_IDS, is_admin
 except Exception:
@@ -31,8 +28,23 @@ except Exception:
         return int(uid) in ADMIN_IDS
 
 
+# ─── State Management ───
+_states = {}
+
+
+def _get_state(admin_id):
+    return _states.get(admin_id)
+
+
+def _set_state(admin_id, session_id):
+    _states[admin_id] = {"session_id": session_id}
+
+
 def register_whatsapp_blast_real_handlers(bot):
 
+    # ═══════════════════════════════════════════════════
+    # Open Menu
+    # ═══════════════════════════════════════════════════
     @bot.callback_query_handler(func=lambda c: c.data == "admin_wb_menu")
     def wb_menu(call):
         if not is_admin(call.from_user.id):
@@ -41,6 +53,9 @@ def register_whatsapp_blast_real_handlers(bot):
         bot.answer_callback_query(call.id)
         _show_main_menu(call.message.chat.id)
 
+    # ═══════════════════════════════════════════════════
+    # Main Router
+    # ═══════════════════════════════════════════════════
     @bot.callback_query_handler(func=lambda c: c.data.startswith("wbr_"))
     def wb_real_callback(call):
         if not is_admin(call.from_user.id):
@@ -51,18 +66,23 @@ def register_whatsapp_blast_real_handlers(bot):
         chat_id = call.message.chat.id
         admin_id = call.from_user.id
 
-        # ─── New Session ───
+        # ─── Sessions ───
         if data == "wbr_new":
             bot.answer_callback_query(call.id)
             _create_session(chat_id, admin_id)
             return
 
-        # ─── Health Check ───
+        if data == "wbr_list":
+            bot.answer_callback_query(call.id)
+            _list_sessions(chat_id, admin_id)
+            return
+
+        # ─── Health ───
         if data == "wbr_health":
             _check_health(call)
             return
 
-        # ─── Init / QR ───
+        # ─── Init & QR ───
         if data == "wbr_init":
             _init_worker(call)
             return
@@ -80,7 +100,7 @@ def register_whatsapp_blast_real_handlers(bot):
             _export_contacts(call)
             return
 
-        # ─── Send Options ───
+        # ─── Set Message / File ───
         if data == "wbr_send_text":
             bot.answer_callback_query(call.id)
             _prompt_text_message(chat_id)
@@ -96,6 +116,15 @@ def register_whatsapp_blast_real_handlers(bot):
             _start_blast(call)
             return
 
+        if data == "wbr_confirm_blast":
+            _confirm_blast(call)
+            return
+
+        if data == "wbr_cancel":
+            bot.answer_callback_query(call.id, "❌ اتلغى")
+            bot.send_message(chat_id, "❌ اتلغى", reply_markup=_main_keyboard())
+            return
+
         if data == "wbr_status":
             _show_status(call)
             return
@@ -109,7 +138,9 @@ def register_whatsapp_blast_real_handlers(bot):
             _logout(call)
             return
 
-    # ─── Text message input ───
+    # ═══════════════════════════════════════════════════
+    # Step Handlers
+    # ═══════════════════════════════════════════════════
     def _prompt_text_message(chat_id):
         msg = bot.send_message(
             chat_id,
@@ -125,21 +156,17 @@ def register_whatsapp_blast_real_handlers(bot):
         state = _get_state(message.from_user.id)
         if not state:
             return
-
         session = get_real_session(state["session_id"])
         if session:
             session.message_text = message.text
             session.add_log(f"💬 Message set: {message.text[:50]}...")
-
         bot.send_message(
             message.chat.id,
-            f"✅ <b>تم تسجيل الرسالة</b>\n\n"
-            f"<i>{message.text[:200]}</i>",
+            f"✅ <b>تم تسجيل الرسالة</b>\n\n<i>{message.text[:200]}</i>",
             parse_mode="HTML",
             reply_markup=_main_keyboard()
         )
 
-    # ─── File URL input ───
     def _prompt_file_url(chat_id):
         msg = bot.send_message(
             chat_id,
@@ -155,43 +182,27 @@ def register_whatsapp_blast_real_handlers(bot):
         state = _get_state(message.from_user.id)
         if not state:
             return
-
         session = get_real_session(state["session_id"])
         if session:
             session.payload_url = message.text.strip()
             session.add_log(f"📎 File URL: {message.text[:50]}...")
-
         bot.send_message(
             message.chat.id,
-            f"✅ <b>تم تسجيل رابط الملف</b>\n\n"
-            f"<code>{message.text[:200]}</code>",
+            f"✅ <b>تم تسجيل رابط الملف</b>\n\n<code>{message.text[:200]}</code>",
             parse_mode="HTML",
             reply_markup=_main_keyboard()
         )
 
 
 # ============================================================
-# State Management
-# ============================================================
-_states = {}
-
-
-def _get_state(admin_id):
-    return _states.get(admin_id)
-
-
-def _set_state(admin_id, session_id):
-    _states[admin_id] = {"session_id": session_id}
-
-
-# ============================================================
-# UI
+# UI Functions
 # ============================================================
 def _show_main_menu(chat_id):
     m = InlineKeyboardMarkup()
     m.add(InlineKeyboardButton("🆕 جلسة جديدة", callback_data="wbr_new"))
+    m.add(InlineKeyboardButton("📋 جلساتي", callback_data="wbr_list"))
     m.add(InlineKeyboardButton("💚 فحص الـ Worker", callback_data="wbr_health"))
-    m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
+    m.add(InlineKeyboardButton("🔙 رجوع للوحة الأدمن", callback_data="admin_panel"))
 
     bot.send_message(
         chat_id,
@@ -219,9 +230,7 @@ def _main_keyboard():
         InlineKeyboardButton("✉️ تحديد رسالة", callback_data="wbr_send_text"),
         InlineKeyboardButton("📎 تحديد ملف", callback_data="wbr_send_file"),
     )
-    m.row(
-        InlineKeyboardButton("🚀 بدء الإرسال", callback_data="wbr_blast"),
-    )
+    m.row(InlineKeyboardButton("🚀 بدء الإرسال", callback_data="wbr_blast"))
     m.row(
         InlineKeyboardButton("📊 حالة", callback_data="wbr_status"),
         InlineKeyboardButton("⏹️ إيقاف", callback_data="wbr_stop"),
@@ -236,7 +245,6 @@ def _main_keyboard():
 def _create_session(chat_id, admin_id):
     session = create_real_session(admin_id)
     _set_state(admin_id, session.session_id)
-
     bot.send_message(
         chat_id,
         f"✅ <b>جلسة جديدة</b>\n"
@@ -244,6 +252,28 @@ def _create_session(chat_id, admin_id):
         f"الخطوة التالية: <b>تهيئة Worker</b>",
         parse_mode="HTML",
         reply_markup=_main_keyboard()
+    )
+
+
+def _list_sessions(chat_id, admin_id):
+    sessions = get_admin_real_sessions(admin_id)
+    if not sessions:
+        bot.send_message(chat_id, "📭 مفيش جلسات", reply_markup=_main_keyboard())
+        return
+
+    m = InlineKeyboardMarkup()
+    for s in sessions:
+        m.add(InlineKeyboardButton(
+            f"⚡ {s.session_id[:8]} | {s.status}",
+            callback_data=f"wbr_view_{s.session_id}"
+        ))
+    m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_wb_menu"))
+
+    bot.send_message(
+        chat_id,
+        f"📋 <b>جلساتي ({len(sessions)})</b>",
+        parse_mode="HTML",
+        reply_markup=m
     )
 
 
@@ -255,9 +285,7 @@ def _check_health(call):
         text = (
             f"❌ <b>الـ Worker مش متاح</b>\n\n"
             f"<code>{result['error']}</code>\n\n"
-            f"💡 تأكد من:\n"
-            f"• WA_WORKER_URL\n"
-            f"• WA_WORKER_SECRET"
+            f"💡 تأكد من WA_WORKER_URL و WA_WORKER_SECRET"
         )
     else:
         ready = result.get("ready", False)
@@ -274,10 +302,8 @@ def _check_health(call):
 
 def _init_worker(call):
     bot.answer_callback_query(call.id, "⏳ تهيئة...")
-
     state = _get_state(call.from_user.id)
     session_name = state["session_id"] if state else "default"
-
     result = worker_init(session_name)
 
     if "error" in result:
@@ -312,10 +338,8 @@ def _send_qr(call):
 
     if result.get("ready"):
         bot.send_message(call.message.chat.id,
-                         "✅ <b>الجلسة مسجلة بالفعل!</b>\n\n"
-                         "مش محتاج QR.",
-                         parse_mode="HTML",
-                         reply_markup=_main_keyboard())
+                         "✅ <b>الجلسة مسجلة بالفعل!</b>",
+                         parse_mode="HTML", reply_markup=_main_keyboard())
         return
 
     qr_text = result.get("qr")
@@ -325,7 +349,6 @@ def _send_qr(call):
                          reply_markup=_main_keyboard())
         return
 
-    # ─── Generate QR Image ───
     try:
         qr_img = qrcode.make(qr_text)
         buf = io.BytesIO()
@@ -334,8 +357,7 @@ def _send_qr(call):
         buf.name = "whatsapp_qr.png"
 
         bot.send_photo(
-            call.message.chat.id,
-            buf,
+            call.message.chat.id, buf,
             caption=(
                 "📱 <b>QR Code للواتساب</b>\n"
                 "━━━━━━━━━━━━━━━━━━\n\n"
@@ -355,12 +377,10 @@ def _send_qr(call):
 
 def _fetch_contacts(call):
     bot.answer_callback_query(call.id, "⏳ جاري الجلب...")
-
     state = _get_state(call.from_user.id)
     if not state:
         bot.send_message(call.message.chat.id, "❌ ابدأ جلسة أولاً")
         return
-
     session = get_real_session(state["session_id"])
     if not session:
         bot.send_message(call.message.chat.id, "❌ الجلسة مش موجودة")
@@ -385,11 +405,8 @@ def _fetch_contacts(call):
         f"━━━━━━━━━━━━━━━━━━\n\n"
         f"📊 <b>العدد:</b> <code>{len(contacts)}</code>\n\n"
     )
-
-    # ─── Preview ───
     for c in contacts[:5]:
         text += f"• {c.get('name', 'Unknown')} — <code>{c.get('number', '')}</code>\n"
-
     if len(contacts) > 5:
         text += f"\n<i>... و {len(contacts) - 5} آخرين</i>"
 
@@ -399,17 +416,14 @@ def _fetch_contacts(call):
 
 def _export_contacts(call):
     bot.answer_callback_query(call.id)
-
     state = _get_state(call.from_user.id)
     if not state:
         return
-
     session = get_real_session(state["session_id"])
     if not session or not session.contacts:
         bot.send_message(call.message.chat.id, "❌ مفيش جهات اتصال")
         return
 
-    # ─── TXT file ───
     lines = []
     for c in session.contacts:
         lines.append(f"{c.get('number', '')} | {c.get('name', '')}")
@@ -424,30 +438,24 @@ def _export_contacts(call):
 
 def _start_blast(call):
     bot.answer_callback_query(call.id)
-
     state = _get_state(call.from_user.id)
     if not state:
         return
-
     session = get_real_session(state["session_id"])
     if not session:
         return
 
     if not session.contacts:
-        bot.answer_callback_query(call.id, "❌ اجلب جهات الاتصال أولاً",
-                                  show_alert=True)
+        bot.answer_callback_query(call.id, "❌ اجلب جهات الاتصال أولاً", show_alert=True)
         return
 
     if not session.message_text and not session.payload_url:
-        bot.answer_callback_query(call.id, "❌ حدد رسالة أو ملف",
-                                  show_alert=True)
+        bot.answer_callback_query(call.id, "❌ حدد رسالة أو ملف", show_alert=True)
         return
 
-    # ─── Confirmation ───
     m = InlineKeyboardMarkup()
     m.row(
-        InlineKeyboardButton("✅ تأكيد الإرسال",
-                             callback_data="wbr_confirm_blast"),
+        InlineKeyboardButton("✅ تأكيد الإرسال", callback_data="wbr_confirm_blast"),
         InlineKeyboardButton("❌ إلغاء", callback_data="wbr_cancel"),
     )
 
@@ -464,17 +472,15 @@ def _start_blast(call):
     )
 
 
-@bot.callback_query_handler(func=lambda c: c.data == "wbr_confirm_blast")
 def _confirm_blast(call):
-    if not is_admin(call.from_user.id):
+    bot.answer_callback_query(call.id, "🚀 بدء...")
+    state = _get_state(call.from_user.id)
+    if not state:
+        return
+    session = get_real_session(state["session_id"])
+    if not session:
         return
 
-    bot.answer_callback_query(call.id, "🚀 بدء...")
-
-    state = _get_state(call.from_user.id)
-    session = get_real_session(state["session_id"])
-
-    # ─── Build contacts list for worker ───
     contact_ids = [{"id": c["id"]} for c in session.contacts if c.get("id")]
 
     result = worker_bulk_blast(
@@ -508,16 +514,8 @@ def _confirm_blast(call):
     )
 
 
-@bot.callback_query_handler(func=lambda c: c.data == "wbr_cancel")
-def _cancel_blast(call):
-    bot.answer_callback_query(call.id, "❌ اتلغى")
-    bot.send_message(call.message.chat.id, "❌ اتلغى",
-                     reply_markup=_main_keyboard())
-
-
 def _show_status(call):
     bot.answer_callback_query(call.id, "🔄 تحديث...")
-
     state = _get_state(call.from_user.id)
     session = get_real_session(state["session_id"]) if state else None
 
@@ -538,7 +536,6 @@ def _show_status(call):
     failed = result.get("failed", 0)
     status = result.get("status", "unknown")
 
-    # Update local
     session.sent = sent
     session.failed = failed
     session.status = status
@@ -551,29 +548,24 @@ def _show_status(call):
         f"✅ <b>نجح:</b> <code>{sent}</code>\n"
         f"❌ <b>فشل:</b> <code>{failed}</code>\n"
     )
-
     bot.send_message(call.message.chat.id, text,
                      parse_mode="HTML", reply_markup=_main_keyboard())
 
 
 def _stop_blast(call):
     bot.answer_callback_query(call.id, "⏹️ جاري الإيقاف...")
-
     state = _get_state(call.from_user.id)
     session = get_real_session(state["session_id"]) if state else None
-
     if not session or not session.blast_id:
         return
 
     result = worker_stop_blast(session.blast_id)
-
     if "error" in result:
         bot.send_message(call.message.chat.id, f"❌ {result['error']}")
         return
 
     session.status = "stopped"
     session.add_log("⏹️ Blast stopped")
-
     bot.send_message(call.message.chat.id, "⏹️ <b>تم الإيقاف</b>",
                      parse_mode="HTML", reply_markup=_main_keyboard())
 
@@ -581,7 +573,6 @@ def _stop_blast(call):
 def _logout(call):
     bot.answer_callback_query(call.id, "🚪 جاري الخروج...")
     result = worker_logout()
-
     bot.send_message(call.message.chat.id,
                      "🚪 <b>تم تسجيل الخروج</b>",
                      parse_mode="HTML", reply_markup=_main_keyboard())
