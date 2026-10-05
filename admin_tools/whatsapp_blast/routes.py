@@ -15,7 +15,6 @@ def register_whatsapp_blast_routes(app):
 
     @app.route('/admin/wb/webhook', methods=['POST'])
     def wb_webhook():
-        """يستقبل events من الـ Worker"""
         secret = request.headers.get('X-Worker-Secret', '')
         if secret != WORKER_SECRET:
             return jsonify({"error": "forbidden"}), 403
@@ -26,7 +25,6 @@ def register_whatsapp_blast_routes(app):
 
         logger.info(f"[WB Webhook] {event}")
 
-        # ممكن نرسل notification للأدمن هنا
         try:
             from config import bot
             from points_system import ADMIN_IDS
@@ -55,7 +53,6 @@ def register_whatsapp_blast_routes(app):
                         )
                     except Exception:
                         pass
-
         except Exception as e:
             logger.warning(f"Webhook notify error: {e}")
 
