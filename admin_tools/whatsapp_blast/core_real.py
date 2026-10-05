@@ -14,8 +14,23 @@ from monitoring import metrics
 logger = get_logger("admin_tools.whatsapp_blast.core_real")
 
 
+# ══════════════════════════════════════════════════════
+# Worker Config
+# ══════════════════════════════════════════════════════
 WORKER_URL = os.getenv("WA_WORKER_URL", "").strip()
 WORKER_SECRET = os.getenv("WA_WORKER_SECRET", "").strip()
+
+# ─── تأكد من وجود https:// ───
+if WORKER_URL and not WORKER_URL.startswith(("http://", "https://")):
+    WORKER_URL = "https://" + WORKER_URL
+    logger.info(f"[WB] Auto-prepended https:// → {WORKER_URL}")
+
+# ─── شيل / الأخيرة ───
+if WORKER_URL.endswith("/"):
+    WORKER_URL = WORKER_URL[:-1]
+
+logger.info(f"[WB] WORKER_URL = {WORKER_URL or 'NOT SET'}")
+logger.info(f"[WB] WORKER_SECRET = {'SET' if WORKER_SECRET else 'NOT SET'}")
 
 
 def _worker_headers():
@@ -27,9 +42,14 @@ def _worker_headers():
 
 def _worker_request(method, path, data=None, timeout=30):
     if not WORKER_URL:
-        return {"error": "WORKER_URL not configured"}
+        return {"error": "WORKER_URL not configured — ضيف WA_WORKER_URL في ENV"}
 
-    url = f"{WORKER_URL.rstrip('/')}{path}"
+    if not WORKER_SECRET:
+        return {"error": "WORKER_SECRET not configured — ضيف WA_WORKER_SECRET في ENV"}
+
+    url = f"{WORKER_URL}{path}"
+
+    logger.debug(f"[WB] {method} {url}")
 
     try:
         if method == "GET":
@@ -41,11 +61,19 @@ def _worker_request(method, path, data=None, timeout=30):
             return {"error": f"HTTP {r.status_code}", "body": r.text[:500]}
 
         return r.json()
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"[WB] Connection error: {e}")
+        return {"error": f"Connection failed: {WORKER_URL}"}
+    except requests.exceptions.Timeout:
+        return {"error": "Request timeout"}
     except Exception as e:
         logger.exception(f"Worker request failed: {e}")
         return {"error": str(e)}
 
 
+# ══════════════════════════════════════════════════════
+# Public API
+# ══════════════════════════════════════════════════════
 def worker_health():
     return _worker_request("GET", "/health", timeout=10)
 
@@ -97,9 +125,9 @@ def worker_logout():
     return _worker_request("POST", "/logout", timeout=30)
 
 
-# ============================================================
+# ══════════════════════════════════════════════════════
 # Sessions
-# ============================================================
+# ══════════════════════════════════════════════════════
 _sessions = {}
 _sessions_lock = threading.Lock()
 
