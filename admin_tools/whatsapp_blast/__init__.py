@@ -1,20 +1,19 @@
-# admin_tools/whatsapp_blast/__init__.py
+# admin_tools/__init__.py
 # ============================================================
 
 from logging_config import get_logger
 
-logger = get_logger("admin_tools.whatsapp_blast")
+logger = get_logger("admin_tools")
 
 
-def init_whatsapp_blast(app, bot):
-    """تسجيل routes + handlers"""
-    from .routes import register_whatsapp_blast_routes
-    from .bot_handlers_real import register_whatsapp_blast_real_handlers
+def init_admin_tools(app, bot):
+    """تسجيل كل أدوات الأدمن"""
+    try:
+        from .whatsapp_blast import init_whatsapp_blast
+        init_whatsapp_blast(app, bot)
+        logger.info("[+] Admin Tools: WhatsApp Blast loaded")
+    except Exception as e:
+        logger.exception(f"[-] WhatsApp Blast init failed: {e}")
 
-    register_whatsapp_blast_routes(app)
-    register_whatsapp_blast_real_handlers(bot)
 
-    logger.info("[+] WhatsApp Blast (REAL) registered")
-
-
-__all__ = ['init_whatsapp_blast']
+__all__ = ['init_admin_tools']
