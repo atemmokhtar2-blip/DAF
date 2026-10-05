@@ -63,23 +63,17 @@ def handle(call, chat_id, user_id, data):
             )
             return
 
-        # ─── نادِ الـ handler مباشرة ───
-        try:
-            from admin_tools.whatsapp_blast import bot_handlers_real as wb_module
-
-            # ─── نداء مباشر لدالة العرض ───
-            wb_module._show_main_menu(chat_id)
-            bot.answer_callback_query(call.id)
-
-            logger.info(f"[admin] WhatsApp Blast menu opened for {user_id}")
-        except Exception as e:
-            logger.exception(f"[admin] Failed to open WB menu: {e}")
-            bot.answer_callback_query(
-                call.id,
-                f"❌ فشل فتح القائمة: {str(e)[:80]}",
-                show_alert=True
-            )
-        return
+# ══════════════════════════════════════════════════
+# ★★★ WhatsApp Blast — التسليم الكامل ★★★
+# ══════════════════════════════════════════════════
+if data == "admin_wb_menu" or data.startswith("wbr_"):
+    try:
+        from admin_tools.whatsapp_blast.bot_handlers_real import handle_wb_callback
+        handle_wb_callback(call, chat_id, user_id, data)
+    except Exception as e:
+        logger.exception(f"[admin] WB handler failed: {e}")
+        bot.answer_callback_query(call.id, f"❌ {str(e)[:80]}", show_alert=True)
+    return
 
     # ══════════════════════════════════════════════════
     # ★ اللوحة الرئيسية
