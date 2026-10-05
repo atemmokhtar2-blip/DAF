@@ -8,6 +8,7 @@ import io
 import time
 import redis
 import telebot
+from cryptography.fernet import Fernet
 
 from logging_config import get_logger
 
@@ -105,3 +106,6 @@ if not BOT_TOKEN:
 
 bot = telebot.TeleBot(BOT_TOKEN)
 logger.info(f"Bot initialized: {BOT_TOKEN[:15]}...{BOT_TOKEN[-5:]}")
+
+# [4] Encryption
+MASTER_CRYPTO_KEY = os.getenv("MASTER_CRYPTO_KEY", "3uKwB8Zpu1e6_H6WvBYU13diP5Wq-l1bjq_8mZdO4Sw=")
