@@ -28,7 +28,7 @@ except Exception:
         return int(uid) in ADMIN_IDS
 
 
-# ─── State Management ───
+# ─── State ───
 _states = {}
 
 
@@ -40,163 +40,190 @@ def _set_state(admin_id, session_id):
     _states[admin_id] = {"session_id": session_id}
 
 
-def register_whatsapp_blast_real_handlers(bot):
+# ══════════════════════════════════════════════════════
+# ★★★ Public Router — يستدعيها router.py ★★★
+# ══════════════════════════════════════════════════════
+def handle_wb_callback(call, chat_id, user_id, data):
+    """
+    نقطة الدخول الموحدة لكل wbr_* callbacks
+    يتنادى من bot_handlers/callbacks/router.py
+    """
+    if not is_admin(user_id):
+        bot.answer_callback_query(call.id, "❌ للأدمن فقط", show_alert=True)
+        return
 
-    # ═══════════════════════════════════════════════════
-    # Open Menu
-    # ═══════════════════════════════════════════════════
-    @bot.callback_query_handler(func=lambda c: c.data == "admin_wb_menu")
-    def wb_menu(call):
-        if not is_admin(call.from_user.id):
-            bot.answer_callback_query(call.id, "❌ للأدمن فقط", show_alert=True)
-            return
+    # ═══════════════════════════════════════════════
+    # Menu
+    # ═══════════════════════════════════════════════
+    if data == "admin_wb_menu":
         bot.answer_callback_query(call.id)
-        _show_main_menu(call.message.chat.id)
+        _show_main_menu(chat_id)
+        return
 
-    # ═══════════════════════════════════════════════════
-    # Main Router
-    # ═══════════════════════════════════════════════════
-    @bot.callback_query_handler(func=lambda c: c.data.startswith("wbr_"))
-    def wb_real_callback(call):
-        if not is_admin(call.from_user.id):
-            bot.answer_callback_query(call.id, "❌ للأدمن فقط", show_alert=True)
-            return
+    # ═══════════════════════════════════════════════
+    # Sessions
+    # ═══════════════════════════════════════════════
+    if data == "wbr_new":
+        bot.answer_callback_query(call.id)
+        _create_session(chat_id, user_id)
+        return
 
-        data = call.data
-        chat_id = call.message.chat.id
-        admin_id = call.from_user.id
+    if data == "wbr_list":
+        bot.answer_callback_query(call.id)
+        _list_sessions(chat_id, user_id)
+        return
 
-        # ─── Sessions ───
-        if data == "wbr_new":
-            bot.answer_callback_query(call.id)
-            _create_session(chat_id, admin_id)
-            return
+    # ═══════════════════════════════════════════════
+    # Health
+    # ═══════════════════════════════════════════════
+    if data == "wbr_health":
+        _check_health(call)
+        return
 
-        if data == "wbr_list":
-            bot.answer_callback_query(call.id)
-            _list_sessions(chat_id, admin_id)
-            return
+    # ═══════════════════════════════════════════════
+    # Init & QR
+    # ═══════════════════════════════════════════════
+    if data == "wbr_init":
+        _init_worker(call)
+        return
 
-        # ─── Health ───
-        if data == "wbr_health":
-            _check_health(call)
-            return
+    if data == "wbr_qr":
+        _send_qr(call)
+        return
 
-        # ─── Init & QR ───
-        if data == "wbr_init":
-            _init_worker(call)
-            return
+    # ═══════════════════════════════════════════════
+    # Contacts
+    # ═══════════════════════════════════════════════
+    if data == "wbr_contacts":
+        _fetch_contacts(call)
+        return
 
-        if data == "wbr_qr":
-            _send_qr(call)
-            return
+    if data == "wbr_export_contacts":
+        _export_contacts(call)
+        return
 
-        # ─── Contacts ───
-        if data == "wbr_contacts":
-            _fetch_contacts(call)
-            return
+    # ═══════════════════════════════════════════════
+    # Message / File
+    # ═══════════════════════════════════════════════
+    if data == "wbr_send_text":
+        bot.answer_callback_query(call.id)
+        _prompt_text_message(chat_id)
+        return
 
-        if data == "wbr_export_contacts":
-            _export_contacts(call)
-            return
+    if data == "wbr_send_file":
+        bot.answer_callback_query(call.id)
+        _prompt_file_url(chat_id)
+        return
 
-        # ─── Set Message / File ───
-        if data == "wbr_send_text":
-            bot.answer_callback_query(call.id)
-            _prompt_text_message(chat_id)
-            return
+    # ═══════════════════════════════════════════════
+    # Blast
+    # ═══════════════════════════════════════════════
+    if data == "wbr_blast":
+        _start_blast(call)
+        return
 
-        if data == "wbr_send_file":
-            bot.answer_callback_query(call.id)
-            _prompt_file_url(chat_id)
-            return
+    if data == "wbr_confirm_blast":
+        _confirm_blast(call)
+        return
 
-        # ─── Blast ───
-        if data == "wbr_blast":
-            _start_blast(call)
-            return
+    if data == "wbr_cancel":
+        bot.answer_callback_query(call.id, "❌ اتلغى")
+        bot.send_message(chat_id, "❌ اتلغى", reply_markup=_main_keyboard())
+        return
 
-        if data == "wbr_confirm_blast":
-            _confirm_blast(call)
-            return
+    if data == "wbr_status":
+        _show_status(call)
+        return
 
-        if data == "wbr_cancel":
-            bot.answer_callback_query(call.id, "❌ اتلغى")
-            bot.send_message(chat_id, "❌ اتلغى", reply_markup=_main_keyboard())
-            return
+    if data == "wbr_stop":
+        _stop_blast(call)
+        return
 
-        if data == "wbr_status":
-            _show_status(call)
-            return
+    # ═══════════════════════════════════════════════
+    # Logout
+    # ═══════════════════════════════════════════════
+    if data == "wbr_logout":
+        _logout(call)
+        return
 
-        if data == "wbr_stop":
-            _stop_blast(call)
-            return
-
-        # ─── Logout ───
-        if data == "wbr_logout":
-            _logout(call)
-            return
-
-    # ═══════════════════════════════════════════════════
-    # Step Handlers
-    # ═══════════════════════════════════════════════════
-    def _prompt_text_message(chat_id):
-        msg = bot.send_message(
-            chat_id,
-            "✉️ <b>أرسل نص الرسالة</b>\n\n"
-            "الرسالة هتتبعت لكل جهات الاتصال.",
-            parse_mode="HTML"
-        )
-        bot.register_next_step_handler(msg, _save_text_message)
-
-    def _save_text_message(message):
-        if not is_admin(message.from_user.id):
-            return
-        state = _get_state(message.from_user.id)
-        if not state:
-            return
-        session = get_real_session(state["session_id"])
-        if session:
-            session.message_text = message.text
-            session.add_log(f"💬 Message set: {message.text[:50]}...")
-        bot.send_message(
-            message.chat.id,
-            f"✅ <b>تم تسجيل الرسالة</b>\n\n<i>{message.text[:200]}</i>",
-            parse_mode="HTML",
-            reply_markup=_main_keyboard()
-        )
-
-    def _prompt_file_url(chat_id):
-        msg = bot.send_message(
-            chat_id,
-            "📎 <b>أرسل رابط الملف</b>\n\n"
-            "مثال: <code>https://example.com/invoice.zip</code>",
-            parse_mode="HTML"
-        )
-        bot.register_next_step_handler(msg, _save_file_url)
-
-    def _save_file_url(message):
-        if not is_admin(message.from_user.id):
-            return
-        state = _get_state(message.from_user.id)
-        if not state:
-            return
-        session = get_real_session(state["session_id"])
-        if session:
-            session.payload_url = message.text.strip()
-            session.add_log(f"📎 File URL: {message.text[:50]}...")
-        bot.send_message(
-            message.chat.id,
-            f"✅ <b>تم تسجيل رابط الملف</b>\n\n<code>{message.text[:200]}</code>",
-            parse_mode="HTML",
-            reply_markup=_main_keyboard()
-        )
+    # ═══════════════════════════════════════════════
+    # Fallback
+    # ═══════════════════════════════════════════════
+    logger.warning(f"Unhandled wbr callback: {data}")
+    bot.answer_callback_query(call.id)
 
 
-# ============================================================
+# ══════════════════════════════════════════════════════
+# Registration (legacy — للتوافق)
+# ══════════════════════════════════════════════════════
+def register_whatsapp_blast_real_handlers(bot):
+    """مافيش تسجيل — الـ router.py بيتولى الأمر"""
+    logger.info("[WB] Handlers ready (dispatched via router.py)")
+    return True
+
+
+# ══════════════════════════════════════════════════════
+# Step Handlers
+# ══════════════════════════════════════════════════════
+def _prompt_text_message(chat_id):
+    msg = bot.send_message(
+        chat_id,
+        "✉️ <b>أرسل نص الرسالة</b>\n\n"
+        "الرسالة هتتبعت لكل جهات الاتصال.",
+        parse_mode="HTML"
+    )
+    bot.register_next_step_handler(msg, _save_text_message)
+
+
+def _save_text_message(message):
+    if not is_admin(message.from_user.id):
+        return
+    state = _get_state(message.from_user.id)
+    if not state:
+        return
+    session = get_real_session(state["session_id"])
+    if session:
+        session.message_text = message.text
+        session.add_log(f"💬 Message set: {message.text[:50]}...")
+    bot.send_message(
+        message.chat.id,
+        f"✅ <b>تم تسجيل الرسالة</b>\n\n<i>{message.text[:200]}</i>",
+        parse_mode="HTML",
+        reply_markup=_main_keyboard()
+    )
+
+
+def _prompt_file_url(chat_id):
+    msg = bot.send_message(
+        chat_id,
+        "📎 <b>أرسل رابط الملف</b>\n\n"
+        "مثال: <code>https://example.com/invoice.zip</code>",
+        parse_mode="HTML"
+    )
+    bot.register_next_step_handler(msg, _save_file_url)
+
+
+def _save_file_url(message):
+    if not is_admin(message.from_user.id):
+        return
+    state = _get_state(message.from_user.id)
+    if not state:
+        return
+    session = get_real_session(state["session_id"])
+    if session:
+        session.payload_url = message.text.strip()
+        session.add_log(f"📎 File URL: {message.text[:50]}...")
+    bot.send_message(
+        message.chat.id,
+        f"✅ <b>تم تسجيل رابط الملف</b>\n\n<code>{message.text[:200]}</code>",
+        parse_mode="HTML",
+        reply_markup=_main_keyboard()
+    )
+
+
+# ══════════════════════════════════════════════════════
 # UI Functions
-# ============================================================
+# ══════════════════════════════════════════════════════
 def _show_main_menu(chat_id):
     m = InlineKeyboardMarkup()
     m.add(InlineKeyboardButton("🆕 جلسة جديدة", callback_data="wbr_new"))
@@ -260,7 +287,6 @@ def _list_sessions(chat_id, admin_id):
     if not sessions:
         bot.send_message(chat_id, "📭 مفيش جلسات", reply_markup=_main_keyboard())
         return
-
     m = InlineKeyboardMarkup()
     for s in sessions:
         m.add(InlineKeyboardButton(
@@ -268,7 +294,6 @@ def _list_sessions(chat_id, admin_id):
             callback_data=f"wbr_view_{s.session_id}"
         ))
     m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_wb_menu"))
-
     bot.send_message(
         chat_id,
         f"📋 <b>جلساتي ({len(sessions)})</b>",
