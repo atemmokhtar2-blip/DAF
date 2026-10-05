@@ -7,14 +7,18 @@ logger = get_logger("admin_tools.whatsapp_blast")
 
 
 def init_whatsapp_blast(app, bot):
-    """تسجيل routes + handlers"""
-    from .routes import register_whatsapp_blast_routes
-    from .bot_handlers_real import register_whatsapp_blast_real_handlers
+    """تسجيل routes فقط — الـ handlers بيشتغلوا من router.py"""
+    logger.info("[WB] Registering WhatsApp Blast...")
 
-    register_whatsapp_blast_routes(app)
-    register_whatsapp_blast_real_handlers(bot)
+    # ─── Flask Routes ───
+    try:
+        from .routes import register_whatsapp_blast_routes
+        register_whatsapp_blast_routes(app)
+        logger.info("[WB] ✅ Routes registered")
+    except Exception as e:
+        logger.exception(f"[WB] ❌ Routes FAILED: {e}")
 
-    logger.info("[+] WhatsApp Blast (REAL) registered")
+    logger.info("[WB] ✅ WhatsApp Blast registration complete (handlers via router)")
 
 
 __all__ = ['init_whatsapp_blast']
