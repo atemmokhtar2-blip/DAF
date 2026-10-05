@@ -1,7 +1,6 @@
 # bot_handlers/callbacks/admin.py
 # ============================================================
-# ★ معالجات الأدمن الكاملة
-# يستخدم admin_system للميزات المتطورة
+# ★ معالجات الأدمن — مع دعم WhatsApp Blast
 # ============================================================
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -29,6 +28,20 @@ from ..helpers import safe_edit, h
 logger = get_logger("bot_handlers.callbacks.admin")
 
 
+# ══════════════════════════════════════════════════
+# ★ WhatsApp Blast — علامة توفر
+# ══════════════════════════════════════════════════
+try:
+    from admin_tools.whatsapp_blast.bot_handlers_real import (
+        register_whatsapp_blast_real_handlers,
+    )
+    WA_BLAST_AVAILABLE = True
+    logger.info("[admin] WhatsApp Blast handler available")
+except Exception as e:
+    WA_BLAST_AVAILABLE = False
+    logger.warning(f"[admin] WhatsApp Blast handler NOT available: {e}")
+
+
 def handle(call, chat_id, user_id, data):
     """الموزّع الرئيسي لكل admin_*"""
 
@@ -38,12 +51,42 @@ def handle(call, chat_id, user_id, data):
         return
 
     # ══════════════════════════════════════════════════
+    # ★★★ WhatsApp Blast ★★★
+    # ══════════════════════════════════════════════════
+    if data == "admin_wb_menu":
+        # لو الـ handlers مش مسجلة
+        if not WA_BLAST_AVAILABLE:
+            bot.answer_callback_query(
+                call.id,
+                "❌ WhatsApp Blast غير متاح — راجع اللوج",
+                show_alert=True
+            )
+            return
+
+        # ─── نادِ الـ handler مباشرة ───
+        try:
+            from admin_tools.whatsapp_blast import bot_handlers_real as wb_module
+
+            # ─── نداء مباشر لدالة العرض ───
+            wb_module._show_main_menu(chat_id)
+            bot.answer_callback_query(call.id)
+
+            logger.info(f"[admin] WhatsApp Blast menu opened for {user_id}")
+        except Exception as e:
+            logger.exception(f"[admin] Failed to open WB menu: {e}")
+            bot.answer_callback_query(
+                call.id,
+                f"❌ فشل فتح القائمة: {str(e)[:80]}",
+                show_alert=True
+            )
+        return
+
+    # ══════════════════════════════════════════════════
     # ★ اللوحة الرئيسية
     # ══════════════════════════════════════════════════
     if data == "admin_panel":
         bot.answer_callback_query(call.id)
 
-        # استخدم اللوحة المتطورة لو متاحة
         try:
             from admin_system import build_advanced_admin_menu
             menu = build_advanced_admin_menu()
@@ -64,7 +107,7 @@ def handle(call, chat_id, user_id, data):
         return
 
     # ══════════════════════════════════════════════════
-    # 🛠️ الصيانة — معطّلة حالياً
+    # 🛠️ الصيانة
     # ══════════════════════════════════════════════════
     if data == "admin_maintenance_on" or data == "admin_maintenance_off":
         bot.answer_callback_query(
@@ -174,7 +217,7 @@ def handle(call, chat_id, user_id, data):
         return
 
     # ══════════════════════════════════════════════════
-    # 📊 إحصائيات (القديمة)
+    # 📊 إحصائيات
     # ══════════════════════════════════════════════════
     if data == "admin_stats":
         bot.answer_callback_query(call.id)
@@ -188,9 +231,6 @@ def handle(call, chat_id, user_id, data):
         safe_edit(call, text, reply_markup=m)
         return
 
-    # ══════════════════════════════════════════════════
-    # 🆕 آخر المسجلين
-    # ══════════════════════════════════════════════════
     if data == "admin_recent":
         _handle_recent(call)
         return
@@ -293,19 +333,17 @@ def handle(call, chat_id, user_id, data):
 
 
 # ══════════════════════════════════════════════════
-# المستخدمون
+# Helpers
 # ══════════════════════════════════════════════════
 def _handle_users_list(call, data):
     try:
         page = int(data.replace("admin_users_", ""))
     except ValueError:
         page = 0
-
     users = get_all_users()
     if not users:
         bot.answer_callback_query(call.id, "لا يوجد مستخدمون", show_alert=True)
         return
-
     users.sort(key=lambda u: u.get("created_at", ""), reverse=True)
     bot.answer_callback_query(call.id)
     safe_edit(call, f"👥 <b>المستخدمون ({len(users)})</b>",
@@ -317,12 +355,10 @@ def _handle_user_detail(call, data):
         uid = int(data.replace("admin_user_", ""))
     except ValueError:
         return
-
     user = get_user(uid)
     if not user:
         bot.answer_callback_query(call.id, "❌ غير موجود", show_alert=True)
         return
-
     bot.answer_callback_query(call.id)
     safe_edit(
         call,
@@ -404,22 +440,18 @@ def _handle_activate_sub(call, data):
     parts = data.replace("admin_activate_", "").rsplit("_", 1)
     if len(parts) != 2:
         return
-
     plan_key, uid_str = parts
     try:
         uid = int(uid_str)
     except ValueError:
         return
-
     try:
         user = activate_subscription(uid, plan_key)
         plan = PRICING_PLANS.get(plan_key)
         if not plan:
             bot.answer_callback_query(call.id, "❌ باقة غير صالحة", show_alert=True)
             return
-
         bot.answer_callback_query(call.id, f"✅ {plan['name']}", show_alert=True)
-
         try:
             from datetime import datetime
             expires = datetime.fromisoformat(user["subscription"]["expires_at"])
@@ -454,12 +486,10 @@ def _handle_msg_user(call, chat_id, data):
 def _handle_recent(call):
     users = get_all_users()
     users.sort(key=lambda u: u.get("created_at", ""), reverse=True)
-
     lines = ["🆕 <b>آخر 10 مستخدمين:</b>"]
     for u in users[:10]:
         uid = u.get("user_id")
         name = u.get("first_name", "Unknown")
-
         if is_admin(uid):
             icon = "👑"
         elif u.get("is_vip"):
@@ -468,18 +498,13 @@ def _handle_recent(call):
             icon = "🚫"
         else:
             icon = "👤"
-
         lines.append(f"{icon} <b>{h(name)}</b> — <code>{uid}</code>")
-
     bot.answer_callback_query(call.id)
     m = InlineKeyboardMarkup()
     m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
     safe_edit(call, "\n".join(lines), reply_markup=m)
 
 
-# ══════════════════════════════════════════════════
-# ★ الميزات المتطورة (من admin_system)
-# ══════════════════════════════════════════════════
 def _handle_live(call):
     bot.answer_callback_query(call.id, "🔴 جاري التحديث...")
     try:
@@ -488,7 +513,6 @@ def _handle_live(call):
     except Exception as e:
         logger.warning(f"live monitor error: {e}")
         text = f"❌ خطأ: {h(str(e)[:200])}"
-
     m = InlineKeyboardMarkup()
     m.add(InlineKeyboardButton("🔄 تحديث", callback_data="admin_live"))
     m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
@@ -503,7 +527,6 @@ def _handle_adv_stats(call):
     except Exception as e:
         logger.warning(f"adv stats error: {e}")
         text = build_admin_stats_text()
-
     m = InlineKeyboardMarkup()
     m.add(InlineKeyboardButton("🔄 تحديث", callback_data="admin_adv_stats"))
     m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
@@ -518,7 +541,6 @@ def _handle_analytics(call):
     except Exception as e:
         logger.warning(f"analytics error: {e}")
         text = f"❌ خطأ: {h(str(e)[:200])}"
-
     m = InlineKeyboardMarkup()
     m.add(InlineKeyboardButton("🔄 تحديث", callback_data="admin_analytics"))
     m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
@@ -533,7 +555,6 @@ def _handle_top_users(call):
     except Exception as e:
         logger.warning(f"top users error: {e}")
         text = f"❌ خطأ: {h(str(e)[:200])}"
-
     m = InlineKeyboardMarkup()
     m.add(InlineKeyboardButton("🔄 تحديث", callback_data="admin_top_users"))
     m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
@@ -547,7 +568,6 @@ def _handle_events(call):
     except Exception as e:
         logger.warning(f"events error: {e}")
         events = []
-
     if not events:
         text = "📋 <b>سجل الأحداث</b>\n\n<i>لا يوجد أحداث بعد</i>"
     else:
@@ -558,7 +578,6 @@ def _handle_events(call):
             etype = ev.get("type", "?")
             lines.append(f"• <code>{h(ts)}</code> — <code>{h(str(admin_id))[:10]}</code> — <b>{h(etype)}</b>")
         text = "\n".join(lines)
-
     bot.answer_callback_query(call.id)
     m = InlineKeyboardMarkup()
     m.add(InlineKeyboardButton("🔄 تحديث", callback_data="admin_events"))
@@ -573,7 +592,6 @@ def _handle_activity_log(call):
     except Exception as e:
         logger.warning(f"activity log error: {e}")
         activities = []
-
     if not activities:
         text = "📡 <b>سجل الأنشطة</b>\n\n<i>لا يوجد</i>"
     else:
@@ -584,7 +602,6 @@ def _handle_activity_log(call):
             action = ev.get("action", "?")
             lines.append(f"• <code>{h(ts)}</code> — <code>{h(str(uid))[:10]}</code> — <b>{h(action)}</b>")
         text = "\n".join(lines)
-
     bot.answer_callback_query(call.id)
     m = InlineKeyboardMarkup()
     m.add(InlineKeyboardButton("🔄 تحديث", callback_data="admin_activity_log"))
@@ -606,7 +623,6 @@ def _handle_clean_redis(call):
     except Exception as e:
         logger.warning(f"clean redis error: {e}")
         text = f"❌ خطأ: {h(str(e)[:200])}"
-
     m = InlineKeyboardMarkup()
     m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
     safe_edit(call, text, reply_markup=m)
@@ -617,18 +633,15 @@ def _handle_export(call, chat_id):
     try:
         from admin_system import export_all_users
         json_data = export_all_users()
-
         if not json_data:
             safe_edit(call, "❌ فشل التصدير",
                       reply_markup=InlineKeyboardMarkup().add(
                           InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel")))
             return
-
         import io
         buf = io.BytesIO(json_data.encode('utf-8'))
         buf.name = "users_export.json"
         bot.send_document(chat_id, buf, caption="📥 <b>تصدير كل المستخدمين</b>", parse_mode="HTML")
-
         safe_edit(call, "✅ تم إرسال الملف",
                   reply_markup=InlineKeyboardMarkup().add(
                       InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel")))
@@ -651,18 +664,13 @@ def _handle_settings(call):
     safe_edit(call, text, reply_markup=m)
 
 
-# ══════════════════════════════════════════════════
-# Step: إضافة اشتراك
-# ══════════════════════════════════════════════════
 def _admin_add_sub_step(message):
     if not is_admin(message.chat.id):
         return
-
     try:
         parts = (message.text or "").strip().split("|")
         uid = int(parts[0].strip())
         plan_key = parts[1].strip()
-
         if plan_key not in PRICING_PLANS:
             bot.send_message(
                 message.chat.id,
@@ -670,7 +678,6 @@ def _admin_add_sub_step(message):
                 parse_mode="HTML"
             )
             return
-
         user = activate_subscription(uid, plan_key)
         plan = PRICING_PLANS[plan_key]
         bot.send_message(
@@ -678,7 +685,6 @@ def _admin_add_sub_step(message):
             f"✅ تم إعطاء <b>{plan['name']}</b> لـ <code>{uid}</code>",
             parse_mode="HTML"
         )
-
         try:
             from datetime import datetime
             expires = datetime.fromisoformat(user["subscription"]["expires_at"])
