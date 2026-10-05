@@ -1,6 +1,6 @@
 # bot_handlers/callbacks/admin.py
 # ============================================================
-# ★ معالجات الأدمن — مع دعم WhatsApp Blast
+# ★ معالجات الأدمن — مع WhatsApp Blast
 # ============================================================
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -28,24 +28,12 @@ from ..helpers import safe_edit, h
 logger = get_logger("bot_handlers.callbacks.admin")
 
 
-# ══════════════════════════════════════════════════
-# ★ WhatsApp Blast — علامة توفر
-# ══════════════════════════════════════════════════
-try:
-    from admin_tools.whatsapp_blast.bot_handlers_real import (
-        register_whatsapp_blast_real_handlers,
-    )
-    WA_BLAST_AVAILABLE = True
-    logger.info("[admin] WhatsApp Blast handler available")
-except Exception as e:
-    WA_BLAST_AVAILABLE = False
-    logger.warning(f"[admin] WhatsApp Blast handler NOT available: {e}")
-
-
 def handle(call, chat_id, user_id, data):
     """الموزّع الرئيسي لكل admin_*"""
 
-    # ─── حماية عامة ───
+    # ══════════════════════════════════════════════════
+    # حماية عامة
+    # ══════════════════════════════════════════════════
     if not is_admin(user_id):
         bot.answer_callback_query(call.id, "❌ للأدمن فقط", show_alert=True)
         return
@@ -53,41 +41,26 @@ def handle(call, chat_id, user_id, data):
     # ══════════════════════════════════════════════════
     # ★★★ WhatsApp Blast ★★★
     # ══════════════════════════════════════════════════
-    if data == "admin_wb_menu":
-        # لو الـ handlers مش مسجلة
-        if not WA_BLAST_AVAILABLE:
-            bot.answer_callback_query(
-                call.id,
-                "❌ WhatsApp Blast غير متاح — راجع اللوج",
-                show_alert=True
-            )
-            return
-
-# ══════════════════════════════════════════════════
-# ★★★ WhatsApp Blast — التسليم الكامل ★★★
-# ══════════════════════════════════════════════════
-if data == "admin_wb_menu" or data.startswith("wbr_"):
-    try:
-        from admin_tools.whatsapp_blast.bot_handlers_real import handle_wb_callback
-        handle_wb_callback(call, chat_id, user_id, data)
-    except Exception as e:
-        logger.exception(f"[admin] WB handler failed: {e}")
-        bot.answer_callback_query(call.id, f"❌ {str(e)[:80]}", show_alert=True)
-    return
+    if data == "admin_wb_menu" or data.startswith("wbr_"):
+        try:
+            from admin_tools.whatsapp_blast.bot_handlers_real import handle_wb_callback
+            handle_wb_callback(call, chat_id, user_id, data)
+        except Exception as e:
+            logger.exception(f"[admin] WB handler failed: {e}")
+            bot.answer_callback_query(call.id, f"❌ {str(e)[:80]}", show_alert=True)
+        return
 
     # ══════════════════════════════════════════════════
     # ★ اللوحة الرئيسية
     # ══════════════════════════════════════════════════
     if data == "admin_panel":
         bot.answer_callback_query(call.id)
-
         try:
             from admin_system import build_advanced_admin_menu
             menu = build_advanced_admin_menu()
         except Exception as e:
             logger.warning(f"build_advanced_admin_menu failed, fallback: {e}")
             menu = build_admin_menu()
-
         safe_edit(call, "👑 <b>لوحة تحكم الأدمن</b>", reply_markup=menu)
         return
 
@@ -104,11 +77,7 @@ if data == "admin_wb_menu" or data.startswith("wbr_"):
     # 🛠️ الصيانة
     # ══════════════════════════════════════════════════
     if data == "admin_maintenance_on" or data == "admin_maintenance_off":
-        bot.answer_callback_query(
-            call.id,
-            "⚠️ نظام الصيانة معطّل حالياً",
-            show_alert=True
-        )
+        bot.answer_callback_query(call.id, "⚠️ نظام الصيانة معطّل حالياً", show_alert=True)
         return
 
     # ══════════════════════════════════════════════════
