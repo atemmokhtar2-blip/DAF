@@ -1,7 +1,7 @@
 # whatsapp_report_generator.py
 # ============================================================
-# WhatsApp Report Generator v3.0
-# مع نظام URL Shortener (Redirect) لتفادي حد تلجرام
+# WhatsApp Report Generator v4.0
+# نسخة نهائية — mailto فقط (يفتح التطبيق مباشرة)
 # ============================================================
 import os
 import time
@@ -9,7 +9,7 @@ import json
 import uuid
 import random
 import urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from config import redis_client, PUBLIC_URL
 from logging_config import get_logger
@@ -27,6 +27,7 @@ WA_REPORT_EMAILS = {
     "android": "android-support@whatsapp.com",
     "ios": "iphone-support@whatsapp.com",
 }
+
 
 # ============================================================
 # [2] القوالب — 25 قالب قوي
@@ -566,41 +567,33 @@ Regards"""
 
 
 # ============================================================
-# [3] مولّد الروابط الطويلة (احتياطي)
+# [3] Helpers
 # ============================================================
-def build_gmail_link(to_email, subject, body):
-    base = "https://mail.google.com/mail/?view=cm&fs=1&tf=1"
-    params = urllib.parse.urlencode({
-        "to": to_email, "su": subject, "body": body,
-    })
-    return f"{base}&{params}"
+def normalize_number(number):
+    """تطبيع الرقم"""
+    if not number:
+        return None
+    clean = number.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    if not clean.startswith("+"):
+        clean = "+" + clean
+    if len(clean) < 10 or len(clean) > 16:
+        return None
+    return clean
 
 
-def build_outlook_link(to_email, subject, body):
-    base = "https://outlook.live.com/mail/0/deeplink/compose"
-    params = urllib.parse.urlencode({
-        "to": to_email, "subject": subject, "body": body,
-    })
-    return f"{base}?{params}"
+def pick_random_email():
+    return random.choice(list(WA_REPORT_EMAILS.values()))
 
 
-def build_yahoo_link(to_email, subject, body):
-    base = "https://compose.mail.yahoo.com/"
-    params = urllib.parse.urlencode({
-        "to": to_email, "sub": subject, "body": body,
-    })
-    return f"{base}?{params}"
-
-
-def build_mailto_link(to_email, subject, body):
-    params = urllib.parse.urlencode({
-        "subject": subject, "body": body,
-    })
-    return f"mailto:{to_email}?{params}"
+def pick_template(reason):
+    templates = REPORT_TEMPLATES.get(reason)
+    if not templates:
+        templates = REPORT_TEMPLATES["spam"]
+    return random.choice(templates)
 
 
 # ============================================================
-# [4] ★★★ نظام URL Shortener ★★★
+# [4] ★★★ Payload Storage (لتخزين البلاغ) ★★★
 # ============================================================
 def save_report_payload(to_email, subject, body):
     """يحفظ البلاغ في Redis ويرجع ID قصير"""
@@ -639,58 +632,14 @@ def get_report_payload(payload_id):
     return None
 
 
-def build_gmail_link_short(payload_id):
-    """رابط قصير للـ Gmail عبر Redirect"""
-    base = PUBLIC_URL.rstrip("/")
-    return f"{base}/wa/redirect/{payload_id}?type=gmail"
-
-
-def build_outlook_link_short(payload_id):
-    base = PUBLIC_URL.rstrip("/")
-    return f"{base}/wa/redirect/{payload_id}?type=outlook"
-
-
-def build_yahoo_link_short(payload_id):
-    base = PUBLIC_URL.rstrip("/")
-    return f"{base}/wa/redirect/{payload_id}?type=yahoo"
-
-
-def build_mailto_link_short(payload_id):
-    base = PUBLIC_URL.rstrip("/")
-    return f"{base}/wa/redirect/{payload_id}?type=mailto"
-
-
 # ============================================================
-# [5] Helpers
-# ============================================================
-def normalize_number(number):
-    """تطبيع الرقم"""
-    if not number:
-        return None
-    clean = number.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
-    if not clean.startswith("+"):
-        clean = "+" + clean
-    if len(clean) < 10 or len(clean) > 16:
-        return None
-    return clean
-
-
-def pick_random_email():
-    return random.choice(list(WA_REPORT_EMAILS.values()))
-
-
-def pick_template(reason):
-    templates = REPORT_TEMPLATES.get(reason)
-    if not templates:
-        templates = REPORT_TEMPLATES["spam"]
-    return random.choice(templates)
-
-
-# ============================================================
-# [6] الدالة الرئيسية — توليد بلاغ
+# [5] ★★★ الدالة الرئيسية — generate_report ★★★
 # ============================================================
 def generate_report(victim_number, reason="spam"):
-    """يولد بلاغ كامل + روابط قصيرة"""
+    """
+    يولد بلاغ كامل + رابط mailto واحد
+    Returns: dict
+    """
     number = normalize_number(victim_number)
     if not number:
         return {"error": "رقم غير صالح"}
@@ -706,45 +655,37 @@ def generate_report(victim_number, reason="spam"):
         days=random.randint(3, 20),
     )
 
-    # احفظ في Redis الأول
+    # احفظ في Redis عشان نستخدم ID قصير
     payload_id = save_report_payload(to_email, subject, body)
 
     if payload_id:
-        # استخدم روابط قصيرة
-        links = {
-            "gmail": build_gmail_link_short(payload_id),
-            "outlook": build_outlook_link_short(payload_id),
-            "yahoo": build_yahoo_link_short(payload_id),
-            "mailto": build_mailto_link_short(payload_id),
-            "payload_id": payload_id,
-            "to_email": to_email,
-            "subject": subject,
-            "body": body,
-            "reason": reason,
-            "number": number,
-        }
+        # رابط قصير → يفتح mailto من خلال redirect
+        base = PUBLIC_URL.rstrip("/")
+        mailto_link = f"{base}/wa/redirect/{payload_id}"
     else:
-        # Fallback — استخدم روابط طويلة
-        links = {
-            "gmail": build_gmail_link(to_email, subject, body),
-            "outlook": build_outlook_link(to_email, subject, body),
-            "yahoo": build_yahoo_link(to_email, subject, body),
-            "mailto": build_mailto_link(to_email, subject, body),
-            "payload_id": None,
-            "to_email": to_email,
-            "subject": subject,
-            "body": body,
-            "reason": reason,
-            "number": number,
-        }
+        # Fallback — mailto مباشر
+        mailto_link = (
+            f"mailto:{to_email}"
+            f"?subject={urllib.parse.quote(subject)}"
+            f"&body={urllib.parse.quote(body)}"
+        )
 
-    return links
+    return {
+        "mailto": mailto_link,
+        "payload_id": payload_id,
+        "to_email": to_email,
+        "subject": subject,
+        "body": body,
+        "reason": reason,
+        "number": number,
+    }
 
 
 # ============================================================
-# [7] Session Management
+# [6] Session Management
 # ============================================================
 def create_report_session(chat_id, victim_number, reason):
+    """ينشئ session لمتابعة البلاغات"""
     if not redis_client:
         return None
     try:
@@ -780,6 +721,7 @@ def get_report_session(session_id):
 
 
 def log_report_sent(session_id):
+    """يزود عداد البلاغات"""
     if not redis_client:
         return 0
     try:
@@ -802,6 +744,7 @@ def log_report_sent(session_id):
 
 
 def get_user_report_history(chat_id, limit=20):
+    """جلب سجل بلاغات المستخدم"""
     if not redis_client:
         return []
     try:
@@ -818,6 +761,7 @@ def get_user_report_history(chat_id, limit=20):
 
 
 def add_to_history(chat_id, victim_number, reason):
+    """يضيف بلاغ للسجل"""
     if not redis_client:
         return
     try:
