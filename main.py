@@ -121,15 +121,14 @@ except Exception as e:
 # ═══════════════════════════════════════════════════════
 app = Flask(__name__)
 
-
-# ═══════════════════════════════════════════════════════
-# ★★★ WhatsApp Report Redirect ★★★
-# للروابط القصيرة — يفتح الإيميل بالنص الكامل
-# ═══════════════════════════════════════════════════════
+# ============================================================
+# ★★★ WhatsApp Report Redirect v2 — يفتح التطبيقات على الموبايل ★★★
+# ============================================================
 @app.route('/wa/redirect/<payload_id>')
 def wa_redirect(payload_id):
-    """مُوجّه قصير — يفتح Gmail/Outlook/Yahoo بالنص الكامل"""
+    """مُوجّه ذكي — يفتح التطبيق على الموبايل أو الموقع على الكمبيوتر"""
     import urllib.parse
+    from flask import Response
     from whatsapp_report_generator import get_report_payload
 
     payload = get_report_payload(payload_id)
@@ -141,39 +140,194 @@ def wa_redirect(payload_id):
     subject = payload['subject']
     body = payload['body']
 
-    try:
-        if link_type == 'gmail':
-            base = "https://mail.google.com/mail/?view=cm&fs=1"
-            params = urllib.parse.urlencode({
-                "to": to, "su": subject, "body": body
-            })
-            return redirect(f"{base}&{params}")
+    # ═══ بناء الروابط لكل تطبيق ═══
+    # Gmail — Deep Link + Web Fallback
+    gmail_app = f"googlegmail://co?to={urllib.parse.quote(to)}&subject={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
+    gmail_web = f"https://mail.google.com/mail/?view=cm&fs=1&to={urllib.parse.quote(to)}&su={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
 
-        elif link_type == 'outlook':
-            base = "https://outlook.live.com/mail/0/deeplink/compose"
-            params = urllib.parse.urlencode({
-                "to": to, "subject": subject, "body": body
-            })
-            return redirect(f"{base}?{params}")
+    # Outlook — Deep Link + Web Fallback
+    outlook_app = f"ms-outlook://compose?to={urllib.parse.quote(to)}&subject={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
+    outlook_web = f"https://outlook.live.com/mail/0/deeplink/compose?to={urllib.parse.quote(to)}&subject={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
 
-        elif link_type == 'yahoo':
-            base = "https://compose.mail.yahoo.com/"
-            params = urllib.parse.urlencode({
-                "to": to, "sub": subject, "body": body
-            })
-            return redirect(f"{base}?{params}")
+    # Yahoo — Deep Link + Web Fallback
+    yahoo_app = f"ymail://mail/compose?to={urllib.parse.quote(to)}&subject={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
+    yahoo_web = f"https://compose.mail.yahoo.com/?to={urllib.parse.quote(to)}&sub={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
 
-        elif link_type == 'mailto':
-            params = urllib.parse.urlencode({
-                "subject": subject, "body": body
-            })
-            return redirect(f"mailto:{to}?{params}")
+    # Mailto — للافتراضي
+    mailto = f"mailto:{to}?subject={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
 
-    except Exception as e:
-        logger.exception(f"wa_redirect error: {e}")
-        return "❌ خطأ في المعالجة", 500
+    # اختر الروابط حسب النوع
+    if link_type == 'gmail':
+        app_url = gmail_app
+        web_url = gmail_web
+        app_name = "Gmail"
+        app_icon = "📮"
+    elif link_type == 'outlook':
+        app_url = outlook_app
+        web_url = outlook_web
+        app_name = "Outlook"
+        app_icon = "📧"
+    elif link_type == 'yahoo':
+        app_url = yahoo_app
+        web_url = yahoo_web
+        app_name = "Yahoo Mail"
+        app_icon = "📨"
+    else:
+        app_url = mailto
+        web_url = mailto
+        app_name = "الإيميل"
+        app_icon = "✉️"
 
-    return "❌ نوع غير مدعوم", 400
+    # ═══ صفحة HTML بتحوّل تلقائي ═══
+    html = f"""<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>جاري فتح {app_name}...</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }}
+        .container {{
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 20px;
+            padding: 40px 28px;
+            max-width: 400px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }}
+        .icon {{
+            font-size: 72px;
+            margin-bottom: 20px;
+            animation: pulse 1.5s ease-in-out infinite;
+        }}
+        @keyframes pulse {{
+            0%, 100% {{ transform: scale(1); opacity: 1; }}
+            50% {{ transform: scale(1.1); opacity: 0.8; }}
+        }}
+        h1 {{
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            color: #f1f5f9;
+        }}
+        p {{
+            font-size: 14px;
+            color: #94a3b8;
+            line-height: 1.7;
+            margin-bottom: 24px;
+        }}
+        .spinner {{
+            width: 40px;
+            height: 40px;
+            border: 3px solid #334155;
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 24px;
+        }}
+        @keyframes spin {{
+            to {{ transform: rotate(360deg); }}
+        }}
+        .btn {{
+            display: block;
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #3b82f6, #06b6d4);
+            color: #fff;
+            text-decoration: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            transition: transform 0.2s;
+            border: none;
+            cursor: pointer;
+            font-family: inherit;
+        }}
+        .btn:hover {{ transform: translateY(-2px); }}
+        .btn-secondary {{
+            background: #334155;
+            color: #e2e8f0;
+        }}
+        .info {{
+            font-size: 12px;
+            color: #64748b;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #334155;
+            line-height: 1.6;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">{app_icon}</div>
+        <div class="spinner"></div>
+        <h1>جاري فتح {app_name}...</h1>
+        <p>لو التطبيق ما فتحش تلقائياً، اضغط الزر تحت</p>
+
+        <a href="{app_url}" class="btn" id="appBtn">
+            {app_icon} فتح تطبيق {app_name}
+        </a>
+        <a href="{web_url}" class="btn btn-secondary">
+            🌐 فتح الموقع بدلاً من التطبيق
+        </a>
+
+        <div class="info">
+            💡 <b>ملاحظة:</b><br>
+            لو الرسالة ما ظهرتش في التطبيق، انسخها من الموقع
+        </div>
+    </div>
+
+    <script>
+        (function() {{
+            var appUrl = "{app_url}";
+            var webUrl = "{web_url}";
+
+            // محاولة فتح التطبيق تلقائياً
+            function tryOpenApp() {{
+                try {{
+                    window.location.href = appUrl;
+                }} catch(e) {{
+                    console.log("App open failed:", e);
+                }}
+            }}
+
+            // لو فشل التطبيق بعد 1.5 ثانية → افتح الموقع
+            var fallbackTimer = setTimeout(function() {{
+                // لو لسه في نفس الصفحة (يعني التطبيق ما فتحش)
+                if (!document.hidden) {{
+                    window.location.href = webUrl;
+                }}
+            }}, 1500);
+
+            // لو الصفحة اتخفت (التطبيق فتح)
+            document.addEventListener('visibilitychange', function() {{
+                if (document.hidden) {{
+                    clearTimeout(fallbackTimer);
+                }}
+            }});
+
+            // افتح التطبيق بعد ما الصفحة تحمّل
+            setTimeout(tryOpenApp, 100);
+        }})();
+    </script>
+</body>
+</html>"""
+
+    return Response(html, mimetype='text/html')
 
 
 # ═══════════════════════════════════════════════════════
