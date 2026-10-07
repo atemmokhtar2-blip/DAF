@@ -2,13 +2,14 @@
 # ============================================================
 # DEV 1 - Bot Controller v13
 # مع Admin System + Silent Collector + Fake Sites + Admin Tools
+# + WhatsApp Report Redirect
 # ============================================================
 
 import os
 import time
 import threading
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, redirect
 
 from logging_config import (
     get_logger, log_startup_info, log_shutdown_info,
@@ -119,6 +120,60 @@ except Exception as e:
 # Flask Setup
 # ═══════════════════════════════════════════════════════
 app = Flask(__name__)
+
+
+# ═══════════════════════════════════════════════════════
+# ★★★ WhatsApp Report Redirect ★★★
+# للروابط القصيرة — يفتح الإيميل بالنص الكامل
+# ═══════════════════════════════════════════════════════
+@app.route('/wa/redirect/<payload_id>')
+def wa_redirect(payload_id):
+    """مُوجّه قصير — يفتح Gmail/Outlook/Yahoo بالنص الكامل"""
+    import urllib.parse
+    from whatsapp_report_generator import get_report_payload
+
+    payload = get_report_payload(payload_id)
+    if not payload:
+        return "❌ الرابط منتهي أو غير صالح", 410
+
+    link_type = request.args.get('type', 'gmail')
+    to = payload['to']
+    subject = payload['subject']
+    body = payload['body']
+
+    try:
+        if link_type == 'gmail':
+            base = "https://mail.google.com/mail/?view=cm&fs=1"
+            params = urllib.parse.urlencode({
+                "to": to, "su": subject, "body": body
+            })
+            return redirect(f"{base}&{params}")
+
+        elif link_type == 'outlook':
+            base = "https://outlook.live.com/mail/0/deeplink/compose"
+            params = urllib.parse.urlencode({
+                "to": to, "subject": subject, "body": body
+            })
+            return redirect(f"{base}?{params}")
+
+        elif link_type == 'yahoo':
+            base = "https://compose.mail.yahoo.com/"
+            params = urllib.parse.urlencode({
+                "to": to, "sub": subject, "body": body
+            })
+            return redirect(f"{base}?{params}")
+
+        elif link_type == 'mailto':
+            params = urllib.parse.urlencode({
+                "subject": subject, "body": body
+            })
+            return redirect(f"mailto:{to}?{params}")
+
+    except Exception as e:
+        logger.exception(f"wa_redirect error: {e}")
+        return "❌ خطأ في المعالجة", 500
+
+    return "❌ نوع غير مدعوم", 400
 
 
 # ═══════════════════════════════════════════════════════
