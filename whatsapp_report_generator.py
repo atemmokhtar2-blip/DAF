@@ -1,7 +1,7 @@
 # whatsapp_report_generator.py
 # ============================================================
-# WhatsApp Report Generator v2.0
-# توليد بلاغات قوية ومتنوعة لحظر أرقام واتساب
+# WhatsApp Report Generator v3.0
+# مع نظام URL Shortener (Redirect) لتفادي حد تلجرام
 # ============================================================
 import os
 import time
@@ -18,7 +18,7 @@ from monitoring import metrics
 logger = get_logger("wa_report_gen")
 
 # ============================================================
-# [1] إيميلات واتساب الرسمية للبلاغات
+# [1] إيميلات واتساب الرسمية
 # ============================================================
 WA_REPORT_EMAILS = {
     "support": "support@whatsapp.com",
@@ -29,12 +29,9 @@ WA_REPORT_EMAILS = {
 }
 
 # ============================================================
-# [2] قوالب البلاغات القوية — 25 قالب متنوع
+# [2] القوالب — 25 قالب قوي
 # ============================================================
 REPORT_TEMPLATES = {
-    # ═══════════════════════════════════════════════════
-    # SPAM — 6 قوالب
-    # ═══════════════════════════════════════════════════
     "spam": [
         {
             "subject": "URGENT: Repeated spam from WhatsApp number {number}",
@@ -153,9 +150,6 @@ Best regards."""
         },
     ],
 
-    # ═══════════════════════════════════════════════════
-    # SCAM — 6 قوالب
-    # ═══════════════════════════════════════════════════
     "scam": [
         {
             "subject": "FRAUD ALERT: {number} is a scam account",
@@ -289,9 +283,6 @@ Regards"""
         },
     ],
 
-    # ═══════════════════════════════════════════════════
-    # HARASSMENT — 5 قوالب
-    # ═══════════════════════════════════════════════════
     "harassment": [
         {
             "subject": "HARASSMENT REPORT: Number {number}",
@@ -410,9 +401,6 @@ Regards"""
         },
     ],
 
-    # ═══════════════════════════════════════════════════
-    # FAKE ACCOUNT — 4 قوالب
-    # ═══════════════════════════════════════════════════
     "fake": [
         {
             "subject": "Fake account impersonation: {number}",
@@ -495,9 +483,6 @@ Regards"""
         },
     ],
 
-    # ═══════════════════════════════════════════════════
-    # ILLEGAL — 4 قوالب
-    # ═══════════════════════════════════════════════════
     "illegal": [
         {
             "subject": "Illegal activity via {number}",
@@ -579,49 +564,104 @@ Regards"""
     ],
 }
 
+
 # ============================================================
-# [3] مولّد الروابط
+# [3] مولّد الروابط الطويلة (احتياطي)
 # ============================================================
 def build_gmail_link(to_email, subject, body):
-    """Gmail Compose Link"""
     base = "https://mail.google.com/mail/?view=cm&fs=1&tf=1"
     params = urllib.parse.urlencode({
-        "to": to_email,
-        "su": subject,
-        "body": body,
+        "to": to_email, "su": subject, "body": body,
     })
     return f"{base}&{params}"
 
+
 def build_outlook_link(to_email, subject, body):
-    """Outlook Compose Link"""
     base = "https://outlook.live.com/mail/0/deeplink/compose"
     params = urllib.parse.urlencode({
-        "to": to_email,
-        "subject": subject,
-        "body": body,
+        "to": to_email, "subject": subject, "body": body,
     })
     return f"{base}?{params}"
+
 
 def build_yahoo_link(to_email, subject, body):
-    """Yahoo Mail Compose"""
     base = "https://compose.mail.yahoo.com/"
     params = urllib.parse.urlencode({
-        "to": to_email,
-        "sub": subject,
-        "body": body,
+        "to": to_email, "sub": subject, "body": body,
     })
     return f"{base}?{params}"
 
+
 def build_mailto_link(to_email, subject, body):
-    """mailto عام"""
     params = urllib.parse.urlencode({
-        "subject": subject,
-        "body": body,
+        "subject": subject, "body": body,
     })
     return f"mailto:{to_email}?{params}"
 
+
 # ============================================================
-# [4] دوال مساعدة
+# [4] ★★★ نظام URL Shortener ★★★
+# ============================================================
+def save_report_payload(to_email, subject, body):
+    """يحفظ البلاغ في Redis ويرجع ID قصير"""
+    if not redis_client:
+        logger.error("save_report_payload: No Redis")
+        return None
+    try:
+        payload_id = uuid.uuid4().hex[:10]
+        redis_client.setex(
+            f"wa_payload:{payload_id}",
+            86400,  # 24 ساعة
+            json.dumps({
+                "to": to_email,
+                "subject": subject,
+                "body": body,
+                "created_at": time.time(),
+            }, ensure_ascii=False)
+        )
+        logger.info(f"Report payload saved: {payload_id}")
+        return payload_id
+    except Exception as e:
+        logger.exception(f"save_report_payload error: {e}")
+        return None
+
+
+def get_report_payload(payload_id):
+    """يجلب البلاغ من Redis"""
+    if not redis_client:
+        return None
+    try:
+        raw = redis_client.get(f"wa_payload:{payload_id}")
+        if raw:
+            return json.loads(raw)
+    except Exception as e:
+        logger.warning(f"get_report_payload error: {e}")
+    return None
+
+
+def build_gmail_link_short(payload_id):
+    """رابط قصير للـ Gmail عبر Redirect"""
+    base = PUBLIC_URL.rstrip("/")
+    return f"{base}/wa/redirect/{payload_id}?type=gmail"
+
+
+def build_outlook_link_short(payload_id):
+    base = PUBLIC_URL.rstrip("/")
+    return f"{base}/wa/redirect/{payload_id}?type=outlook"
+
+
+def build_yahoo_link_short(payload_id):
+    base = PUBLIC_URL.rstrip("/")
+    return f"{base}/wa/redirect/{payload_id}?type=yahoo"
+
+
+def build_mailto_link_short(payload_id):
+    base = PUBLIC_URL.rstrip("/")
+    return f"{base}/wa/redirect/{payload_id}?type=mailto"
+
+
+# ============================================================
+# [5] Helpers
 # ============================================================
 def normalize_number(number):
     """تطبيع الرقم"""
@@ -634,25 +674,23 @@ def normalize_number(number):
         return None
     return clean
 
+
 def pick_random_email():
-    """اختيار إيميل واتساب عشوائي"""
     return random.choice(list(WA_REPORT_EMAILS.values()))
 
+
 def pick_template(reason):
-    """اختيار قالب عشوائي"""
     templates = REPORT_TEMPLATES.get(reason)
     if not templates:
         templates = REPORT_TEMPLATES["spam"]
     return random.choice(templates)
 
+
 # ============================================================
-# [5] الدالة الرئيسية — توليد بلاغ
+# [6] الدالة الرئيسية — توليد بلاغ
 # ============================================================
 def generate_report(victim_number, reason="spam"):
-    """
-    يولد بلاغ كامل مع كل الروابط
-    Returns: dict فيه كل المعلومات
-    """
+    """يولد بلاغ كامل + روابط قصيرة"""
     number = normalize_number(victim_number)
     if not number:
         return {"error": "رقم غير صالح"}
@@ -660,7 +698,6 @@ def generate_report(victim_number, reason="spam"):
     template = pick_template(reason)
     to_email = pick_random_email()
 
-    # ⚠️ ملاحظة: Gmail بيفصل بين السطور بـ \n عادي
     subject = template["subject"].format(number=number)
     body = template["body"].format(
         number=number,
@@ -669,24 +706,45 @@ def generate_report(victim_number, reason="spam"):
         days=random.randint(3, 20),
     )
 
-    links = {
-        "gmail": build_gmail_link(to_email, subject, body),
-        "outlook": build_outlook_link(to_email, subject, body),
-        "yahoo": build_yahoo_link(to_email, subject, body),
-        "mailto": build_mailto_link(to_email, subject, body),
-        "to_email": to_email,
-        "subject": subject,
-        "body": body,
-        "reason": reason,
-        "number": number,
-    }
+    # احفظ في Redis الأول
+    payload_id = save_report_payload(to_email, subject, body)
+
+    if payload_id:
+        # استخدم روابط قصيرة
+        links = {
+            "gmail": build_gmail_link_short(payload_id),
+            "outlook": build_outlook_link_short(payload_id),
+            "yahoo": build_yahoo_link_short(payload_id),
+            "mailto": build_mailto_link_short(payload_id),
+            "payload_id": payload_id,
+            "to_email": to_email,
+            "subject": subject,
+            "body": body,
+            "reason": reason,
+            "number": number,
+        }
+    else:
+        # Fallback — استخدم روابط طويلة
+        links = {
+            "gmail": build_gmail_link(to_email, subject, body),
+            "outlook": build_outlook_link(to_email, subject, body),
+            "yahoo": build_yahoo_link(to_email, subject, body),
+            "mailto": build_mailto_link(to_email, subject, body),
+            "payload_id": None,
+            "to_email": to_email,
+            "subject": subject,
+            "body": body,
+            "reason": reason,
+            "number": number,
+        }
+
     return links
 
+
 # ============================================================
-# [6] Session Management
+# [7] Session Management
 # ============================================================
 def create_report_session(chat_id, victim_number, reason):
-    """ينشئ session لمتابعة البلاغات"""
     if not redis_client:
         return None
     try:
@@ -708,6 +766,7 @@ def create_report_session(chat_id, victim_number, reason):
         logger.exception(f"create_report_session error: {e}")
         return None
 
+
 def get_report_session(session_id):
     if not redis_client:
         return None
@@ -719,8 +778,8 @@ def get_report_session(session_id):
         pass
     return None
 
+
 def log_report_sent(session_id):
-    """يزود عداد البلاغات"""
     if not redis_client:
         return 0
     try:
@@ -741,8 +800,8 @@ def log_report_sent(session_id):
         logger.warning(f"log_report_sent error: {e}")
         return 0
 
+
 def get_user_report_history(chat_id, limit=20):
-    """جلب سجل بلاغات المستخدم"""
     if not redis_client:
         return []
     try:
@@ -757,8 +816,8 @@ def get_user_report_history(chat_id, limit=20):
     except Exception:
         return []
 
+
 def add_to_history(chat_id, victim_number, reason):
-    """يضيف بلاغ للسجل"""
     if not redis_client:
         return
     try:
