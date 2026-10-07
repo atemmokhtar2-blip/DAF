@@ -1,6 +1,6 @@
 # bot_handlers/callbacks/wa_report.py
 # ============================================================
-# WhatsApp Report Handler v2 — FIXED
+# WhatsApp Report Handler v3 — مع روابط قصيرة
 # ============================================================
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -22,6 +22,9 @@ from whatsapp_report_generator import (
 logger = get_logger("bot_handlers.callbacks.wa_report")
 
 
+# ============================================================
+# أسماء الأسباب
+# ============================================================
 REASON_NAMES = {
     "spam": "📨 سبام (رسائل مزعجة)",
     "scam": "💰 نصب واحتيال",
@@ -40,21 +43,18 @@ REASON_DESCRIPTIONS = {
 
 
 # ============================================================
-# Helper — إرسال رسالة جديدة بدل edit
+# Helper: إرسال رسالة جديدة
 # ============================================================
 def _send_new(call, chat_id, text, reply_markup=None):
-    """يبعت رسالة جديدة بدل ما يعدّل"""
-    # احذف الرسالة القديمة
+    """يمسح القديمة + يبعت جديدة"""
     try:
         bot.delete_message(call.message.chat.id, call.message.message_id)
     except Exception:
         pass
 
-    # ابعت جديدة
     try:
         bot.send_message(
-            chat_id,
-            text,
+            chat_id, text,
             reply_markup=reply_markup,
             parse_mode="HTML",
             disable_web_page_preview=True,
@@ -62,11 +62,9 @@ def _send_new(call, chat_id, text, reply_markup=None):
         return True
     except Exception as e:
         logger.error(f"_send_new error: {e}")
-        # جرب بدون HTML
         try:
             bot.send_message(
-                chat_id,
-                text,
+                chat_id, text,
                 reply_markup=reply_markup,
                 disable_web_page_preview=True,
             )
@@ -107,7 +105,6 @@ def handle(call, chat_id, user_id, data):
             _send_new(call, chat_id, "❌ لا يمكن استخدام الأداة")
             return
 
-        # اطلب الرقم
         msg = bot.send_message(
             chat_id,
             "🚫 <b>حظر رقم واتساب</b>\n"
@@ -127,7 +124,7 @@ def handle(call, chat_id, user_id, data):
         return
 
     # ═══════════════════════════════════════════════════
-    # 2. اختيار السبب ← 🔥 المشكلة هنا
+    # 2. اختيار السبب
     # ═══════════════════════════════════════════════════
     if data.startswith("wa_reason_"):
         bot.answer_callback_query(call.id)
@@ -138,7 +135,6 @@ def handle(call, chat_id, user_id, data):
             return
         reason, number = parts[0], parts[1]
 
-        # ولّد البلاغ
         report = generate_report(number, reason)
         if report.get("error"):
             _send_new(call, chat_id, f"❌ <b>خطأ:</b> {report['error']}")
@@ -151,7 +147,6 @@ def handle(call, chat_id, user_id, data):
         text = _build_report_message(report, reason)
         m = _build_report_keyboard(report, session_id)
 
-        # ═══ استخدم _send_new بدل safe_edit ═══
         _send_new(call, chat_id, text, reply_markup=m)
 
         logger.info(f"WA Report generated: {number} | reason={reason} | user={user_id}")
@@ -196,7 +191,7 @@ def handle(call, chat_id, user_id, data):
 
         m = InlineKeyboardMarkup()
         m.add(InlineKeyboardButton(
-            "📧 إرسال بلاغ جديد (إيميل مختلف)",
+            "📧 إرسال بلاغ جديد",
             url=new_report["gmail"]
         ))
         m.row(
@@ -240,7 +235,7 @@ def handle(call, chat_id, user_id, data):
         return
 
     # ═══════════════════════════════════════════════════
-    # 5. عرض القوالب
+    # 5. القوالب
     # ═══════════════════════════════════════════════════
     if data == "wa_report_templates":
         bot.answer_callback_query(call.id)
@@ -256,7 +251,7 @@ def handle(call, chat_id, user_id, data):
         return
 
     # ═══════════════════════════════════════════════════
-    # 6. سجل البلاغات
+    # 6. السجل
     # ═══════════════════════════════════════════════════
     if data == "wa_report_history":
         bot.answer_callback_query(call.id)
@@ -312,7 +307,6 @@ def handle(call, chat_id, user_id, data):
 # Step Handlers
 # ============================================================
 def _process_number_step(message, user_id):
-    """بعد استلام الرقم"""
     chat_id = message.chat.id
     number_input = (message.text or "").strip()
 
@@ -323,7 +317,7 @@ def _process_number_step(message, user_id):
             "❌ <b>رقم غير صالح</b>\n\n"
             "لازم يكون بالصيغة الدولية:\n"
             "<code>+201234567890</code>\n\n"
-            "جرب تاني بالرقم الصح:",
+            "جرب تاني:",
             parse_mode="HTML"
         )
         msg = bot.send_message(chat_id, "📱 <b>ابعت الرقم الصحيح:</b>", parse_mode="HTML")
@@ -361,6 +355,7 @@ def _process_number_step(message, user_id):
 # بناء الرسائل والأزرار
 # ============================================================
 def _build_report_message(report, reason):
+    """يبني رسالة عرض البلاغ"""
     reason_name = REASON_NAMES.get(reason, reason)
     reason_desc = REASON_DESCRIPTIONS.get(reason, "")
 
@@ -368,7 +363,6 @@ def _build_report_message(report, reason):
     if len(report["body"]) > 250:
         body_preview += "..."
 
-    # ⚠️ مهم: escape النص عشان HTML
     import html as html_mod
     body_preview = html_mod.escape(body_preview)
 
@@ -393,8 +387,10 @@ def _build_report_message(report, reason):
 
 
 def _build_report_keyboard(report, session_id):
+    """يبني أزرار الإرسال — مع روابط قصيرة"""
     m = InlineKeyboardMarkup()
 
+    # روابط قصيرة تعمل عبر redirect
     m.row(
         InlineKeyboardButton("📮 إرسال من Gmail", url=report["gmail"]),
         InlineKeyboardButton("📧 إرسال من Outlook", url=report["outlook"]),
