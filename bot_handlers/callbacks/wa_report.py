@@ -1,6 +1,6 @@
 # bot_handlers/callbacks/wa_report.py
 # ============================================================
-# WhatsApp Report Handler v4 — زر واحد فقط (mailto)
+# WhatsApp Report Handler v5 — مع Anti-Repeat (50 قالب)
 # ============================================================
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -17,6 +17,7 @@ from whatsapp_report_generator import (
     add_to_history,
     normalize_number,
     REPORT_TEMPLATES,
+    get_template_stats,
 )
 
 logger = get_logger("bot_handlers.callbacks.wa_report")
@@ -124,7 +125,7 @@ def handle(call, chat_id, user_id, data):
         return
 
     # ═══════════════════════════════════════════════════
-    # 2. اختيار السبب
+    # 2. اختيار السبب — مع Anti-Repeat
     # ═══════════════════════════════════════════════════
     if data.startswith("wa_reason_"):
         bot.answer_callback_query(call.id)
@@ -135,7 +136,8 @@ def handle(call, chat_id, user_id, data):
             return
         reason, number = parts[0], parts[1]
 
-        report = generate_report(number, reason)
+        # ⚡ نمرر user_id للحصول على قالب فريد
+        report = generate_report(number, reason, user_id=user_id)
         if report.get("error"):
             _send_new(call, chat_id, f"❌ <b>خطأ:</b> {report['error']}")
             return
@@ -149,11 +151,14 @@ def handle(call, chat_id, user_id, data):
 
         _send_new(call, chat_id, text, reply_markup=m)
 
-        logger.info(f"WA Report generated: {number} | reason={reason} | user={user_id}")
+        logger.info(
+            f"WA Report generated: {number} | reason={reason} | "
+            f"template={report.get('template_id')} | user={user_id}"
+        )
         return
 
     # ═══════════════════════════════════════════════════
-    # 3. "بعتت البلاغ"
+    # 3. "بعتت البلاغ" — مع Anti-Repeat
     # ═══════════════════════════════════════════════════
     if data.startswith("wa_report_sent_"):
         session_id = data.replace("wa_report_sent_", "")
@@ -168,7 +173,9 @@ def handle(call, chat_id, user_id, data):
 
         number = session["victim_number"]
         reason = session["reason"]
-        new_report = generate_report(number, reason)
+
+        # ⚡ نمرر user_id للحصول على قالب فريد
+        new_report = generate_report(number, reason, user_id=user_id)
 
         text = (
             f"✅ <b>تم تسجيل بلاغ #{count}</b>\n"
@@ -235,15 +242,31 @@ def handle(call, chat_id, user_id, data):
         return
 
     # ═══════════════════════════════════════════════════
-    # 5. عرض القوالب
+    # 5. عرض القوالب — مع إحصائيات
     # ═══════════════════════════════════════════════════
     if data == "wa_report_templates":
         bot.answer_callback_query(call.id)
 
-        text = "📋 <b>القوالب المتاحة</b>\n━━━━━━━━━━━━━━━━━━━━\n\n"
+        stats = get_template_stats()
+
+        text = (
+            f"📋 <b>القوالب المتاحة</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🎯 <b>الإجمالي:</b> <code>{stats.get('total', 0)}</code> قالب\n\n"
+        )
+
         for reason, name in REASON_NAMES.items():
-            count = len(REPORT_TEMPLATES.get(reason, []))
-            text += f"{name}\n   ⤷ {count} قوالب متنوعة\n\n"
+            count = stats.get(reason, 0)
+            text += f"{name}\n"
+            text += f"   ⤷ <b>{count}</b> قوالب متنوعة\n\n"
+
+        text += (
+            f"━━━ ⚡ ━━━ <b>مميزات</b>\n"
+            f"✅ كل مستخدم يحصل على قالب فريد\n"
+            f"✅ لا تكرار — كل بلاغ مختلف\n"
+            f"✅ محتوى واقعي بتفاصيل دقيقة\n"
+            f"✅ تعدي فلاتر واتساب"
+        )
 
         m = InlineKeyboardMarkup()
         m.add(InlineKeyboardButton("🔙 رجوع", callback_data="wa_report_start"))
@@ -293,6 +316,11 @@ def handle(call, chat_id, user_id, data):
             "✅ لا تعدّل النص — ده يخلي البلاغ موثوق\n"
             "✅ ابعت من إيميلات حقيقية (Gmail/Outlook)\n"
             "✅ كرر العملية كل 3 أيام لو مفيش نتيجة\n\n"
+            "━━━ 🎯 ━━━ <b>لماذا 50 قالب؟</b>\n"
+            "• كل مستخدم يأخذ قالب فريد\n"
+            "• لا تكرار في الرسائل\n"
+            "• تفاصيل واقعية (أسماء، مدن، مبالغ)\n"
+            "• تعدي فلاتر واتساب تلقائياً\n\n"
             "⏰ <b>مدة الحظر:</b> 24-72 ساعة\n"
             "📊 <b>معدل النجاح:</b> 60-80%"
         )
