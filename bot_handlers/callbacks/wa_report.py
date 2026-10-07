@@ -1,6 +1,6 @@
 # bot_handlers/callbacks/wa_report.py
 # ============================================================
-# WhatsApp Report Handler v3 — مع روابط قصيرة
+# WhatsApp Report Handler v4 — زر واحد فقط (mailto)
 # ============================================================
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -23,7 +23,7 @@ logger = get_logger("bot_handlers.callbacks.wa_report")
 
 
 # ============================================================
-# أسماء الأسباب
+# [1] أسماء الأسباب
 # ============================================================
 REASON_NAMES = {
     "spam": "📨 سبام (رسائل مزعجة)",
@@ -43,10 +43,10 @@ REASON_DESCRIPTIONS = {
 
 
 # ============================================================
-# Helper: إرسال رسالة جديدة
+# [2] Helper: إرسال رسالة جديدة (يمسح القديمة)
 # ============================================================
 def _send_new(call, chat_id, text, reply_markup=None):
-    """يمسح القديمة + يبعت جديدة"""
+    """يمسح الرسالة القديمة + يبعت جديدة"""
     try:
         bot.delete_message(call.message.chat.id, call.message.message_id)
     except Exception:
@@ -75,7 +75,7 @@ def _send_new(call, chat_id, text, reply_markup=None):
 
 
 # ============================================================
-# المعالج الرئيسي
+# [3] المعالج الرئيسي
 # ============================================================
 def handle(call, chat_id, user_id, data):
     """الدالة الرئيسية"""
@@ -192,7 +192,7 @@ def handle(call, chat_id, user_id, data):
         m = InlineKeyboardMarkup()
         m.add(InlineKeyboardButton(
             "📧 إرسال بلاغ جديد",
-            url=new_report["gmail"]
+            url=new_report["mailto"]
         ))
         m.row(
             InlineKeyboardButton("✅ بعتت بلاغ تاني", callback_data=f"wa_report_sent_{session_id}"),
@@ -235,7 +235,7 @@ def handle(call, chat_id, user_id, data):
         return
 
     # ═══════════════════════════════════════════════════
-    # 5. القوالب
+    # 5. عرض القوالب
     # ═══════════════════════════════════════════════════
     if data == "wa_report_templates":
         bot.answer_callback_query(call.id)
@@ -285,7 +285,7 @@ def handle(call, chat_id, user_id, data):
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "1️⃣ اختر سبب البلاغ\n"
             "2️⃣ هيتولّدلك رسالة جاهزة\n"
-            "3️⃣ اضغط زر الإرسال → يفتح Gmail\n"
+            "3️⃣ اضغط زر الإرسال → يفتح التطبيق\n"
             "4️⃣ اضغط <b>Send</b> فقط (متعدلش النص)\n"
             "5️⃣ كرر من إيميل تاني\n\n"
             "━━━ 💡 ━━━ نصائح\n\n"
@@ -304,9 +304,10 @@ def handle(call, chat_id, user_id, data):
 
 
 # ============================================================
-# Step Handlers
+# [4] Step Handler — استلام الرقم
 # ============================================================
 def _process_number_step(message, user_id):
+    """بعد استلام الرقم من المستخدم"""
     chat_id = message.chat.id
     number_input = (message.text or "").strip()
 
@@ -352,19 +353,12 @@ def _process_number_step(message, user_id):
 
 
 # ============================================================
-# بناء الرسائل والأزرار
+# [5] بناء رسالة البلاغ
 # ============================================================
 def _build_report_message(report, reason):
-    """يبني رسالة عرض البلاغ"""
+    """يبني رسالة عرض البلاغ — نظيفة ومبسطة"""
     reason_name = REASON_NAMES.get(reason, reason)
     reason_desc = REASON_DESCRIPTIONS.get(reason, "")
-
-    body_preview = report["body"][:250]
-    if len(report["body"]) > 250:
-        body_preview += "..."
-
-    import html as html_mod
-    body_preview = html_mod.escape(body_preview)
 
     text = (
         f"📧 <b>بلاغ جاهز للإرسال</b>\n"
@@ -374,37 +368,39 @@ def _build_report_message(report, reason):
         f"📂 <b>نوع البلاغ:</b>\n"
         f"{reason_name}\n"
         f"<i>{reason_desc}</i>\n\n"
-        f"📮 <b>إيميل واتساب:</b>\n"
+        f"📮 <b>سيتم الإرسال إلى:</b>\n"
         f"<code>{report['to_email']}</code>\n\n"
-        f"📝 <b>الموضوع:</b>\n"
-        f"<code>{report['subject'][:80]}</code>\n\n"
-        f"━━━ 📄 ━━━ <b>معاينة الرسالة</b>\n"
-        f"<i>{body_preview}</i>\n\n"
-        f"⚠️ <b>مهم:</b> متعدّلش النص عشان البلاغ يبقى موثوق\n\n"
-        f"👇 <b>اضغط على زر الإيميل بتاعك:</b>"
+        f"━━━ 📋 ━━━ <b>الخطوات</b>\n"
+        f"1️⃣ اضغط على زر الإرسال تحت\n"
+        f"2️⃣ هيفتح تطبيق الإيميل بتاعك\n"
+        f"3️⃣ الرسالة تكون جاهزة ✅\n"
+        f"4️⃣ اضغط <b>Send</b> بس\n\n"
+        f"⚠️ <b>مهم:</b> متعدّلش النص\n"
+        f"🔄 <b>للحظر الأسرع:</b> كرر من إيميل تاني"
     )
     return text
 
 
+# ============================================================
+# [6] ★★★ بناء أزرار البلاغ — زر واحد فقط ★★★
+# ============================================================
 def _build_report_keyboard(report, session_id):
-    """يبني أزرار الإرسال — مع روابط قصيرة"""
+    """يبني أزرار الإرسال — زر واحد فقط (mailto)"""
     m = InlineKeyboardMarkup()
 
-    # روابط قصيرة تعمل عبر redirect
-    m.row(
-        InlineKeyboardButton("📮 إرسال من Gmail", url=report["gmail"]),
-        InlineKeyboardButton("📧 إرسال من Outlook", url=report["outlook"]),
-    )
-    m.row(
-        InlineKeyboardButton("📨 إرسال من Yahoo", url=report["yahoo"]),
-        InlineKeyboardButton("✉️ إيميل آخر", url=report["mailto"]),
-    )
+    # ⚡ زر واحد فقط — يفتح التطبيق الافتراضي مباشرة
+    m.add(InlineKeyboardButton(
+        "📧 إرسال البلاغ الآن",
+        url=report["mailto"]
+    ))
 
+    # زر تأكيد الإرسال
     m.add(InlineKeyboardButton(
         "✅ بعتت البلاغ",
         callback_data=f"wa_report_sent_{session_id}"
     ))
 
+    # أزرار مساعدة
     m.row(
         InlineKeyboardButton("❓ مساعدة", callback_data="wa_report_help"),
         InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"),
