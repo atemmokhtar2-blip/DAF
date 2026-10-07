@@ -1,13 +1,30 @@
-# bot_handlers/callbacks/wa_report.py
-# ============================================================
-# WhatsApp Report Handler — معالج أزرار حظر واتساب
-# ============================================================
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-from config import bot
-from imports_manager import can_use_tool, consume_usage
-from logging_config import get_logger
-
+# # bot_handlers/callbacks/wa_report.py
+import traceback
+try:
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    from config import bot
+    from imports_manager import can_use_tool, consume_usage
+    from logging_config import get_logger
+    from ..helpers import safe_edit, h
+    from whatsapp_report_generator import (
+        generate_report,
+        create_report_session,
+        get_report_session,
+        log_report_sent,
+        get_user_report_history,
+        add_to_history,
+        normalize_number,
+        REPORT_TEMPLATES,
+    )
+    logger = get_logger("bot_handlers.callbacks.wa_report")
+    logger.info("✅ wa_report imported successfully")
+except Exception as e:
+    print("=" * 60)
+    print("❌ wa_report IMPORT ERROR:")
+    print("=" * 60)
+    traceback.print_exc()
+    print("=" * 60)
+    raise
 from ..helpers import safe_edit, h
 from whatsapp_report_generator import (
     generate_report,
