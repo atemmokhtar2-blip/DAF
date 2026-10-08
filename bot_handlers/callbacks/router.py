@@ -1,6 +1,6 @@
 # bot_handlers/callbacks/router.py
 # ============================================================
-# Router v6.0 — مع Force Subscribe + WhatsApp Blast + WhatsApp Report
+# Router v6.1 — مع Force Subscribe + WhatsApp Blast + WhatsApp Report
 # ============================================================
 
 from config import bot
@@ -77,14 +77,9 @@ except Exception as e:
 
 # ============================================================
 # ROUTES — الترتيب مهم جداً!
+# ⚠️ ملاحظة: fs_check بيتعامل معاه من force_subscribe.py مباشرة
 # ============================================================
 ROUTES = [
-    # ═══════════════════════════════════════════════════════
-    # ⚡ [0] Force Subscribe — الأول
-    # ═══════════════════════════════════════════════════════
-    (lambda d: d == "fs_check", lambda call, chat_id, user_id, data: None),
-    # ^ ملاحظة: الـ fs_check بيتعامل معاه في force_subscribe.py مباشرة
-
     # ═══════════════════════════════════════════════════════
     # [1] WhatsApp Report
     # ═══════════════════════════════════════════════════════
@@ -191,9 +186,16 @@ def callback_handler(call):
     logger.info(f"[CALLBACK] user={user_id} | data='{data}'")
 
     # ═══════════════════════════════════════════════════
+    # ⚡ fs_check — سيبها لـ force_subscribe.py
+    # ═══════════════════════════════════════════════════
+    if data == "fs_check":
+        logger.info("[CALLBACK] fs_check → handled by force_subscribe")
+        return  # ← اطلع فوراً، خلّي الـ handler التاني يشتغل
+
+    # ═══════════════════════════════════════════════════
     # ★ Force Subscribe Check ★
     # ═══════════════════════════════════════════════════
-    if FS_AVAILABLE and data != "fs_check":
+    if FS_AVAILABLE:
         try:
             if not is_subscribed(user_id):
                 # المستخدم مش مشترك
@@ -226,7 +228,6 @@ def callback_handler(call):
                 return
         except Exception as e:
             logger.warning(f"fs check in callback error: {e}")
-            # لو حصل خطأ، كمّل عادي
 
     # ═══════════════════════════════════════════════════
     # Routes
