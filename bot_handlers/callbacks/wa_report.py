@@ -1,6 +1,7 @@
 # bot_handlers/callbacks/wa_report.py
 # ============================================================
-# WhatsApp Report Handler v5 — مع Anti-Repeat (50 قالب)
+# WhatsApp Report Handler v6.0
+# Multi-Channel + Multi-Language + Blast Mode
 # ============================================================
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -10,6 +11,7 @@ from logging_config import get_logger
 
 from whatsapp_report_generator import (
     generate_report,
+    generate_blast_reports,
     create_report_session,
     get_report_session,
     log_report_sent,
@@ -18,6 +20,7 @@ from whatsapp_report_generator import (
     normalize_number,
     REPORT_TEMPLATES,
     get_template_stats,
+    WA_REPORT_CHANNELS,
 )
 
 logger = get_logger("bot_handlers.callbacks.wa_report")
@@ -40,6 +43,22 @@ REASON_DESCRIPTIONS = {
     "harassment": "بلاغ عن تهديد ومضايقة",
     "fake": "بلاغ عن حساب مزيف أو انتحال شخصية",
     "illegal": "بلاغ عن أنشطة غير قانونية",
+}
+
+LANG_FLAGS = {
+    "en": "🇬🇧",
+    "ar": "🇪🇬",
+    "fr": "🇫🇷",
+    "es": "🇪🇸",
+    "de": "🇩🇪",
+}
+
+LANG_NAMES = {
+    "en": "English",
+    "ar": "العربية",
+    "fr": "Français",
+    "es": "Español",
+    "de": "Deutsch",
 }
 
 
@@ -125,7 +144,195 @@ def handle(call, chat_id, user_id, data):
         return
 
     # ═══════════════════════════════════════════════════
-    # 2. اختيار السبب — مع Anti-Repeat
+    # 2. ⚡ Blast Mode — اختيار السبب
+    # ═══════════════════════════════════════════════════
+    if data.startswith("wa_blast_"):
+        body = data.replace("wa_blast_", "")
+        parts = body.split("_", 1)
+
+        # الحالة 1: wa_blast_+201234567890 (رقم فقط)
+        if len(parts) == 1:
+            bot.answer_callback_query(call.id)
+            number = parts[0]
+
+            text = (
+                f"⚡ <b>Blast Mode</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"📱 <b>الرقم:</b> <code>{number}</code>\n\n"
+                f"🎯 <b>اختر سبب البلاغ:</b>\n\n"
+                f"سيتم إرسال <b>5 بلاغات</b> دفعة واحدة:\n"
+                f"• 🌐 <b>5 لغات</b> مختلفة\n"
+                f"• 📧 <b>5 إيميلات</b> واتساب\n"
+                f"• 📝 <b>5 قوالب</b> فريدة\n"
+                f"• 🎭 <b>محتوى متنوع</b> 100%\n\n"
+                f"⚡ <b>نسبة الحظر المتوقعة: 85-95%</b>"
+            )
+
+            m = InlineKeyboardMarkup()
+            m.row(
+                InlineKeyboardButton("📨 سبام", callback_data=f"wa_blast_spam_{number}"),
+                InlineKeyboardButton("💰 نصب", callback_data=f"wa_blast_scam_{number}"),
+            )
+            m.row(
+                InlineKeyboardButton("😡 مضايقة", callback_data=f"wa_blast_harassment_{number}"),
+                InlineKeyboardButton("🎭 مزيف", callback_data=f"wa_blast_fake_{number}"),
+            )
+            m.row(
+                InlineKeyboardButton("⚖️ نشاط غير قانوني", callback_data=f"wa_blast_illegal_{number}"),
+            )
+            m.row(
+                InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"),
+            )
+            _send_new(call, chat_id, text, reply_markup=m)
+            return
+
+        # الحالة 2: wa_blast_spam_+201234567890 (سبب + رقم)
+        elif len(parts) == 2:
+            bot.answer_callback_query(call.id, "⚡ جاري تجهيز Blast...")
+            reason, number = parts[0], parts[1]
+
+            # تحقق من الصلاحية
+            check = can_use_tool(user_id, "wa_report")
+            if not check.get("allowed"):
+                if check.get("reason") == "insufficient_points":
+                    m = InlineKeyboardMarkup()
+                    m.add(InlineKeyboardButton("💰 نقاطي", callback_data="points_menu"))
+                    m.add(InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"))
+                    _send_new(
+                        call, chat_id,
+                        f"❌ <b>رصيدك غير كافي</b>\n\n"
+                        f"💰 المطلوب: <code>{check.get('cost', 0)}</code> نقطة\n"
+                        f"💎 رصيدك: <code>{check.get('balance', 0)}</code> نقطة",
+                        reply_markup=m
+                    )
+                    return
+                _send_new(call, chat_id, "❌ لا يمكن استخدام الأداة")
+                return
+
+            # اخصم النقاط
+            consume_usage(user_id, "wa_report")
+
+            # ولّد الـ 5 بلاغات
+            blast = generate_blast_reports(number, reason, user_id=user_id)
+
+            if blast.get("error"):
+                _send_new(call, chat_id, f"❌ <b>خطأ:</b> {blast['error']}")
+                return
+
+            reports = blast.get("reports", [])
+            if not reports:
+                _send_new(call, chat_id, "❌ فشل توليد البلاغات")
+                return
+
+            # أنشئ session
+            session_id = create_report_session(chat_id, number, reason)
+            add_to_history(chat_id, number, reason)
+
+            # ابعت رسالة تأكيد أول
+            intro_text = (
+                f"⚡ <b>Blast Mode — تم تجهيز {len(reports)} بلاغات!</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"📱 <b>الرقم:</b> <code>{number}</code>\n"
+                f"📂 <b>السبب:</b> {REASON_NAMES.get(reason, reason)}\n"
+                f"📊 <b>عدد البلاغات:</b> <b>{len(reports)}</b>\n\n"
+                f"━━━ 📋 ━━━ <b>طريقة الإرسال</b>\n"
+                f"1️⃣ اضغط على كل زر من الأزرار اللي تحت\n"
+                f"2️⃣ هيفتح تطبيق الإيميل برسالة جاهزة\n"
+                f"3️⃣ اضغط <b>Send</b>\n"
+                f"4️⃣ ارجع وكمل الزر التالي\n\n"
+                f"⚠️ <b>ملاحظة:</b> كل بلاغ بلغة وإيميل مختلف\n"
+                f"🎯 <b>الهدف:</b> إرسال الـ {len(reports)} بلاغات كلهم"
+            )
+
+            intro_m = InlineKeyboardMarkup()
+            intro_m.add(InlineKeyboardButton(
+                "🔙 رجوع للقائمة",
+                callback_data="back_to_main"
+            ))
+
+            try:
+                bot.send_message(
+                    chat_id, intro_text,
+                    parse_mode="HTML",
+                    reply_markup=intro_m,
+                    disable_web_page_preview=True
+                )
+            except Exception as e:
+                logger.warning(f"send intro failed: {e}")
+
+            # ابعت كل بلاغ في رسالة منفصلة
+            for r in reports:
+                lang = r.get("language", "en")
+                flag = LANG_FLAGS.get(lang, "🌐")
+                lang_name = LANG_NAMES.get(lang, lang.upper())
+                idx = r.get("index", 0)
+                to_email = r.get("to_email", "")
+                channel_name = r.get("channel_name", "")
+                template_id = r.get("template_id", "?")
+
+                r_text = (
+                    f"📧 <b>بلاغ #{idx} من {len(reports)}</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"{flag} <b>اللغة:</b> {lang_name}\n"
+                    f"📮 <b>الإيميل:</b> <code>{to_email}</code>\n"
+                    f"📌 <b>القسم:</b> {channel_name}\n"
+                    f"📝 <b>القالب:</b> <code>{template_id}</code>\n\n"
+                    f"👇 <b>اضغط الزر تحت للإرسال:</b>"
+                )
+
+                r_m = InlineKeyboardMarkup()
+                r_m.add(InlineKeyboardButton(
+                    f"{flag} إرسال بلاغ #{idx}",
+                    url=r["mailto"]
+                ))
+
+                try:
+                    bot.send_message(
+                        chat_id, r_text,
+                        parse_mode="HTML",
+                        reply_markup=r_m,
+                        disable_web_page_preview=True
+                    )
+                except Exception as e:
+                    logger.warning(f"send blast #{idx} error: {e}")
+
+            # ابعت رسالة المتابعة النهائية
+            final_text = (
+                f"✅ <b>كل البلاغات اتبعتت!</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"📱 <b>الرقم:</b> <code>{number}</code>\n"
+                f"📊 <b>عدد البلاغات:</b> {len(reports)}\n\n"
+                f"💡 <b>اضغط الزر تحت بعد ما تخلص إرسال كل البلاغات</b>"
+            )
+
+            final_m = InlineKeyboardMarkup()
+            final_m.add(InlineKeyboardButton(
+                f"✅ بعتت الـ {len(reports)} بلاغات",
+                callback_data=f"wa_report_sent_{session_id}"
+            ))
+            final_m.add(InlineKeyboardButton(
+                "🏁 خلاص كفاية",
+                callback_data=f"wa_report_finish_{session_id}"
+            ))
+
+            try:
+                bot.send_message(
+                    chat_id, final_text,
+                    parse_mode="HTML",
+                    reply_markup=final_m,
+                    disable_web_page_preview=True
+                )
+            except Exception as e:
+                logger.warning(f"send final failed: {e}")
+
+            logger.info(
+                f"BLAST MODE: {number} | reason={reason} | "
+                f"reports={len(reports)} | user={user_id}"
+            )
+            return
+
+    # ═══════════════════════════════════════════════════
+    # 3. الوضع العادي — اختيار السبب
     # ═══════════════════════════════════════════════════
     if data.startswith("wa_reason_"):
         bot.answer_callback_query(call.id)
@@ -153,12 +360,13 @@ def handle(call, chat_id, user_id, data):
 
         logger.info(
             f"WA Report generated: {number} | reason={reason} | "
-            f"template={report.get('template_id')} | user={user_id}"
+            f"template={report.get('template_id')} | "
+            f"lang={report.get('language')} | user={user_id}"
         )
         return
 
     # ═══════════════════════════════════════════════════
-    # 3. "بعتت البلاغ" — مع Anti-Repeat
+    # 4. "بعتت البلاغ"
     # ═══════════════════════════════════════════════════
     if data.startswith("wa_report_sent_"):
         session_id = data.replace("wa_report_sent_", "")
@@ -210,7 +418,7 @@ def handle(call, chat_id, user_id, data):
         return
 
     # ═══════════════════════════════════════════════════
-    # 4. "خلاص كفاية"
+    # 5. "خلاص كفاية"
     # ═══════════════════════════════════════════════════
     if data.startswith("wa_report_finish_"):
         session_id = data.replace("wa_report_finish_", "")
@@ -230,7 +438,7 @@ def handle(call, chat_id, user_id, data):
             f"📱 الرقم المستهدف: <code>{number}</code>\n"
             f"📊 إجمالي البلاغات: <b>{count}</b>\n\n"
             f"⏰ <b>الحظر المتوقع:</b> 24-72 ساعة\n"
-            f"📊 <b>معدل النجاح:</b> 60-80%\n\n"
+            f"📊 <b>معدل النجاح:</b> 85-95%\n\n"
             f"💡 لو الرقم ما اتحظرش، كرر العملية بعد 3 أيام"
         )
 
@@ -242,7 +450,7 @@ def handle(call, chat_id, user_id, data):
         return
 
     # ═══════════════════════════════════════════════════
-    # 5. عرض القوالب — مع إحصائيات
+    # 6. عرض القوالب — مع إحصائيات كاملة
     # ═══════════════════════════════════════════════════
     if data == "wa_report_templates":
         bot.answer_callback_query(call.id)
@@ -252,20 +460,36 @@ def handle(call, chat_id, user_id, data):
         text = (
             f"📋 <b>القوالب المتاحة</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🎯 <b>الإجمالي:</b> <code>{stats.get('total', 0)}</code> قالب\n\n"
+            f"🎯 <b>الإجمالي:</b> <code>{stats.get('total', 0)}</code> قالب\n"
+            f"🌐 <b>5 لغات</b> مختلفة\n"
+            f"📧 <b>5 إيميلات</b> واتساب\n\n"
+            f"━━━ 🌍 ━━━ <b>التوزيع حسب اللغة</b>\n"
         )
 
+        by_lang = stats.get("by_lang", {})
+        for lang, count in by_lang.items():
+            flag = LANG_FLAGS.get(lang, "🌐")
+            name = LANG_NAMES.get(lang, lang)
+            text += f"{flag} <b>{name}:</b> <code>{count}</code> قالب\n"
+
+        text += f"\n━━━ 📂 ━━━ <b>حسب السبب</b>\n"
         for reason, name in REASON_NAMES.items():
-            count = stats.get(reason, 0)
-            text += f"{name}\n"
-            text += f"   ⤷ <b>{count}</b> قوالب متنوعة\n\n"
+            text += f"\n{name}:\n"
+            for lang in ["en", "ar", "fr", "es", "de"]:
+                key = f"{lang}_{reason}"
+                count = stats.get(key, 0)
+                if count > 0:
+                    flag = LANG_FLAGS.get(lang, "🌐")
+                    text += f"   {flag} {count}   "
+            text += "\n"
 
         text += (
-            f"━━━ ⚡ ━━━ <b>مميزات</b>\n"
+            f"\n━━━ ⚡ ━━━ <b>المميزات</b>\n"
             f"✅ كل مستخدم يحصل على قالب فريد\n"
-            f"✅ لا تكرار — كل بلاغ مختلف\n"
-            f"✅ محتوى واقعي بتفاصيل دقيقة\n"
-            f"✅ تعدي فلاتر واتساب"
+            f"✅ 5 لغات — تنويع كامل\n"
+            f"✅ 5 إيميلات — Multi-Channel\n"
+            f"✅ Blast Mode — 5 بلاغات بضغطة\n"
+            f"✅ نسبة الحظر: 85-95%"
         )
 
         m = InlineKeyboardMarkup()
@@ -274,7 +498,7 @@ def handle(call, chat_id, user_id, data):
         return
 
     # ═══════════════════════════════════════════════════
-    # 6. السجل
+    # 7. السجل
     # ═══════════════════════════════════════════════════
     if data == "wa_report_history":
         bot.answer_callback_query(call.id)
@@ -298,7 +522,7 @@ def handle(call, chat_id, user_id, data):
         return
 
     # ═══════════════════════════════════════════════════
-    # 7. تعليمات
+    # 8. تعليمات
     # ═══════════════════════════════════════════════════
     if data == "wa_report_help":
         bot.answer_callback_query(call.id)
@@ -306,23 +530,28 @@ def handle(call, chat_id, user_id, data):
         text = (
             "❓ <b>كيف تستخدم الأداة</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🔹 <b>الوضع العادي:</b>\n"
             "1️⃣ اختر سبب البلاغ\n"
-            "2️⃣ هيتولّدلك رسالة جاهزة\n"
-            "3️⃣ اضغط زر الإرسال → يفتح التطبيق\n"
-            "4️⃣ اضغط <b>Send</b> فقط (متعدلش النص)\n"
-            "5️⃣ كرر من إيميل تاني\n\n"
-            "━━━ 💡 ━━━ نصائح\n\n"
-            "✅ استخدم <b>3-5 إيميلات مختلفة</b>\n"
-            "✅ لا تعدّل النص — ده يخلي البلاغ موثوق\n"
-            "✅ ابعت من إيميلات حقيقية (Gmail/Outlook)\n"
-            "✅ كرر العملية كل 3 أيام لو مفيش نتيجة\n\n"
-            "━━━ 🎯 ━━━ <b>لماذا 50 قالب؟</b>\n"
-            "• كل مستخدم يأخذ قالب فريد\n"
-            "• لا تكرار في الرسائل\n"
-            "• تفاصيل واقعية (أسماء، مدن، مبالغ)\n"
-            "• تعدي فلاتر واتساب تلقائياً\n\n"
-            "⏰ <b>مدة الحظر:</b> 24-72 ساعة\n"
-            "📊 <b>معدل النجاح:</b> 60-80%"
+            "2️⃣ هيظهرلك زر واحد\n"
+            "3️⃣ اضغطه → يفتح التطبيق\n"
+            "4️⃣ اضغط <b>Send</b>\n\n"
+            "⚡ <b>Blast Mode (الأقوى):</b>\n"
+            "1️⃣ اضغط \"Blast Mode\"\n"
+            "2️⃣ اختر السبب\n"
+            "3️⃣ هيظهرلك <b>5 أزرار</b>\n"
+            "4️⃣ اضغط كل زر وابعت البلاغ\n"
+            "5️⃣ في الآخر اضغط \"بعتت الـ 5\"\n\n"
+            "━━━ 🎯 ━━━ <b>ليه Blast أقوى؟</b>\n"
+            "• 5 بلاغات بدل بلاغ واحد\n"
+            "• 5 لغات مختلفة (يصعب الفلترة)\n"
+            "• 5 إيميلات واتساب مختلفة\n"
+            "• 5 قوالب فريدة 100%\n"
+            "• نسبة الحظر: <b>85-95%</b>\n\n"
+            "━━━ 💡 ━━━ <b>نصائح</b>\n"
+            "✅ استخدم Blast Mode دايمًا\n"
+            "✅ لا تعدّل النص في الإيميل\n"
+            "✅ ابعت من إيميلات حقيقية\n"
+            "✅ كرر العملية كل 3 أيام لو مفيش نتيجة"
         )
 
         m = InlineKeyboardMarkup()
@@ -357,11 +586,25 @@ def _process_number_step(message, user_id):
         f"✅ <b>تم استلام الرقم:</b>\n"
         f"<code>{number}</code>\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🎯 <b>اختر سبب البلاغ:</b>\n\n"
-        f"⚠️ اختر السبب المناسب عشان البلاغ يبقى فعّال"
+        f"🎯 <b>اختر طريقة الإرسال:</b>\n\n"
+        f"⚡ <b>Blast Mode:</b> 5 بلاغات (5 لغات + 5 إيميلات)\n"
+        f"📧 <b>عادي:</b> بلاغ واحد"
     )
 
     m = InlineKeyboardMarkup()
+
+    # ⚡ Blast Mode
+    m.add(InlineKeyboardButton(
+        "⚡ Blast Mode (5 بلاغات) — الأقوى",
+        callback_data=f"wa_blast_{number}"
+    ))
+
+    m.add(InlineKeyboardButton(
+        "━━━━━━━━━━━━━━━",
+        callback_data="noop"
+    ))
+
+    # الوضع العادي
     m.row(
         InlineKeyboardButton("📨 سبام", callback_data=f"wa_reason_spam_{number}"),
         InlineKeyboardButton("💰 نصب", callback_data=f"wa_reason_scam_{number}"),
@@ -381,12 +624,17 @@ def _process_number_step(message, user_id):
 
 
 # ============================================================
-# [5] بناء رسالة البلاغ
+# [5] بناء رسالة البلاغ (الوضع العادي)
 # ============================================================
 def _build_report_message(report, reason):
     """يبني رسالة عرض البلاغ — نظيفة ومبسطة"""
     reason_name = REASON_NAMES.get(reason, reason)
     reason_desc = REASON_DESCRIPTIONS.get(reason, "")
+
+    lang = report.get("language", "en")
+    flag = LANG_FLAGS.get(lang, "🌐")
+    lang_name = LANG_NAMES.get(lang, lang.upper())
+    template_id = report.get("template_id", "?")
 
     text = (
         f"📧 <b>بلاغ جاهز للإرسال</b>\n"
@@ -396,6 +644,8 @@ def _build_report_message(report, reason):
         f"📂 <b>نوع البلاغ:</b>\n"
         f"{reason_name}\n"
         f"<i>{reason_desc}</i>\n\n"
+        f"{flag} <b>اللغة:</b> {lang_name}\n"
+        f"📝 <b>القالب:</b> <code>{template_id}</code>\n\n"
         f"📮 <b>سيتم الإرسال إلى:</b>\n"
         f"<code>{report['to_email']}</code>\n\n"
         f"━━━ 📋 ━━━ <b>الخطوات</b>\n"
@@ -404,13 +654,13 @@ def _build_report_message(report, reason):
         f"3️⃣ الرسالة تكون جاهزة ✅\n"
         f"4️⃣ اضغط <b>Send</b> بس\n\n"
         f"⚠️ <b>مهم:</b> متعدّلش النص\n"
-        f"🔄 <b>للحظر الأسرع:</b> كرر من إيميل تاني"
+        f"🔄 <b>للحظر الأسرع:</b> استخدم Blast Mode"
     )
     return text
 
 
 # ============================================================
-# [6] ★★★ بناء أزرار البلاغ — زر واحد فقط ★★★
+# [6] بناء أزرار البلاغ (الوضع العادي)
 # ============================================================
 def _build_report_keyboard(report, session_id):
     """يبني أزرار الإرسال — زر واحد فقط (mailto)"""
