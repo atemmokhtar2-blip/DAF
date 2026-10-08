@@ -15,35 +15,20 @@ logger = get_logger("force_subscribe")
 
 
 # ============================================================
-# [1] ⚙️ الإعدادات — عدّل هنا
+# [1] ⚙️ الإعدادات — ضفت قناتك
 # ============================================================
 
-# القنوات المطلوبة (ممكن تزود أكتر من واحدة)
-# ⚠️ لازم البوت يكون ADMIN في كل قناة عشان يقدر يتحقق
 REQUIRED_CHANNELS = [
     {
-        "id": "-1001234567890",       # ← ID القناة (بالسالب)
-        "username": "@your_channel",  # ← يوزرنيم القناة
-        "name": "قناة البوت الرسمية",   # ← اسم القناة
-        "url": "https://t.me/your_channel",  # ← لينك القناة
+        "id": "-1002222222222",       # ⚠️ اتحقق من ID الحقيقي للقناة
+        "username": "@K_J6k",          # ⚠️ يوزرنيم القناة
+        "name": "K_J6 قناة البوت",      # اسم القناة المعروض
+        "url": "https://t.me/K_J6k",  # رابط القناة
     },
-    # ضيف قنوات تانية هنا لو عايز
-    # {
-    #     "id": "-1009876543210",
-    #     "username": "@channel2",
-    #     "name": "قناة الدعم",
-    #     "url": "https://t.me/channel2",
-    # },
 ]
 
-# هل الاشتراك إجباري ولا لأ
 FORCE_SUBSCRIBE_ENABLED = True
-
-# مدة الكاش (بالثواني) — لو المستخدم اتأكد إنه عضو، مش هنسأل تاني
-# 300 = 5 دقايق
-CHECK_CACHE_TTL = 300
-
-# هل الأدمن معفي؟
+CHECK_CACHE_TTL = 300  # 5 دقائق كاش
 ADMIN_EXEMPT = True
 
 
@@ -55,7 +40,6 @@ def _cache_key(user_id):
 
 
 def _is_cached(user_id):
-    """لو اتحقق قبل كده — استخدم الكاش"""
     if not redis_client:
         return False
     try:
@@ -65,7 +49,6 @@ def _is_cached(user_id):
 
 
 def _set_cache(user_id):
-    """احفظ إن المستخدم اتحقق"""
     if not redis_client:
         return
     try:
@@ -75,7 +58,6 @@ def _set_cache(user_id):
 
 
 def _clear_cache(user_id):
-    """امسح الكاش (لو اشترك جديد)"""
     if not redis_client:
         return
     try:
@@ -88,45 +70,44 @@ def _clear_cache(user_id):
 # [3] التحقق من العضوية
 # ============================================================
 def check_user_membership(user_id, channel):
-    """
-    يتحقق لو المستخدم عضو في قناة معينة
-    Returns: True لو عضو، False لو لأ
-    """
     try:
         member = bot.get_chat_member(channel["id"], user_id)
         status = member.status
 
-        # الحالات: creator, administrator, member, restricted, left, kicked
         if status in ("creator", "administrator", "member"):
             return True
-        # restricted ممكن يكون عضو بس ممنوع من حاجة
         if status == "restricted":
-            # لو is_member = True
             return getattr(member, "is_member", False)
         return False
     except Exception as e:
         err = str(e).lower()
-        # لو البوت مش أدمن أو القناة غلط
-        if "chat not found" in err or "bot is not a member" in err:
-            logger.error(f"❌ Bot is not admin in {channel['id']}!")
-            # نعتبره عضو عشان ما نمنعش المستخدمين
-            return True
+
+        # البوت مش أدمن في القناة → لازم نبلغ
+        if "chat not found" in err:
+            logger.error(
+                f"❌ Chat not found: {channel['id']} — "
+                f"تأكد إن البوت مضاف في القناة كـ Admin!"
+            )
+            return True  # اسمح للمستخدم عشان ما نوقفش البوت
+
+        if "bot is not a member" in err or "not enough rights" in err:
+            logger.error(
+                f"❌ Bot not admin in {channel['id']} — "
+                f"لازم تضيف البوت كـ Admin!"
+            )
+            return True  # اسمح
+
         if "user not found" in err:
             return False
+
         logger.warning(f"check_user_membership error: {e}")
-        # في حالة خطأ غير معروف، نسمح (أمان)
-        return True
+        return True  # اسمح في حالة خطأ غير معروف
 
 
 def check_all_channels(user_id):
-    """
-    يتحقق من كل القنوات
-    Returns: (is_member: bool, missing_channels: list)
-    """
     if not FORCE_SUBSCRIBE_ENABLED:
         return True, []
 
-    # الأدمن معفي؟
     if ADMIN_EXEMPT:
         try:
             from points_system import is_admin
@@ -135,7 +116,6 @@ def check_all_channels(user_id):
         except Exception:
             pass
 
-    # الكاش
     if _is_cached(user_id):
         return True, []
 
@@ -154,12 +134,9 @@ def check_all_channels(user_id):
 
 
 # ============================================================
-# [4] بناء رسالة الاشتراك الإجباري
+# [4] بناء رسالة الاشتراك
 # ============================================================
 def build_subscribe_message(missing_channels, user_name=""):
-    """
-    يبني رسالة "اشترك أولاً"
-    """
     if len(missing_channels) == 1:
         ch = missing_channels[0]
         text = (
@@ -192,14 +169,12 @@ def build_subscribe_message(missing_channels, user_name=""):
 
     m = InlineKeyboardMarkup()
 
-    # أزرار القنوات
     for ch in missing_channels:
         m.add(InlineKeyboardButton(
             f"📢 {ch['name']}",
             url=ch['url']
         ))
 
-    # زر التحقق
     m.add(InlineKeyboardButton(
         "✅ تحققت من الاشتراك",
         callback_data="fs_check"
@@ -209,22 +184,22 @@ def build_subscribe_message(missing_channels, user_name=""):
 
 
 # ============================================================
-# [5] Middleware — يتحقق من كل رسالة
+# [5] Middleware
 # ============================================================
 def check_and_prompt(message_or_call):
-    """
-    يتحقق لو المستخدم مشترك
-    Returns: True لو مسموح يكمل، False لو محتاج يشترك
-    """
     if not FORCE_SUBSCRIBE_ENABLED:
         return True
 
     try:
-        # استخرج info من message أو call
         if hasattr(message_or_call, "from_user"):
             user_id = message_or_call.from_user.id
             user_name = message_or_call.from_user.first_name or ""
-            chat_id = message_or_call.chat.id if hasattr(message_or_call, "chat") else message_or_call.message.chat.id
+            if hasattr(message_or_call, "chat"):
+                chat_id = message_or_call.chat.id
+            elif hasattr(message_or_call, "message"):
+                chat_id = message_or_call.message.chat.id
+            else:
+                return True
         else:
             return True
 
@@ -233,7 +208,6 @@ def check_and_prompt(message_or_call):
         if is_member:
             return True
 
-        # ابعتله رسالة الاشتراك
         text, m = build_subscribe_message(missing, user_name)
 
         try:
@@ -250,7 +224,6 @@ def check_and_prompt(message_or_call):
 
     except Exception as e:
         logger.exception(f"check_and_prompt error: {e}")
-        # في حالة خطأ، اسمح
         return True
 
 
@@ -258,7 +231,6 @@ def check_and_prompt(message_or_call):
 # [6] Init — تسجيل الـ handler
 # ============================================================
 def init_force_subscribe(bot_instance=None):
-    """تسجيل handler زر التحقق"""
     global bot
     if bot_instance:
         bot = bot_instance
@@ -269,7 +241,6 @@ def init_force_subscribe(bot_instance=None):
         chat_id = call.message.chat.id
         user_name = call.from_user.first_name or ""
 
-        # امسح الكاش الأول
         _clear_cache(user_id)
 
         is_member, missing = check_all_channels(user_id)
@@ -277,7 +248,6 @@ def init_force_subscribe(bot_instance=None):
         if is_member:
             bot.answer_callback_query(call.id, "✅ تمام! تم التحقق", show_alert=False)
 
-            # امسح رسالة الاشتراك
             try:
                 bot.delete_message(chat_id, call.message.message_id)
             except Exception:
@@ -307,7 +277,6 @@ def init_force_subscribe(bot_instance=None):
                 show_alert=True
             )
 
-            # حدّث رسالة الاشتراك
             text, m = build_subscribe_message(missing, user_name)
             try:
                 bot.edit_message_text(
@@ -321,7 +290,10 @@ def init_force_subscribe(bot_instance=None):
             except Exception:
                 pass
 
-    logger.info(f"[+] Force Subscribe initialized | Channels: {len(REQUIRED_CHANNELS)}")
+    logger.info(
+        f"[+] Force Subscribe initialized | "
+        f"Channels: {len(REQUIRED_CHANNELS)}"
+    )
     return True
 
 
@@ -329,11 +301,9 @@ def init_force_subscribe(bot_instance=None):
 # [7] Public API
 # ============================================================
 def is_subscribed(user_id):
-    """يتحقق لو المستخدم مشترك (بدون ما يبعت رسالة)"""
     is_member, _ = check_all_channels(user_id)
     return is_member
 
 
 def get_required_channels():
-    """يرجع قائمة القنوات"""
     return REQUIRED_CHANNELS
