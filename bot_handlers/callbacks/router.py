@@ -1,6 +1,6 @@
 # bot_handlers/callbacks/router.py
 # ============================================================
-# Router v6.1 — مع Force Subscribe + WhatsApp Blast + WhatsApp Report
+# Router v6.2 — مع Force Subscribe + WhatsApp Blast + WhatsApp Report
 # ============================================================
 
 from config import bot
@@ -57,7 +57,12 @@ except Exception as e:
 
 # ═══ Force Subscribe ═══
 try:
-    from force_subscribe import is_subscribed, build_subscribe_message, check_all_channels
+    from force_subscribe import (
+        is_subscribed,
+        build_subscribe_message,
+        check_all_channels,
+        handle_fs_check_callback,
+    )
     FS_AVAILABLE = True
     logger.info("[router] Force Subscribe loaded")
 except Exception as e:
@@ -74,10 +79,15 @@ except Exception as e:
     def check_all_channels(user_id):
         return True, []
 
+    def handle_fs_check_callback(call):
+        try:
+            bot.answer_callback_query(call.id, "❌ خدمة التحقق غير متاحة", show_alert=True)
+        except Exception:
+            pass
+
 
 # ============================================================
 # ROUTES — الترتيب مهم جداً!
-# ⚠️ ملاحظة: fs_check بيتعامل معاه من force_subscribe.py مباشرة
 # ============================================================
 ROUTES = [
     # ═══════════════════════════════════════════════════════
@@ -186,19 +196,30 @@ def callback_handler(call):
     logger.info(f"[CALLBACK] user={user_id} | data='{data}'")
 
     # ═══════════════════════════════════════════════════
-    # ⚡ fs_check — سيبها لـ force_subscribe.py
+    # ⚡ fs_check — ننفذ الدالة مباشرة
     # ═══════════════════════════════════════════════════
     if data == "fs_check":
-        logger.info("[CALLBACK] fs_check → handled by force_subscribe")
-        return  # ← اطلع فوراً، خلّي الـ handler التاني يشتغل
+        logger.info("[CALLBACK] fs_check → calling handler directly")
+        try:
+            handle_fs_check_callback(call)
+        except Exception as e:
+            logger.exception(f"fs_check handler error: {e}")
+            try:
+                bot.answer_callback_query(
+                    call.id,
+                    "❌ حدث خطأ، حاول تاني",
+                    show_alert=True
+                )
+            except Exception:
+                pass
+        return
 
     # ═══════════════════════════════════════════════════
-    # ★ Force Subscribe Check ★
+    # ★ Force Subscribe Check (لأي زر تاني)
     # ═══════════════════════════════════════════════════
     if FS_AVAILABLE:
         try:
             if not is_subscribed(user_id):
-                # المستخدم مش مشترك
                 try:
                     _, missing = check_all_channels(user_id)
                     text, m = build_subscribe_message(
