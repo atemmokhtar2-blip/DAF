@@ -19,7 +19,7 @@ logger = get_logger("force_subscribe")
 
 REQUIRED_CHANNELS = [
     {
-        "id": "-1001234567890",       # ⚠️ حط الـ ID الحقيقي
+        "id": "-1004463431688",       # ⚠️ حط الـ ID الحقيقي
         "username": "@K_J6k",
         "name": "K_J6 قناة البوت",
         "url": "https://t.me/K_J6k",
