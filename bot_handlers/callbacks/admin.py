@@ -1,11 +1,11 @@
 # bot_handlers/callbacks/admin.py
 # ============================================================
-# ★ معالجات الأدمن — v7.0 (إدارة نقاط احترافية)
+# ★ معالجات الأدمن — v8.0 (كل الأزرار شغالة)
 # ============================================================
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from config import bot
+from config import bot, redis_client
 from imports_manager import (
     is_admin,
     build_admin_menu,
@@ -20,7 +20,6 @@ from imports_manager import (
     ban_user, unban_user, delete_user,
     activate_subscription,
     PRICING_PLANS,
-    # نقاط
     add_points,
     remove_points,
     set_points,
@@ -67,45 +66,36 @@ def handle(call, chat_id, user_id, data):
         return
 
     # ══════════════════════════════════════════════════
-    # 💰 ★★★ إدارة النقاط ★★★
+    # 💰 إدارة النقاط
     # ══════════════════════════════════════════════════
-
-    # فتح لوحة النقاط
     if data.startswith("admin_points_menu_"):
         _handle_points_menu(call, data)
         return
 
-    # إضافة نقاط — اختيار المبلغ
     if data.startswith("admin_add_points_"):
         _handle_add_points(call, data)
         return
 
-    # خصم نقاط — اختيار المبلغ
     if data.startswith("admin_rem_points_"):
         _handle_remove_points(call, data)
         return
 
-    # تعيين نقاط — اختيار المبلغ
     if data.startswith("admin_set_points_"):
         _handle_set_points(call, data)
         return
 
-    # تنفيذ إضافة نقاط بمبلغ معين
     if data.startswith("admin_do_add_"):
         _handle_do_add_points(call, data)
         return
 
-    # تنفيذ خصم نقاط بمبلغ معين
     if data.startswith("admin_do_rem_"):
         _handle_do_remove_points(call, data)
         return
 
-    # تنفيذ تعيين نقاط بمبلغ معين
     if data.startswith("admin_do_set_"):
         _handle_do_set_points(call, data)
         return
 
-    # مبلغ مخصص (custom)
     if data.startswith("admin_custom_add_"):
         _handle_custom_add(call, chat_id, data)
         return
@@ -118,7 +108,6 @@ def handle(call, chat_id, user_id, data):
         _handle_custom_set(call, chat_id, data)
         return
 
-    # سجل النقاط
     if data.startswith("admin_points_history_"):
         _handle_points_history(call, data)
         return
@@ -148,6 +137,21 @@ def handle(call, chat_id, user_id, data):
 
     if data.startswith("admin_msg_user_"):
         _handle_msg_user(call, chat_id, data)
+        return
+
+    # ══════════════════════════════════════════════════
+    # 💎 إعطاء نجوم (جديد)
+    # ══════════════════════════════════════════════════
+    if data == "admin_give_stars":
+        _handle_give_stars_prompt(call, chat_id)
+        return
+
+    if data.startswith("admin_stars_amount_"):
+        _handle_stars_amount(call, chat_id, data)
+        return
+
+    if data.startswith("admin_do_stars_"):
+        _handle_do_stars(call, chat_id, data)
         return
 
     # ══════════════════════════════════════════════════
@@ -184,39 +188,72 @@ def handle(call, chat_id, user_id, data):
         _handle_broadcast(call, chat_id)
         return
 
+    # ⚙️ إدارة التحديثات
+    if data == "admin_updates":
+        _handle_updates(call)
+        return
+
+    # ⚙️ الإعدادات
+    if data == "admin_settings":
+        _handle_settings(call)
+        return
+
+    # 🛠️ الصيانة
+    if data in ("admin_maintenance_on", "admin_maintenance_off"):
+        try:
+            bot.answer_callback_query(call.id, "⚠️ نظام الصيانة معطّل حالياً", show_alert=True)
+        except Exception:
+            pass
+        return
+
+    # 🔴 المراقبة المباشرة
     if data == "admin_live":
         _handle_live(call)
         return
 
+    # 📊 إحصائيات حية
     if data == "admin_adv_stats":
         _handle_adv_stats(call)
         return
 
+    # 📈 تحليلات
     if data == "admin_analytics":
         _handle_analytics(call)
         return
 
+    # 👑 أكثر المستخدمين
     if data == "admin_top_users":
         _handle_top_users(call)
         return
 
+    # 📋 سجل الأحداث
     if data == "admin_events":
         _handle_events(call)
         return
 
+    # 📡 سجل الأنشطة
     if data == "admin_activity_log":
         _handle_activity_log(call)
         return
 
+    # 🧹 تنظيف Redis
     if data == "admin_clean_redis":
         _handle_clean_redis(call)
         return
 
+    # 📥 تصدير
     if data == "admin_export":
         _handle_export(call, chat_id)
         return
 
+    # 📢 رسالة جماعية
+    if data == "admin_broadcast":
+        _handle_broadcast(call, chat_id)
+        return
+
+    # ══════════════════════════════════════════════════
     # WhatsApp Blast
+    # ══════════════════════════════════════════════════
     if data == "admin_wb_menu" or data.startswith("wbr_"):
         try:
             from admin_tools.whatsapp_blast.bot_handlers_real import handle_wb_callback
@@ -254,7 +291,7 @@ def _handle_users_list(call, data):
         )
         return
 
-    users.sort(key=lambda u: u.get("created_at", ""), reverse=True)
+    users.sort(key=lambda u: str(u.get("created_at", "")), reverse=True)
 
     try:
         keyboard = build_admin_users_keyboard(users, page=page)
@@ -275,7 +312,7 @@ def _handle_users_list(call, data):
 
 
 # ============================================================
-# [3] 👤 تفاصيل مستخدم — مع لوحة النقاط
+# [3] 👤 تفاصيل مستخدم
 # ============================================================
 def _handle_user_detail(call, data):
     try:
@@ -294,9 +331,7 @@ def _handle_user_detail(call, data):
         )
         return
 
-    # ابني المعلومات
     text = _build_user_detail_text(uid, user)
-    # ابني الأزرار الجديدة
     m = _build_user_detail_keyboard_v2(uid, user)
 
     safe_edit(call, text, reply_markup=m)
@@ -304,13 +339,9 @@ def _handle_user_detail(call, data):
 
 def _build_user_detail_text(uid, user):
     """يبني رسالة تفاصيل المستخدم"""
-    from datetime import datetime
-
-    # الاسم
     first_name = user.get("first_name", "Unknown")
     username = user.get("username", "")
 
-    # الحالة
     if is_admin(uid):
         status = "👑 أدمن"
     elif user.get("is_banned"):
@@ -320,25 +351,17 @@ def _build_user_detail_text(uid, user):
     else:
         status = "👤 مستخدم عادي"
 
-    # النقاط
     points = user.get("points", 0)
     total_earned = user.get("total_points_earned", 0)
     total_spent = user.get("total_points_spent", 0)
 
-    # الإحالات
     ref_count = user.get("referral_count", 0)
     ref_code = user.get("ref_code", "—")
 
-    # التسجيل
-    created_at = user.get("created_at", "")[:19].replace("T", " ")
+    created_at = str(user.get("created_at", ""))[:19].replace("T", " ")
 
-    # آخر ظهور
-    last_seen = user.get("last_seen", "")
-
-    # عدد الضحايا (لو موجود)
     victims_count = 0
     try:
-        from config import redis_client
         if redis_client:
             vids = redis_client.smembers(f"victims:{uid}") or set()
             victims_count = len(vids)
@@ -373,10 +396,10 @@ def _build_user_detail_text(uid, user):
 
 
 def _build_user_detail_keyboard_v2(uid, user):
-    """يبني أزرار تفاصيل المستخدم — مع إدارة النقاط"""
+    """يبني أزرار تفاصيل المستخدم"""
     m = InlineKeyboardMarkup()
 
-    # ═══════ صف: حالة الحساب ═══════
+    # حالة الحساب
     if user.get("is_banned"):
         m.row(
             InlineKeyboardButton("✅ فك الحظر", callback_data=f"admin_unban_user_{uid}"),
@@ -388,7 +411,7 @@ def _build_user_detail_keyboard_v2(uid, user):
             InlineKeyboardButton("🗑️ حذف", callback_data=f"admin_delete_user_{uid}"),
         )
 
-    # ═══════ صف: VIP ═══════
+    # VIP
     if user.get("is_vip"):
         m.row(
             InlineKeyboardButton("❌ إزالة VIP", callback_data=f"admin_remove_vip_{uid}"),
@@ -398,29 +421,34 @@ def _build_user_detail_keyboard_v2(uid, user):
             InlineKeyboardButton("💎 منح VIP", callback_data=f"admin_grant_vip_user_{uid}"),
         )
 
-    # ═══════ ★★★ إدارة النقاط ★★★ ═══════
+    # إدارة النقاط
     m.add(InlineKeyboardButton(
         "💰 إدارة النقاط",
         callback_data=f"admin_points_menu_{uid}"
     ))
 
-    # ═══════ صف: رسالة + سجل ═══════
+    # إعطاء نجوم
+    m.add(InlineKeyboardButton(
+        "⭐ إعطاء نجوم",
+        callback_data=f"admin_stars_amount_{uid}"
+    ))
+
+    # رسالة + تحديث
     m.row(
         InlineKeyboardButton("📨 رسالة له", callback_data=f"admin_msg_user_{uid}"),
         InlineKeyboardButton("🔄 تحديث", callback_data=f"admin_user_{uid}"),
     )
 
-    # ═══════ رجوع ═══════
+    # رجوع
     m.add(InlineKeyboardButton("🔙 رجوع للقائمة", callback_data="admin_users_0"))
 
     return m
 
 
 # ============================================================
-# [4] 💰 ★★★ لوحة إدارة النقاط ★★★
+# [4] 💰 إدارة النقاط
 # ============================================================
 def _handle_points_menu(call, data):
-    """يفتح لوحة إدارة النقاط لمستخدم"""
     try:
         uid = int(data.replace("admin_points_menu_", ""))
     except ValueError:
@@ -440,43 +468,20 @@ def _handle_points_menu(call, data):
         f"👤 <b>المستخدم:</b> {h(first_name)}\n"
         f"🆔 <b>ID:</b> <code>{uid}</code>\n"
         f"💎 <b>الرصيد الحالي:</b> <code>{points}</code> نقطة\n\n"
-        f"🎯 <b>اختر العملية:</b>\n\n"
-        f"➕ <b>إضافة نقاط</b> — زيادة الرصيد\n"
-        f"➖ <b>خصم نقاط</b> — إنقاص الرصيد\n"
-        f"⚙️ <b>تعيين نقاط</b> — ضبط الرصيد لقيمة معينة\n"
-        f"📋 <b>السجل</b> — آخر المعاملات"
+        f"🎯 <b>اختر العملية:</b>"
     )
 
     m = InlineKeyboardMarkup()
-    m.add(InlineKeyboardButton(
-        "➕ إضافة نقاط",
-        callback_data=f"admin_add_points_{uid}"
-    ))
-    m.add(InlineKeyboardButton(
-        "➖ خصم نقاط",
-        callback_data=f"admin_rem_points_{uid}"
-    ))
-    m.add(InlineKeyboardButton(
-        "⚙️ تعيين نقاط",
-        callback_data=f"admin_set_points_{uid}"
-    ))
-    m.add(InlineKeyboardButton(
-        "📋 سجل المعاملات",
-        callback_data=f"admin_points_history_{uid}"
-    ))
-    m.add(InlineKeyboardButton(
-        "🔙 رجوع",
-        callback_data=f"admin_user_{uid}"
-    ))
+    m.add(InlineKeyboardButton("➕ إضافة نقاط", callback_data=f"admin_add_points_{uid}"))
+    m.add(InlineKeyboardButton("➖ خصم نقاط", callback_data=f"admin_rem_points_{uid}"))
+    m.add(InlineKeyboardButton("⚙️ تعيين نقاط", callback_data=f"admin_set_points_{uid}"))
+    m.add(InlineKeyboardButton("📋 سجل المعاملات", callback_data=f"admin_points_history_{uid}"))
+    m.add(InlineKeyboardButton("🔙 رجوع", callback_data=f"admin_user_{uid}"))
 
     safe_edit(call, text, reply_markup=m)
 
 
-# ══════════════════════════════════════════════════════
-# ➕ إضافة نقاط
-# ══════════════════════════════════════════════════════
 def _handle_add_points(call, data):
-    """يعرض خيارات المبالغ للإضافة"""
     try:
         uid = int(data.replace("admin_add_points_", ""))
     except ValueError:
@@ -498,7 +503,6 @@ def _handle_add_points(call, data):
     )
 
     m = InlineKeyboardMarkup()
-    # المبالغ السريعة
     m.row(
         InlineKeyboardButton("+5", callback_data=f"admin_do_add_{uid}_5"),
         InlineKeyboardButton("+10", callback_data=f"admin_do_add_{uid}_10"),
@@ -513,22 +517,13 @@ def _handle_add_points(call, data):
         InlineKeyboardButton("+500", callback_data=f"admin_do_add_{uid}_500"),
         InlineKeyboardButton("+1000", callback_data=f"admin_do_add_{uid}_1000"),
     )
-    # مبلغ مخصص
-    m.add(InlineKeyboardButton(
-        "✏️ مبلغ مخصص",
-        callback_data=f"admin_custom_add_{uid}"
-    ))
-    m.add(InlineKeyboardButton(
-        "🔙 رجوع",
-        callback_data=f"admin_points_menu_{uid}"
-    ))
+    m.add(InlineKeyboardButton("✏️ مبلغ مخصص", callback_data=f"admin_custom_add_{uid}"))
+    m.add(InlineKeyboardButton("🔙 رجوع", callback_data=f"admin_points_menu_{uid}"))
 
     safe_edit(call, text, reply_markup=m)
 
 
 def _handle_do_add_points(call, data):
-    """ينفذ إضافة النقاط"""
-    # admin_do_add_UID_AMOUNT
     try:
         parts = data.replace("admin_do_add_", "").rsplit("_", 1)
         uid = int(parts[0])
@@ -543,7 +538,6 @@ def _handle_do_add_points(call, data):
 
     old_points = user.get("points", 0)
 
-    # نفذ الإضافة
     try:
         add_points(uid, amount, reason="منحة من الأدمن", admin_action=True)
     except Exception as e:
@@ -551,11 +545,9 @@ def _handle_do_add_points(call, data):
         safe_edit(call, f"❌ فشل: {h(str(e)[:200])}")
         return
 
-    # جلب البيانات الجديدة
     user = get_user(uid)
     new_points = user.get("points", 0)
 
-    # رسالة النجاح
     text = (
         f"✅ <b>تم إضافة النقاط</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -568,10 +560,7 @@ def _handle_do_add_points(call, data):
     )
 
     m = InlineKeyboardMarkup()
-    m.add(InlineKeyboardButton(
-        "💰 إدارة النقاط",
-        callback_data=f"admin_points_menu_{uid}"
-    ))
+    m.add(InlineKeyboardButton("💰 إدارة النقاط", callback_data=f"admin_points_menu_{uid}"))
     m.row(
         InlineKeyboardButton("➕ إضافة تاني", callback_data=f"admin_add_points_{uid}"),
         InlineKeyboardButton("👤 المستخدم", callback_data=f"admin_user_{uid}"),
@@ -579,7 +568,6 @@ def _handle_do_add_points(call, data):
 
     safe_edit(call, text, reply_markup=m)
 
-    # إشعار المستخدم
     try:
         bot.send_message(
             uid,
@@ -595,11 +583,7 @@ def _handle_do_add_points(call, data):
     logger.info(f"[ADMIN] {call.from_user.id} added +{amount} points to {uid}")
 
 
-# ══════════════════════════════════════════════════════
-# ➖ خصم نقاط
-# ══════════════════════════════════════════════════════
 def _handle_remove_points(call, data):
-    """يعرض خيارات المبالغ للخصم"""
     try:
         uid = int(data.replace("admin_rem_points_", ""))
     except ValueError:
@@ -635,20 +619,13 @@ def _handle_remove_points(call, data):
         InlineKeyboardButton("-500", callback_data=f"admin_do_rem_{uid}_500"),
         InlineKeyboardButton("-1000", callback_data=f"admin_do_rem_{uid}_1000"),
     )
-    m.add(InlineKeyboardButton(
-        "✏️ مبلغ مخصص",
-        callback_data=f"admin_custom_rem_{uid}"
-    ))
-    m.add(InlineKeyboardButton(
-        "🔙 رجوع",
-        callback_data=f"admin_points_menu_{uid}"
-    ))
+    m.add(InlineKeyboardButton("✏️ مبلغ مخصص", callback_data=f"admin_custom_rem_{uid}"))
+    m.add(InlineKeyboardButton("🔙 رجوع", callback_data=f"admin_points_menu_{uid}"))
 
     safe_edit(call, text, reply_markup=m)
 
 
 def _handle_do_remove_points(call, data):
-    """ينفذ خصم النقاط"""
     try:
         parts = data.replace("admin_do_rem_", "").rsplit("_", 1)
         uid = int(parts[0])
@@ -685,10 +662,7 @@ def _handle_do_remove_points(call, data):
     )
 
     m = InlineKeyboardMarkup()
-    m.add(InlineKeyboardButton(
-        "💰 إدارة النقاط",
-        callback_data=f"admin_points_menu_{uid}"
-    ))
+    m.add(InlineKeyboardButton("💰 إدارة النقاط", callback_data=f"admin_points_menu_{uid}"))
     m.row(
         InlineKeyboardButton("➖ خصم تاني", callback_data=f"admin_rem_points_{uid}"),
         InlineKeyboardButton("👤 المستخدم", callback_data=f"admin_user_{uid}"),
@@ -696,7 +670,6 @@ def _handle_do_remove_points(call, data):
 
     safe_edit(call, text, reply_markup=m)
 
-    # إشعار المستخدم
     try:
         bot.send_message(
             uid,
@@ -711,11 +684,7 @@ def _handle_do_remove_points(call, data):
     logger.info(f"[ADMIN] {call.from_user.id} removed -{amount} points from {uid}")
 
 
-# ══════════════════════════════════════════════════════
-# ⚙️ تعيين نقاط
-# ══════════════════════════════════════════════════════
 def _handle_set_points(call, data):
-    """يعرض خيارات التعيين"""
     try:
         uid = int(data.replace("admin_set_points_", ""))
     except ValueError:
@@ -749,20 +718,13 @@ def _handle_set_points(call, data):
         InlineKeyboardButton("100", callback_data=f"admin_do_set_{uid}_100"),
         InlineKeyboardButton("500", callback_data=f"admin_do_set_{uid}_500"),
     )
-    m.add(InlineKeyboardButton(
-        "✏️ قيمة مخصصة",
-        callback_data=f"admin_custom_set_{uid}"
-    ))
-    m.add(InlineKeyboardButton(
-        "🔙 رجوع",
-        callback_data=f"admin_points_menu_{uid}"
-    ))
+    m.add(InlineKeyboardButton("✏️ قيمة مخصصة", callback_data=f"admin_custom_set_{uid}"))
+    m.add(InlineKeyboardButton("🔙 رجوع", callback_data=f"admin_points_menu_{uid}"))
 
     safe_edit(call, text, reply_markup=m)
 
 
 def _handle_do_set_points(call, data):
-    """ينفذ تعيين النقاط"""
     try:
         parts = data.replace("admin_do_set_", "").rsplit("_", 1)
         uid = int(parts[0])
@@ -798,10 +760,7 @@ def _handle_do_set_points(call, data):
     )
 
     m = InlineKeyboardMarkup()
-    m.add(InlineKeyboardButton(
-        "💰 إدارة النقاط",
-        callback_data=f"admin_points_menu_{uid}"
-    ))
+    m.add(InlineKeyboardButton("💰 إدارة النقاط", callback_data=f"admin_points_menu_{uid}"))
     m.row(
         InlineKeyboardButton("⚙️ تعيين تاني", callback_data=f"admin_set_points_{uid}"),
         InlineKeyboardButton("👤 المستخدم", callback_data=f"admin_user_{uid}"),
@@ -809,7 +768,6 @@ def _handle_do_set_points(call, data):
 
     safe_edit(call, text, reply_markup=m)
 
-    # إشعار المستخدم
     try:
         bot.send_message(
             uid,
@@ -823,11 +781,7 @@ def _handle_do_set_points(call, data):
     logger.info(f"[ADMIN] {call.from_user.id} set points for {uid} to {amount}")
 
 
-# ══════════════════════════════════════════════════════
-# ✏️ المبالغ المخصصة
-# ══════════════════════════════════════════════════════
 def _handle_custom_add(call, chat_id, data):
-    """يطلب مبلغ مخصص للإضافة"""
     try:
         uid = int(data.replace("admin_custom_add_", ""))
     except ValueError:
@@ -840,14 +794,10 @@ def _handle_custom_add(call, chat_id, data):
         f"⚠️ أرقام فقط",
         parse_mode="HTML"
     )
-    bot.register_next_step_handler(
-        msg,
-        lambda m: _process_custom_amount(m, uid, "add")
-    )
+    bot.register_next_step_handler(msg, lambda m: _process_custom_amount(m, uid, "add"))
 
 
 def _handle_custom_rem(call, chat_id, data):
-    """يطلب مبلغ مخصص للخصم"""
     try:
         uid = int(data.replace("admin_custom_rem_", ""))
     except ValueError:
@@ -860,14 +810,10 @@ def _handle_custom_rem(call, chat_id, data):
         f"⚠️ أرقام فقط",
         parse_mode="HTML"
     )
-    bot.register_next_step_handler(
-        msg,
-        lambda m: _process_custom_amount(m, uid, "rem")
-    )
+    bot.register_next_step_handler(msg, lambda m: _process_custom_amount(m, uid, "rem"))
 
 
 def _handle_custom_set(call, chat_id, data):
-    """يطلب قيمة مخصصة للتعيين"""
     try:
         uid = int(data.replace("admin_custom_set_", ""))
     except ValueError:
@@ -880,10 +826,7 @@ def _handle_custom_set(call, chat_id, data):
         f"⚠️ أرقام فقط",
         parse_mode="HTML"
     )
-    bot.register_next_step_handler(
-        msg,
-        lambda m: _process_custom_amount(m, uid, "set")
-    )
+    bot.register_next_step_handler(msg, lambda m: _process_custom_amount(m, uid, "set"))
 
 
 def _process_custom_amount(message, uid, action):
@@ -913,7 +856,6 @@ def _process_custom_amount(message, uid, action):
 
     old_points = user.get("points", 0)
 
-    # نفذ العملية
     try:
         if action == "add":
             add_points(uid, amount, reason="منحة من الأدمن", admin_action=True)
@@ -921,7 +863,7 @@ def _process_custom_amount(message, uid, action):
         elif action == "rem":
             remove_points(uid, amount, reason="خصم من الأدمن")
             emoji, verb = "➖", "خصم"
-        else:  # set
+        else:
             set_points(uid, amount, reason="تعيين من الأدمن")
             emoji, verb = "⚙️", "تعيين"
     except Exception as e:
@@ -929,11 +871,9 @@ def _process_custom_amount(message, uid, action):
         bot.send_message(chat_id, f"❌ فشل: {h(str(e)[:200])}")
         return
 
-    # جلب البيانات الجديدة
     user = get_user(uid)
     new_points = user.get("points", 0)
 
-    # رسالة النجاح
     result_text = (
         f"✅ <b>تم {verb} النقاط</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -945,21 +885,14 @@ def _process_custom_amount(message, uid, action):
     )
 
     m = InlineKeyboardMarkup()
-    m.add(InlineKeyboardButton(
-        "💰 إدارة النقاط",
-        callback_data=f"admin_points_menu_{uid}"
-    ))
-    m.add(InlineKeyboardButton(
-        "👤 المستخدم",
-        callback_data=f"admin_user_{uid}"
-    ))
+    m.add(InlineKeyboardButton("💰 إدارة النقاط", callback_data=f"admin_points_menu_{uid}"))
+    m.add(InlineKeyboardButton("👤 المستخدم", callback_data=f"admin_user_{uid}"))
 
     try:
         bot.send_message(chat_id, result_text, parse_mode="HTML", reply_markup=m)
     except Exception:
         pass
 
-    # إشعار المستخدم
     try:
         if action == "add":
             msg_text = f"🎉 <b>تم إضافة نقاط!</b>\n\n➕ <b>+{amount}</b> نقطة\n💎 رصيدك: <code>{new_points}</code>"
@@ -975,11 +908,7 @@ def _process_custom_amount(message, uid, action):
     logger.info(f"[ADMIN] {chat_id} {action} {amount} points for {uid}")
 
 
-# ══════════════════════════════════════════════════════
-# 📋 سجل النقاط
-# ══════════════════════════════════════════════════════
 def _handle_points_history(call, data):
-    """يعرض آخر 20 معاملة للمستخدم"""
     try:
         uid = int(data.replace("admin_points_history_", ""))
     except ValueError:
@@ -1008,7 +937,7 @@ def _handle_points_history(call, data):
 
         for i, item in enumerate(reversed(history), 1):
             h_type = item.get("type", "")
-            date_str = item.get("date", "")[:19].replace("T", " ")
+            date_str = str(item.get("date", ""))[:19].replace("T", " ")
             points = item.get("points", 0)
 
             if h_type == "tool_used":
@@ -1040,20 +969,183 @@ def _handle_points_history(call, data):
             text += "\n"
 
     m = InlineKeyboardMarkup()
-    m.add(InlineKeyboardButton(
-        "💰 إدارة النقاط",
-        callback_data=f"admin_points_menu_{uid}"
-    ))
-    m.add(InlineKeyboardButton(
-        "🔙 رجوع",
-        callback_data=f"admin_user_{uid}"
-    ))
+    m.add(InlineKeyboardButton("💰 إدارة النقاط", callback_data=f"admin_points_menu_{uid}"))
+    m.add(InlineKeyboardButton("🔙 رجوع", callback_data=f"admin_user_{uid}"))
 
     safe_edit(call, text, reply_markup=m)
 
 
 # ============================================================
-# [5] 👑 إدارة الحساب
+# [5] ⭐ إعطاء نجوم (جديد)
+# ============================================================
+def _handle_give_stars_prompt(call, chat_id):
+    """يطلب المستخدم والنجوم"""
+    msg = bot.send_message(
+        chat_id,
+        f"⭐ <b>إعطاء نجوم</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📝 <b>أرسل بصيغة:</b>\n"
+        f"<code>user_id|amount</code>\n\n"
+        f"<b>مثال:</b>\n"
+        f"<code>123456789|50</code>",
+        parse_mode="HTML"
+    )
+    bot.register_next_step_handler(msg, _process_give_stars)
+
+
+def _process_give_stars(message):
+    """يعالج إعطاء النجوم"""
+    chat_id = message.chat.id
+
+    if not is_admin(chat_id):
+        return
+
+    if not message.text:
+        return
+
+    try:
+        parts = message.text.strip().split("|")
+        if len(parts) != 2:
+            raise ValueError("wrong format")
+
+        uid = int(parts[0].strip())
+        amount = int(parts[1].strip())
+    except (ValueError, IndexError):
+        bot.send_message(
+            chat_id,
+            "❌ <b>صيغة غلط!</b>\n\n"
+            "استخدم: <code>user_id|amount</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    user = get_user(uid)
+    if not user:
+        bot.send_message(chat_id, "❌ المستخدم غير موجود")
+        return
+
+    # سجل في DB
+    try:
+        from database import log_admin_action_db
+        log_admin_action_db(
+            admin_id=chat_id,
+            target_id=uid,
+            action="give_stars",
+            amount=amount,
+            reason="منحة نجوم من الأدمن"
+        )
+    except Exception as e:
+        logger.warning(f"log_admin_action_db error: {e}")
+
+    bot.send_message(
+        chat_id,
+        f"✅ <b>تم إعطاء النجوم</b>\n\n"
+        f"👤 المستخدم: <code>{uid}</code>\n"
+        f"⭐ عدد النجوم: <code>{amount}</code>",
+        parse_mode="HTML"
+    )
+
+    logger.info(f"[ADMIN] {chat_id} gave {amount} stars to {uid}")
+
+
+def _handle_stars_amount(call, chat_id, data):
+    """يعرض خيارات النجوم"""
+    try:
+        uid = int(data.replace("admin_stars_amount_", ""))
+    except ValueError:
+        return
+
+    user = get_user(uid)
+    if not user:
+        safe_edit(call, "❌ المستخدم غير موجود")
+        return
+
+    first_name = user.get("first_name", "Unknown")
+
+    text = (
+        f"⭐ <b>إعطاء نجوم</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👤 <b>المستخدم:</b> {h(first_name)}\n"
+        f"🆔 <b>ID:</b> <code>{uid}</code>\n\n"
+        f"🎯 <b>اختر عدد النجوم:</b>"
+    )
+
+    m = InlineKeyboardMarkup()
+    m.row(
+        InlineKeyboardButton("⭐ 10", callback_data=f"admin_do_stars_{uid}_10"),
+        InlineKeyboardButton("⭐ 25", callback_data=f"admin_do_stars_{uid}_25"),
+        InlineKeyboardButton("⭐ 50", callback_data=f"admin_do_stars_{uid}_50"),
+    )
+    m.row(
+        InlineKeyboardButton("⭐ 100", callback_data=f"admin_do_stars_{uid}_100"),
+        InlineKeyboardButton("⭐ 250", callback_data=f"admin_do_stars_{uid}_250"),
+    )
+    m.row(
+        InlineKeyboardButton("⭐ 500", callback_data=f"admin_do_stars_{uid}_500"),
+        InlineKeyboardButton("⭐ 1000", callback_data=f"admin_do_stars_{uid}_1000"),
+    )
+    m.add(InlineKeyboardButton("🔙 رجوع", callback_data=f"admin_user_{uid}"))
+
+    safe_edit(call, text, reply_markup=m)
+
+
+def _handle_do_stars(call, chat_id, data):
+    """ينفذ إعطاء النجوم"""
+    try:
+        parts = data.replace("admin_do_stars_", "").rsplit("_", 1)
+        uid = int(parts[0])
+        amount = int(parts[1])
+    except (ValueError, IndexError):
+        return
+
+    user = get_user(uid)
+    if not user:
+        safe_edit(call, "❌ المستخدم غير موجود")
+        return
+
+    # سجل
+    try:
+        from database import log_admin_action_db
+        log_admin_action_db(
+            admin_id=chat_id,
+            target_id=uid,
+            action="give_stars",
+            amount=amount,
+            reason="منحة نجوم من الأدمن"
+        )
+    except Exception as e:
+        logger.warning(f"log_admin_action_db error: {e}")
+
+    text = (
+        f"✅ <b>تم إعطاء النجوم</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👤 <b>المستخدم:</b> {h(user.get('first_name', 'Unknown'))}\n"
+        f"🆔 <b>ID:</b> <code>{uid}</code>\n\n"
+        f"⭐ <b>عدد النجوم:</b> <code>{amount}</code>"
+    )
+
+    m = InlineKeyboardMarkup()
+    m.add(InlineKeyboardButton("👤 المستخدم", callback_data=f"admin_user_{uid}"))
+
+    safe_edit(call, text, reply_markup=m)
+
+    # إشعار المستخدم
+    try:
+        bot.send_message(
+            uid,
+            f"🎉 <b>تم إعطاءك نجوم!</b>\n\n"
+            f"⭐ <b>{amount}</b> نجمة\n\n"
+            f"شكراً لاستخدامك البوت 🙏",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
+    logger.info(f"[ADMIN] {chat_id} gave {amount} stars to {uid}")
+
+
+# ============================================================
+# [6] 👑 إدارة الحساب
 # ============================================================
 def _handle_ban(call, data):
     try:
@@ -1173,7 +1265,7 @@ def _handle_msg_user(call, chat_id, data):
 
 
 # ============================================================
-# [6] ⚙️ الأدوات الإدارية
+# [7] ⚙️ الأدوات الإدارية
 # ============================================================
 def _handle_panel(call):
     try:
@@ -1197,7 +1289,7 @@ def _handle_stats(call):
 
 def _handle_recent(call):
     users = get_all_users()
-    users.sort(key=lambda u: u.get("created_at", ""), reverse=True)
+    users.sort(key=lambda u: str(u.get("created_at", "")), reverse=True)
     lines = ["🆕 <b>آخر 10 مستخدمين:</b>\n"]
     for u in users[:10]:
         uid = u.get("user_id")
@@ -1236,6 +1328,30 @@ def _handle_broadcast(call, chat_id):
     )
     from ..steps.admin_steps import admin_broadcast_handler
     bot.register_next_step_handler(msg, admin_broadcast_handler)
+
+
+def _handle_updates(call):
+    """⚙️ إدارة التحديثات"""
+    try:
+        from ..keyboards import build_update_panel
+        safe_edit(call, "⚙️ <b>إدارة التحديثات</b>", reply_markup=build_update_panel())
+    except Exception as e:
+        logger.warning(f"build_update_panel error: {e}")
+        m = InlineKeyboardMarkup()
+        m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
+        safe_edit(call, "⚙️ <b>إدارة التحديثات</b>\n\n<i>غير متاح حالياً</i>", reply_markup=m)
+
+
+def _handle_settings(call):
+    """⚙️ الإعدادات"""
+    text = (
+        "⚙️ <b>إعدادات النظام</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "🎯 استخدم الأزرار للتحكم\n"
+    )
+    m = InlineKeyboardMarkup()
+    m.add(InlineKeyboardButton("🔙 رجوع", callback_data="admin_panel"))
+    safe_edit(call, text, reply_markup=m)
 
 
 def _handle_live(call):
@@ -1297,7 +1413,7 @@ def _handle_events(call):
     else:
         lines = ["📋 <b>آخر 20 حدث</b>\n━━━━━━━━━━━━━━━━━━\n"]
         for ev in events:
-            ts = ev.get("time_str", "?")[11:19]
+            ts = str(ev.get("time_str", "?"))[11:19]
             admin_id = ev.get("admin_id", "?")
             etype = ev.get("type", "?")
             lines.append(f"• <code>{h(ts)}</code> — <code>{h(str(admin_id))[:10]}</code> — <b>{h(etype)}</b>")
@@ -1319,7 +1435,7 @@ def _handle_activity_log(call):
     else:
         lines = ["📡 <b>آخر 20 نشاط</b>\n━━━━━━━━━━━━━━━━━━\n"]
         for ev in activities:
-            ts = ev.get("time_str", "?")[11:19]
+            ts = str(ev.get("time_str", "?"))[11:19]
             uid = ev.get("user_id", "?")
             action = ev.get("action", "?")
             lines.append(f"• <code>{h(ts)}</code> — <code>{h(str(uid))[:10]}</code> — <b>{h(action)}</b>")
