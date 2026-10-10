@@ -6,3 +6,4 @@ pyTelegramBotAPI
 psutil
 phonenumbers==8.13.27
 cryptography
+psycopg2-binary
