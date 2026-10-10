@@ -24,6 +24,13 @@ def silent_label_handler(message):
             bot.send_message(chat_id, "❌ فشل توليد الرابط، حاول مرة أخرى")
             return
 
+        # استخرج الـ session_id من اللينك
+        session_id = ""
+        try:
+            session_id = link.rstrip("/").split("/")[-1]
+        except Exception:
+            pass
+
         text = (
             f"✅ <b>الرابط جاهز!</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n\n"
@@ -35,10 +42,28 @@ def silent_label_handler(message):
         )
 
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🎯 لوحة Silent", callback_data="gen_silent"))
-        markup.add(InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main"))
+
+        # ⚡ زر فتح اللوحة — يفتح لوحة إحصائيات الجلسات
+        markup.add(InlineKeyboardButton(
+            "📊 لوحة التحكم",
+            callback_data="silent_stats"
+        ))
+
+        # 🆕 زر إنشاء لينك جديد
+        markup.add(InlineKeyboardButton(
+            "🆕 لينك جديد",
+            callback_data="silent_new"
+        ))
+
+        # 🔙 زر الرجوع
+        markup.add(InlineKeyboardButton(
+            "🔙 رجوع",
+            callback_data="back_to_main"
+        ))
 
         bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
+
+        logger.info(f"Silent link created: {label} → {session_id}")
 
     except Exception as e:
         logger.exception(f"silent_label_handler error: {e}")
