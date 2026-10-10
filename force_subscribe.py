@@ -1,10 +1,9 @@
 # force_subscribe.py
 # ============================================================
-# Force Subscribe System — الاشتراك الإجباري في القنوات
+# Force Subscribe System — v2.0
 # ============================================================
 import time
 import json
-from typing import Optional
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import bot, redis_client
@@ -15,20 +14,20 @@ logger = get_logger("force_subscribe")
 
 
 # ============================================================
-# [1] ⚙️ الإعدادات — ضفت قناتك
+# [1] ⚙️ الإعدادات
 # ============================================================
 
 REQUIRED_CHANNELS = [
     {
-        "id": "-1004463431688",       # ⚠️ اتحقق من ID الحقيقي للقناة
-        "username": "@K_J6k",          # ⚠️ يوزرنيم القناة
-        "name": "K_J6 قناة البوت",      # اسم القناة المعروض
-        "url": "https://t.me/K_J6k",  # رابط القناة
+        "id": "-1001234567890",       # ⚠️ حط الـ ID الحقيقي
+        "username": "@K_J6k",
+        "name": "K_J6 قناة البوت",
+        "url": "https://t.me/K_J6k",
     },
 ]
 
 FORCE_SUBSCRIBE_ENABLED = True
-CHECK_CACHE_TTL = 300  # 5 دقائق كاش
+CHECK_CACHE_TTL = 300
 ADMIN_EXEMPT = True
 
 
@@ -67,7 +66,7 @@ def _clear_cache(user_id):
 
 
 # ============================================================
-# [3] التحقق من العضوية
+# [3] التحقق
 # ============================================================
 def check_user_membership(user_id, channel):
     try:
@@ -82,26 +81,24 @@ def check_user_membership(user_id, channel):
     except Exception as e:
         err = str(e).lower()
 
-        # البوت مش أدمن في القناة → لازم نبلغ
         if "chat not found" in err:
             logger.error(
                 f"❌ Chat not found: {channel['id']} — "
                 f"تأكد إن البوت مضاف في القناة كـ Admin!"
             )
-            return True  # اسمح للمستخدم عشان ما نوقفش البوت
+            return True
 
         if "bot is not a member" in err or "not enough rights" in err:
             logger.error(
-                f"❌ Bot not admin in {channel['id']} — "
-                f"لازم تضيف البوت كـ Admin!"
+                f"❌ Bot not admin in {channel['id']}!"
             )
-            return True  # اسمح
+            return True
 
         if "user not found" in err:
             return False
 
         logger.warning(f"check_user_membership error: {e}")
-        return True  # اسمح في حالة خطأ غير معروف
+        return True
 
 
 def check_all_channels(user_id):
@@ -134,7 +131,7 @@ def check_all_channels(user_id):
 
 
 # ============================================================
-# [4] بناء رسالة الاشتراك
+# [4] رسالة الاشتراك
 # ============================================================
 def build_subscribe_message(missing_channels, user_name=""):
     if len(missing_channels) == 1:
@@ -228,67 +225,107 @@ def check_and_prompt(message_or_call):
 
 
 # ============================================================
-# [6] Init — تسجيل الـ handler
+# [6] ★★★ Handler لزر التحقق ★★★
+# ============================================================
+def handle_fs_check_callback(call):
+    """
+    يتعامل مع زر "تحققت من الاشتراك"
+    بتتنادى من router.py مباشرة
+    """
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    user_name = call.from_user.first_name or ""
+
+    logger.info(f"[FS_CHECK] user={user_id} pressed check button")
+
+    # امسح الكاش عشان نتحقق من جديد
+    _clear_cache(user_id)
+
+    is_member, missing = check_all_channels(user_id)
+    logger.info(
+        f"[FS_CHECK] user={user_id} | is_member={is_member} | "
+        f"missing={len(missing)}"
+    )
+
+    if is_member:
+        # ✅ المستخدم مشترك
+        try:
+            bot.answer_callback_query(
+                call.id,
+                "✅ تمام! تم التحقق بنجاح",
+                show_alert=False
+            )
+        except Exception:
+            pass
+
+        # امسح رسالة الاشتراك
+        try:
+            bot.delete_message(chat_id, call.message.message_id)
+        except Exception as e:
+            logger.debug(f"delete message error: {e}")
+
+        # ابعتله القائمة الرئيسية
+        try:
+            from bot_handlers.keyboards import main_menu, main_menu_text
+            bot.send_message(
+                chat_id,
+                main_menu_text(user_id),
+                reply_markup=main_menu(user_id),
+                parse_mode="HTML"
+            )
+            logger.info(f"[FS_CHECK] Main menu sent to {user_id}")
+        except Exception as e:
+            logger.warning(f"[FS_CHECK] send main menu error: {e}")
+            try:
+                bot.send_message(
+                    chat_id,
+                    "✅ <b>تم التحقق بنجاح!</b>\n\n"
+                    "استخدم /start لفتح القائمة الرئيسية",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
+    else:
+        # ❌ المستخدم مش مشترك
+        try:
+            bot.answer_callback_query(
+                call.id,
+                "❌ لسه مشتركتش! اشترك في القناة الأول",
+                show_alert=True
+            )
+        except Exception:
+            pass
+
+        # حدّث رسالة الاشتراك
+        try:
+            text, m = build_subscribe_message(missing, user_name)
+            bot.edit_message_text(
+                text=text,
+                chat_id=chat_id,
+                message_id=call.message.message_id,
+                reply_markup=m,
+                parse_mode="HTML",
+                disable_web_page_preview=True
+            )
+        except Exception as e:
+            logger.warning(f"[FS_CHECK] edit message error: {e}")
+
+
+# ============================================================
+# [7] Init
 # ============================================================
 def init_force_subscribe(bot_instance=None):
+    """تسجيل handler احتياطي"""
     global bot
     if bot_instance:
         bot = bot_instance
 
+    # Handler احتياطي (لو router مش شغال)
     @bot.callback_query_handler(func=lambda call: call.data == "fs_check")
-    def _handle_check(call):
-        user_id = call.from_user.id
-        chat_id = call.message.chat.id
-        user_name = call.from_user.first_name or ""
-
-        _clear_cache(user_id)
-
-        is_member, missing = check_all_channels(user_id)
-
-        if is_member:
-            bot.answer_callback_query(call.id, "✅ تمام! تم التحقق", show_alert=False)
-
-            try:
-                bot.delete_message(chat_id, call.message.message_id)
-            except Exception:
-                pass
-
-            # ابعتله القائمة الرئيسية
-            try:
-                from bot_handlers.keyboards import main_menu, main_menu_text
-                bot.send_message(
-                    chat_id,
-                    main_menu_text(user_id),
-                    reply_markup=main_menu(user_id),
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                logger.warning(f"send main menu error: {e}")
-                bot.send_message(
-                    chat_id,
-                    "✅ <b>تم التحقق بنجاح!</b>\n\n"
-                    "استخدم /start لفتح القائمة",
-                    parse_mode="HTML"
-                )
-        else:
-            bot.answer_callback_query(
-                call.id,
-                "❌ لسه مشتركتش! اشترك في القنوات الأول",
-                show_alert=True
-            )
-
-            text, m = build_subscribe_message(missing, user_name)
-            try:
-                bot.edit_message_text(
-                    text=text,
-                    chat_id=chat_id,
-                    message_id=call.message.message_id,
-                    reply_markup=m,
-                    parse_mode="HTML",
-                    disable_web_page_preview=True
-                )
-            except Exception:
-                pass
+    def _handle_check_fallback(call):
+        logger.info("[FS_CHECK] Fallback handler called")
+        handle_fs_check_callback(call)
 
     logger.info(
         f"[+] Force Subscribe initialized | "
@@ -298,7 +335,7 @@ def init_force_subscribe(bot_instance=None):
 
 
 # ============================================================
-# [7] Public API
+# [8] Public API
 # ============================================================
 def is_subscribed(user_id):
     is_member, _ = check_all_channels(user_id)
