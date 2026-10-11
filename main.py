@@ -138,7 +138,15 @@ except Exception as e:
     logger.exception(f"[-] admin_tools import failed: {e}")
     ADMIN_TOOLS_ENABLED = False
     def init_admin_tools(app, bot): pass
-
+# ═══════════════════════════════════════════════════════
+# ★★★ Init Broadcast Tool ★★★
+# ═══════════════════════════════════════════════════════
+try:
+    from broadcast_tool import init_broadcast_handler
+    init_broadcast_handler(bot)
+    logger.info("[+] Init: broadcast tool")
+except Exception as e:
+    logger.exception(f"[-] Broadcast tool init failed: {e}")
 
 # ═══════════════════════════════════════════════════════
 # Force Subscribe
