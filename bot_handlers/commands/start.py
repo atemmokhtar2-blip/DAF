@@ -1,6 +1,6 @@
 # bot_handlers/commands/start.py
 # ============================================================
-# /start — مع Force Subscribe
+# /start — مع Force Subscribe + Pending Referral
 # ============================================================
 from config import bot
 from imports_manager import (
@@ -25,7 +25,32 @@ def start_command(message):
     username = message.from_user.username or "Unknown"
 
     # ═══════════════════════════════════════════════════
-    # ★ Force Subscribe Check ★
+    # 1. استخراج كود الإحالة (قبل أي check)
+    # ═══════════════════════════════════════════════════
+    ref_code = None
+
+    try:
+        if message.text and len(message.text.split()) > 1:
+            arg = message.text.split()[1].strip()
+            if arg.startswith("ref_"):
+                ref_code = arg.replace("ref_", "")
+                logger.info(f"[START] Ref code detected: {ref_code} | user={user_id}")
+    except Exception as e:
+        logger.warning(f"[START] parse ref error: {e}")
+
+    # ═══════════════════════════════════════════════════
+    # 2. ⚡ لو فيه ref_code → احفظه كمعلّق (قبل FS check)
+    # ═══════════════════════════════════════════════════
+    if ref_code:
+        try:
+            from force_subscribe import save_pending_ref
+            save_pending_ref(user_id, ref_code)
+            logger.info(f"[START] Pending ref saved: {user_id} → {ref_code}")
+        except Exception as e:
+            logger.warning(f"[START] save_pending_ref error: {e}")
+
+    # ═══════════════════════════════════════════════════
+    # 3. ★ Force Subscribe Check ★
     # ═══════════════════════════════════════════════════
     try:
         from force_subscribe import check_and_prompt
@@ -34,32 +59,40 @@ def start_command(message):
             return
     except Exception as e:
         logger.warning(f"force_subscribe check error: {e}")
-        # لو حصل خطأ، كمّل عادي
 
     # ═══════════════════════════════════════════════════
-    # --- استخراج كود الإحالة ---
+    # 4. جلب كود الإحالة المعلّق (لو مشترك من الأول)
     # ═══════════════════════════════════════════════════
     referred_by = None
-    ref_code = None
 
     try:
-        if message.text and len(message.text.split()) > 1:
-            arg = message.text.split()[1].strip()
-            if arg.startswith("ref_"):
-                ref_code = arg.replace("ref_", "")
-                # هل المستخدم جديد؟
-                from imports_manager import get_user
-                existing_user = get_user(user_id)
-                if not existing_user and POINTS_SYSTEM_ENABLED:
-                    referrer_id = get_referral_by_code(ref_code)
-                    if referrer_id and int(referrer_id) != user_id:
-                        referred_by = referrer_id
-                        logger.info(f"New user via referral: {user_id} - {referrer_id}")
+        from force_subscribe import get_pending_ref, clear_pending_ref
+        from imports_manager import get_user
+
+        pending_ref = get_pending_ref(user_id)
+
+        if pending_ref and POINTS_SYSTEM_ENABLED:
+            existing_user = get_user(user_id)
+
+            if not existing_user:
+                referrer_id = get_referral_by_code(pending_ref)
+                if referrer_id and int(referrer_id) != user_id:
+                    referred_by = referrer_id
+                    logger.info(
+                        f"[START] ✅ Referral applied: "
+                        f"{user_id} referred by {referrer_id}"
+                    )
+                else:
+                    logger.info(f"[START] Invalid referrer for {pending_ref}")
+
+            # امسح الكود (سواء صح أو غلط)
+            clear_pending_ref(user_id)
+
     except Exception as e:
-        logger.warning(f"parse ref error: {e}")
+        logger.warning(f"[START] pending ref error: {e}")
 
     # ═══════════════════════════════════════════════════
-    # --- إنشاء/جلب المستخدم ---
+    # 5. إنشاء/جلب المستخدم
     # ═══════════════════════════════════════════════════
     try:
         get_or_create_user(user_id, username, user_name, referred_by=referred_by)
@@ -67,7 +100,7 @@ def start_command(message):
         logger.exception(f"get_or_create_user error: {e}")
 
     # ═══════════════════════════════════════════════════
-    # --- رسالة الترحيب ---
+    # 6. رسالة الترحيب
     # ═══════════════════════════════════════════════════
     try:
         if is_admin(user_id):
@@ -81,7 +114,7 @@ def start_command(message):
         welcome_text = f"👋 أهلاً <b>{h(user_name)}</b>!"
 
     # ═══════════════════════════════════════════════════
-    # --- إرسال ---
+    # 7. إرسال
     # ═══════════════════════════════════════════════════
     try:
         bot.send_message(
