@@ -1,6 +1,7 @@
 # force_subscribe.py
 # ============================================================
-# Force Subscribe System — v2.0
+# Force Subscribe System — v3.0
+# + Pending Referral Tracking
 # ============================================================
 import time
 import json
@@ -14,9 +15,8 @@ logger = get_logger("force_subscribe")
 
 
 # ============================================================
-# [1] ⚙️ الإعدادات
+# [1] الإعدادات
 # ============================================================
-
 REQUIRED_CHANNELS = [
     {
         "id": "-1004463431688",       # ⚠️ حط الـ ID الحقيقي
@@ -30,9 +30,12 @@ FORCE_SUBSCRIBE_ENABLED = True
 CHECK_CACHE_TTL = 300
 ADMIN_EXEMPT = True
 
+# ⚡ TTL لكود الإحالة المعلّق (10 دقايق)
+PENDING_REF_TTL = 600
+
 
 # ============================================================
-# [2] Helpers
+# [2] Helpers - Cache
 # ============================================================
 def _cache_key(user_id):
     return f"fs_verified:{user_id}"
@@ -66,7 +69,63 @@ def _clear_cache(user_id):
 
 
 # ============================================================
-# [3] التحقق
+# [3] ⚡ Pending Referral Storage
+# ============================================================
+def _pending_ref_key(user_id):
+    return f"pending_ref:{user_id}"
+
+
+def save_pending_ref(user_id, ref_code):
+    """
+    يحفظ كود الإحالة مؤقتاً لحد ما المستخدم يخلّص اشتراك
+    """
+    if not redis_client or not ref_code:
+        return False
+    try:
+        redis_client.setex(
+            _pending_ref_key(user_id),
+            PENDING_REF_TTL,
+            ref_code
+        )
+        logger.info(f"[PENDING-REF] Saved: user={user_id} | code={ref_code}")
+        return True
+    except Exception as e:
+        logger.warning(f"save_pending_ref error: {e}")
+        return False
+
+
+def get_pending_ref(user_id):
+    """
+    يرجع كود الإحالة المعلّق (لو موجود)
+    """
+    if not redis_client:
+        return None
+    try:
+        raw = redis_client.get(_pending_ref_key(user_id))
+        if raw:
+            code = raw.decode() if isinstance(raw, bytes) else raw
+            logger.info(f"[PENDING-REF] Retrieved: user={user_id} | code={code}")
+            return code
+    except Exception as e:
+        logger.warning(f"get_pending_ref error: {e}")
+    return None
+
+
+def clear_pending_ref(user_id):
+    """
+    يمسح كود الإحالة المعلّق بعد الاستخدام
+    """
+    if not redis_client:
+        return
+    try:
+        redis_client.delete(_pending_ref_key(user_id))
+        logger.info(f"[PENDING-REF] Cleared: user={user_id}")
+    except Exception:
+        pass
+
+
+# ============================================================
+# [4] التحقق من العضوية
 # ============================================================
 def check_user_membership(user_id, channel):
     try:
@@ -89,9 +148,7 @@ def check_user_membership(user_id, channel):
             return True
 
         if "bot is not a member" in err or "not enough rights" in err:
-            logger.error(
-                f"❌ Bot not admin in {channel['id']}!"
-            )
+            logger.error(f"❌ Bot not admin in {channel['id']}!")
             return True
 
         if "user not found" in err:
@@ -131,7 +188,7 @@ def check_all_channels(user_id):
 
 
 # ============================================================
-# [4] رسالة الاشتراك
+# [5] رسالة الاشتراك
 # ============================================================
 def build_subscribe_message(missing_channels, user_name=""):
     if len(missing_channels) == 1:
@@ -145,9 +202,8 @@ def build_subscribe_message(missing_channels, user_name=""):
             f"1️⃣ تدخل القناة\n"
             f"2️⃣ تعمل <b>Join / اشتراك</b>\n"
             f"3️⃣ ترجع هنا وتدوس <b>✅ تحققت</b>\n\n"
-            f"💡 <b>ليه ده مطلوب؟</b>\n"
-            f"عشان نضمن إن المستخدمين نشطين\n"
-            f"والبوت يستمر في التطوير"
+            f"💡 <b>ملاحظة:</b> لو دخلت من رابط إحالة،\n"
+            f"الإحالة هتتحسب أوتوماتيك بعد التحقق ✨"
         )
     else:
         text = (
@@ -181,7 +237,7 @@ def build_subscribe_message(missing_channels, user_name=""):
 
 
 # ============================================================
-# [5] Middleware
+# [6] Middleware
 # ============================================================
 def check_and_prompt(message_or_call):
     if not FORCE_SUBSCRIBE_ENABLED:
@@ -225,23 +281,23 @@ def check_and_prompt(message_or_call):
 
 
 # ============================================================
-# [6] ★★★ Handler لزر التحقق ★★★
+# [7] ⚡ Handle fs_check - مع معالجة الإحالة
 # ============================================================
 def handle_fs_check_callback(call):
     """
     يتعامل مع زر "تحققت من الاشتراك"
-    بتتنادى من router.py مباشرة
+    ⚡ الإضافة الجديدة: يتحقق من وجود كود إحالة معلّق ويسجّله
     """
     user_id = call.from_user.id
     chat_id = call.message.chat.id
     user_name = call.from_user.first_name or ""
+    username = call.from_user.username or "Unknown"
 
     logger.info(f"[FS_CHECK] user={user_id} pressed check button")
 
-    # امسح الكاش عشان نتحقق من جديد
     _clear_cache(user_id)
-
     is_member, missing = check_all_channels(user_id)
+
     logger.info(
         f"[FS_CHECK] user={user_id} | is_member={is_member} | "
         f"missing={len(missing)}"
@@ -263,6 +319,14 @@ def handle_fs_check_callback(call):
             bot.delete_message(chat_id, call.message.message_id)
         except Exception as e:
             logger.debug(f"delete message error: {e}")
+
+        # ═══════════════════════════════════════════════
+        # 🎁 معالجة الإحالة المعلّقة
+        # ═══════════════════════════════════════════════
+        try:
+            _process_pending_referral(user_id, user_name, username)
+        except Exception as e:
+            logger.exception(f"[FS_CHECK] pending referral error: {e}")
 
         # ابعتله القائمة الرئيسية
         try:
@@ -297,9 +361,8 @@ def handle_fs_check_callback(call):
         except Exception:
             pass
 
-        # حدّث رسالة الاشتراك
+        text, m = build_subscribe_message(missing, user_name)
         try:
-            text, m = build_subscribe_message(missing, user_name)
             bot.edit_message_text(
                 text=text,
                 chat_id=chat_id,
@@ -313,7 +376,109 @@ def handle_fs_check_callback(call):
 
 
 # ============================================================
-# [7] Init
+# [8] 🎁 معالجة الإحالة المعلّقة
+# ============================================================
+def _process_pending_referral(user_id, user_name, username):
+    """
+    يتعامل مع كود الإحالة المعلّق بعد التحقق من الاشتراك
+    """
+    # هات كود الإحالة المعلّق
+    pending_ref = get_pending_ref(user_id)
+
+    if not pending_ref:
+        logger.info(f"[FS_CHECK] No pending referral for user={user_id}")
+        return
+
+    logger.info(
+        f"[FS_CHECK] Processing pending referral: "
+        f"user={user_id} | code={pending_ref}"
+    )
+
+    try:
+        from imports_manager import (
+            get_user,
+            get_or_create_user,
+            get_referral_by_code,
+        )
+        from points_system import POINTS_SYSTEM_ENABLED
+
+        # 1. تحقق إن المستخدم جديد (مش موجود قبل كده)
+        existing_user = get_user(user_id)
+
+        if existing_user:
+            # المستخدم موجود بالفعل - مش هنحسب الإحالة
+            logger.info(
+                f"[FS_CHECK] User {user_id} already exists — "
+                f"referral not counted"
+            )
+            clear_pending_ref(user_id)
+            return
+
+        # 2. تحقق من صحة الكود
+        if not POINTS_SYSTEM_ENABLED:
+            logger.warning("[FS_CHECK] Points system disabled")
+            clear_pending_ref(user_id)
+            return
+
+        referrer_id = get_referral_by_code(pending_ref)
+
+        if not referrer_id:
+            logger.warning(
+                f"[FS_CHECK] Invalid ref code: {pending_ref}"
+            )
+            clear_pending_ref(user_id)
+            return
+
+        # 3. تأكد إن المستخدم مش هو نفس صاحب الإحالة
+        if int(referrer_id) == user_id:
+            logger.info("[FS_CHECK] User tried to refer themselves")
+            clear_pending_ref(user_id)
+            return
+
+        # 4. ✅ سجّل الإحالة
+        logger.info(
+            f"[FS_CHECK] ✅ Valid referral! "
+            f"referrer={referrer_id} → new_user={user_id}"
+        )
+
+        new_user = get_or_create_user(
+            user_id,
+            username=username,
+            first_name=user_name,
+            referred_by=referrer_id
+        )
+
+        if new_user:
+            logger.info(f"[FS_CHECK] ✅ User created with referral!")
+
+            # إشعار للمستخدم الجديد
+            try:
+                bot.send_message(
+                    user_id,
+                    f"🎉 <b>مرحباً بك!</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"✅ تم تسجيلك بنجاح\n"
+                    f"💰 حصلت على <b>25 نقطة</b> ترحيبية\n"
+                    f"🎁 تم احتساب الإحالة لصاحب الرابط\n\n"
+                    f"شكراً لاستخدامك البوت 🙏",
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.debug(f"notify new user error: {e}")
+
+        # امسح الكود المعلّق
+        clear_pending_ref(user_id)
+
+        metrics.inc_counter("referral_via_fs_check")
+
+    except Exception as e:
+        logger.exception(f"_process_pending_referral error: {e}")
+        # امسح الكود عشان ما يفضلش معلّق
+        clear_pending_ref(user_id)
+
+
+# ============================================================
+# [9] Init
 # ============================================================
 def init_force_subscribe(bot_instance=None):
     """تسجيل handler احتياطي"""
@@ -321,7 +486,6 @@ def init_force_subscribe(bot_instance=None):
     if bot_instance:
         bot = bot_instance
 
-    # Handler احتياطي (لو router مش شغال)
     @bot.callback_query_handler(func=lambda call: call.data == "fs_check")
     def _handle_check_fallback(call):
         logger.info("[FS_CHECK] Fallback handler called")
@@ -329,13 +493,14 @@ def init_force_subscribe(bot_instance=None):
 
     logger.info(
         f"[+] Force Subscribe initialized | "
-        f"Channels: {len(REQUIRED_CHANNELS)}"
+        f"Channels: {len(REQUIRED_CHANNELS)} | "
+        f"Pending ref tracking: ON"
     )
     return True
 
 
 # ============================================================
-# [8] Public API
+# [10] Public API
 # ============================================================
 def is_subscribed(user_id):
     is_member, _ = check_all_channels(user_id)
