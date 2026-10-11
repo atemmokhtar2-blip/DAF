@@ -52,45 +52,41 @@ def admin_search_handler(message):
 
 
 def admin_broadcast_handler(message):
+    """
+    يستقبل الرسالة من الأدمن ويرسلها كمعاينة أولاً
+    """
     if not is_admin(message.chat.id):
         return
-
+    
     text = message.text
     if not text:
-        return
-
-    users = get_all_users()
-    success = failed = 0
-
-    status_msg = bot.send_message(
-        message.chat.id,
-        f"📢 جاري الإرسال لـ {len(users)}..."
-    )
-
-    for u in users:
-        uid = u.get("user_id")
-        if u.get("is_banned"):
-            continue
-        try:
-            bot.send_message(
-                uid,
-                f"📢 <b>رسالة من الإدارة:</b>\n\n{h(text)}",
-                parse_mode="HTML"
-            )
-            success += 1
-            time.sleep(0.05)
-        except Exception:
-            failed += 1
-
-    try:
-        bot.edit_message_text(
-            f"✅ <b>تم!</b>\n✔️ {success}\n❌ {failed}",
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
+        bot.send_message(
+            message.chat.id,
+            "❌ الرسالة فارغة",
             parse_mode="HTML"
         )
-    except Exception:
-        pass
+        return
+    
+    # ⚡ استخدم أداة البث الاحترافية
+    try:
+        from broadcast_tool import broadcast_with_preview
+        success = broadcast_with_preview(message.chat.id, text)
+        
+        if success:
+            logger.info(f"[BROADCAST] Preview sent to admin {message.chat.id}")
+        else:
+            bot.send_message(
+                message.chat.id,
+                "❌ فشل إرسال المعاينة",
+                parse_mode="HTML"
+            )
+    except Exception as e:
+        logger.exception(f"admin_broadcast_handler error: {e}")
+        bot.send_message(
+            message.chat.id,
+            f"❌ خطأ: {str(e)[:200]}",
+            parse_mode="HTML"
+        )
 
 
 def admin_ban_handler(message):
