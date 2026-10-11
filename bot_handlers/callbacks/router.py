@@ -1,6 +1,6 @@
 # bot_handlers/callbacks/router.py
 # ============================================================
-# Router v6.3 — مع Force Subscribe + WhatsApp Blast + WhatsApp Report
+# Router v6.4 — مع Broadcast Tool
 # ============================================================
 
 from config import bot
@@ -87,6 +87,36 @@ except Exception as e:
 
 
 # ============================================================
+# ⚡ Broadcast Callback Handler
+# ============================================================
+def _handle_broadcast_callback(call, chat_id, user_id, data):
+    """يوجه الـ callbacks للـ broadcast_tool"""
+    try:
+        from broadcast_tool import (
+            handle_bc_cancel,
+            handle_bc_stats,
+            handle_bc_back,
+            handle_bc_confirm_send,
+        )
+
+        if data == "bc_cancel":
+            handle_bc_cancel(call)
+        elif data == "bc_stats":
+            handle_bc_stats(call)
+        elif data == "bc_back":
+            handle_bc_back(call)
+        elif data == "bc_confirm_send":
+            handle_bc_confirm_send(call)
+
+    except Exception as e:
+        logger.exception(f"broadcast callback error: {e}")
+        try:
+            bot.answer_callback_query(call.id, f"❌ خطأ: {str(e)[:100]}", show_alert=True)
+        except Exception:
+            pass
+
+
+# ============================================================
 # ROUTES — الترتيب مهم جداً!
 # ============================================================
 ROUTES = [
@@ -102,6 +132,12 @@ ROUTES = [
               or d.startswith("wa_report_sent_")
               or d.startswith("wa_report_finish_"),
      wa_report_cb.handle),
+
+    # ═══════════════════════════════════════════════════════
+    # ⚡ [0.5] Broadcast Tool
+    # ═══════════════════════════════════════════════════════
+    (lambda d: d in ("bc_cancel", "bc_stats", "bc_back", "bc_confirm_send"),
+     _handle_broadcast_callback),
 
     # ═══════════════════════════════════════════════════════
     # [1] WhatsApp Blast
@@ -141,7 +177,7 @@ ROUTES = [
     (lambda d: d == "search_menu" or d.startswith("search_"), search_cb.handle),
 
     # ═══════════════════════════════════════════════════════
-    # [7] Facebook — مع fb_show_panel
+    # [7] Facebook
     # ═══════════════════════════════════════════════════════
     (lambda d: d == "gen_fb" 
               or d == "fb_show_panel"
@@ -149,7 +185,7 @@ ROUTES = [
               or d.startswith("fb_stats_"), fb_cb.handle),
 
     # ═══════════════════════════════════════════════════════
-    # [8] Instagram — مع ig_show_panel
+    # [8] Instagram
     # ═══════════════════════════════════════════════════════
     (lambda d: d == "gen_ig" 
               or d == "ig_show_panel"
@@ -267,7 +303,6 @@ def callback_handler(call):
                     handler(call, chat_id, user_id, data)
                     return
             except Exception as e:
-                # تجنب التعامل مع أخطاء الـ timeout
                 err_str = str(e).lower()
                 if "query is too old" in err_str or "query id is invalid" in err_str:
                     logger.warning(f"[CALLBACK] route #{idx} — query expired for '{data}'")
