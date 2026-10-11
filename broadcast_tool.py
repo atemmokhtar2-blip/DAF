@@ -1,7 +1,7 @@
 # broadcast_tool.py
 # ============================================================
-# Broadcast Tool v2 — إرسال رسائل جماعية احترافي
-# مع تقارير كاملة + أمان من الحظر
+# Broadcast Tool v3 — إرسال رسائل جماعية احترافي
+# ⚡ Handlers بتتنادى من router.py
 # ============================================================
 import os
 import time
@@ -256,8 +256,6 @@ def _run_broadcast(session_id, admin_id, message, users, notify_admin):
                 f"⏱️ ETA: {int(remaining)}s"
             )
 
-            update_broadcast_stats(session_id, 0, 0, 0)
-
         # ═══ Batch Delay ═══
         if i % BATCH_SIZE == 0:
             logger.info(f"⏸️ Batch break: {BATCH_DELAY}s")
@@ -353,7 +351,6 @@ def _run_broadcast(session_id, admin_id, message, users, notify_admin):
 
 def _estimate_time(total_users):
     """يحسب الوقت المتوقع"""
-    # Time per user = BROADCAST_DELAY + batches
     per_user = BROADCAST_DELAY
     batches = total_users // BATCH_SIZE
     total_seconds = (total_users * per_user) + (batches * BATCH_DELAY)
@@ -472,17 +469,13 @@ def build_broadcast_stats_text(admin_id=None):
 
 
 # ============================================================
-# [6] Broadcast Handler
+# [6] ⚡ Standalone Callback Handlers
+# بتتنادى من router.py
 # ============================================================
-def init_broadcast_handler(bot_instance=None):
-    """تسجيل handlers للبث"""
-    global bot
-    if bot_instance:
-        bot = bot_instance
 
-    # ═══ تأكيد الإرسال ═══
-    @bot.callback_query_handler(func=lambda call: call.data == "bc_confirm_send")
-    def _confirm_send(call):
+def handle_bc_confirm_send(call):
+    """يتعامل مع زر الإرسال للجميع"""
+    try:
         admin_id = call.from_user.id
 
         if admin_id != ADMIN_ID:
@@ -524,31 +517,50 @@ def init_broadcast_handler(bot_instance=None):
                 parse_mode="HTML"
             )
 
-    # ═══ إلغاء الإرسال ═══
-    @bot.callback_query_handler(func=lambda call: call.data == "bc_cancel")
-    def _cancel_send(call):
+    except Exception as e:
+        logger.exception(f"handle_bc_confirm_send error: {e}")
+        try:
+            bot.answer_callback_query(call.id, f"❌ خطأ: {str(e)[:100]}", show_alert=True)
+        except Exception:
+            pass
+
+
+def handle_bc_cancel(call):
+    """يتعامل مع زر الإلغاء"""
+    try:
         admin_id = call.from_user.id
 
         if admin_id != ADMIN_ID:
+            bot.answer_callback_query(call.id, "❌ للأدمن فقط", show_alert=True)
             return
 
         bot.answer_callback_query(call.id, "❌ تم الإلغاء")
 
         try:
             redis_client.delete(f"broadcast_preview:{admin_id}")
+        except Exception:
+            pass
+
+        try:
             bot.delete_message(call.message.chat.id, call.message.message_id)
         except Exception:
             pass
 
-    # ═══ إحصائيات ═══
-    @bot.callback_query_handler(func=lambda call: call.data == "bc_stats")
-    def _show_stats(call):
+    except Exception as e:
+        logger.exception(f"handle_bc_cancel error: {e}")
+
+
+def handle_bc_stats(call):
+    """يتعامل مع زر الإحصائيات"""
+    try:
         admin_id = call.from_user.id
 
         if admin_id != ADMIN_ID:
+            bot.answer_callback_query(call.id, "❌ للأدمن فقط", show_alert=True)
             return
 
         bot.answer_callback_query(call.id)
+
         text = build_broadcast_stats_text(admin_id)
 
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -563,21 +575,44 @@ def init_broadcast_handler(bot_instance=None):
                 reply_markup=m,
                 parse_mode="HTML"
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"edit stats message error: {e}")
 
-    @bot.callback_query_handler(func=lambda call: call.data == "bc_back")
-    def _back(call):
-        try:
-            bot.delete_message(call.message.chat.id, call.message.message_id)
-        except Exception:
-            pass
+    except Exception as e:
+        logger.exception(f"handle_bc_stats error: {e}")
 
-    logger.info("[+] Broadcast handler initialized")
+
+def handle_bc_back(call):
+    """يتعامل مع زر الرجوع"""
+    try:
+        bot.answer_callback_query(call.id)
+    except Exception:
+        pass
+
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except Exception as e:
+        logger.warning(f"delete back message error: {e}")
 
 
 # ============================================================
-# [7] Public API for Admin
+# [7] Init (بدون تسجيل handlers)
+# ============================================================
+def init_broadcast_handler(bot_instance=None):
+    """
+    تهيئة broadcast tool
+    ⚠️ الـ handlers بتتسجل من router.py
+    """
+    global bot
+    if bot_instance:
+        bot = bot_instance
+
+    logger.info("[+] Broadcast tool initialized (handlers via router)")
+    return True
+
+
+# ============================================================
+# [8] Public API for Admin
 # ============================================================
 def admin_broadcast_confirm(admin_id, message):
     """يستخدم من admin_steps"""
