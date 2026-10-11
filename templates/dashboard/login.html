@@ -3,146 +3,286 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>تسجيل الدخول — لوحة التحكم</title>
+<title>تسجيل الدخول — K_J6 Dashboard</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
 <style>
-  body {
-    background: radial-gradient(circle at 50% 0%, #1e293b 0%, #0b1120 70%);
-    color: #e2e8f0;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: system-ui, -apple-system, sans-serif;
-    margin: 0;
-  }
-  .login-card {
-    max-width: 420px;
-    width: 100%;
-    padding: 40px 32px;
-    background: rgba(30, 41, 59, 0.85);
-    backdrop-filter: blur(20px);
-    border: 1px solid #334155;
-    border-radius: 20px;
-    text-align: center;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  }
-  .shield-icon {
-    width: 90px;
-    height: 90px;
-    margin: 0 auto 24px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #3b82f6, #06b6d4);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 44px;
-    box-shadow: 0 0 40px rgba(59, 130, 246, 0.5);
-  }
-  h1 { font-size: 24px; margin: 0 0 12px; color: #f1f5f9; font-weight: 700; }
-  .subtitle { color: #94a3b8; font-size: 14px; line-height: 1.7; margin-bottom: 28px; }
-  .btn-telegram {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    width: 100%;
-    padding: 14px 20px;
-    background: linear-gradient(135deg, #0088cc, #229ED9);
-    color: white;
-    border: none;
-    border-radius: 12px;
-    font-size: 15px;
-    font-weight: 600;
-    text-decoration: none;
-    transition: all 0.2s;
-    margin-bottom: 12px;
-  }
-  .btn-telegram:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0, 136, 204, 0.4); color: white; }
-  .error-box {
-    padding: 12px 16px;
-    background: rgba(239, 68, 68, 0.15);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    border-radius: 10px;
-    color: #fca5a5;
-    font-size: 13px;
-    margin-bottom: 20px;
-  }
-  .steps {
-    text-align: right;
-    margin-top: 28px;
-    padding-top: 24px;
-    border-top: 1px solid #334155;
-  }
-  .step {
-    display: flex;
-    gap: 12px;
-    padding: 10px 0;
-    font-size: 13px;
-    color: #94a3b8;
-  }
-  .step-num {
-    width: 26px; height: 26px;
-    border-radius: 50%;
-    background: #1e293b;
-    border: 1px solid #3b82f6;
-    color: #3b82f6;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 700;
-    font-size: 12px;
-    flex-shrink: 0;
-  }
-  .footer { margin-top: 24px; font-size: 11px; color: #475569; }
+:root {
+  --bg: #05070d;
+  --card: #101623;
+  --border: #1e2836;
+  --primary: #00d4ff;
+  --secondary: #7c3aed;
+  --text: #e6edf7;
+  --text-muted: #6b7a94;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+}
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(0, 212, 255, 0.15) 0%, transparent 40%),
+    radial-gradient(circle at 70% 70%, rgba(124, 58, 237, 0.15) 0%, transparent 40%);
+  animation: bg-move 20s ease-in-out infinite;
+  pointer-events: none;
+}
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(ellipse at center, black 20%, transparent 70%);
+  pointer-events: none;
+}
+@keyframes bg-move {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-20px, -20px) scale(1.05); }
+}
+
+.login-container {
+  position: relative;
+  z-index: 1;
+  max-width: 460px;
+  width: 100%;
+}
+.login-card {
+  background: rgba(16, 22, 35, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 44px 32px;
+  text-align: center;
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.6),
+    0 0 80px rgba(0, 212, 255, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+.login-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #00d4ff, #7c3aed, #ec4899);
+  background-size: 200% 100%;
+  animation: gradient-slide 3s linear infinite;
+}
+@keyframes gradient-slide {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+.shield-icon {
+  width: 100px;
+  height: 100px;
+  margin: 0 auto 24px;
+  border-radius: 28px;
+  background: linear-gradient(135deg, #00d4ff, #7c3aed);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48px;
+  box-shadow:
+    0 0 40px rgba(0, 212, 255, 0.5),
+    0 0 80px rgba(124, 58, 237, 0.3);
+  animation: shield-pulse 2s ease-in-out infinite;
+  position: relative;
+}
+.shield-icon::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 30px;
+  background: linear-gradient(135deg, #00d4ff, #7c3aed);
+  z-index: -1;
+  opacity: 0.5;
+  animation: rotate 3s linear infinite;
+}
+@keyframes shield-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+@keyframes rotate {
+  to { transform: rotate(360deg); }
+}
+
+h1 {
+  font-size: 26px;
+  margin: 0 0 10px;
+  color: var(--text);
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+.subtitle {
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.7;
+  margin-bottom: 28px;
+}
+
+.btn-telegram {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 16px 24px;
+  background: linear-gradient(135deg, #0088cc, #229ED9);
+  color: white;
+  border: none;
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+  font-family: inherit;
+}
+.btn-telegram::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s;
+}
+.btn-telegram:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgba(0, 136, 204, 0.4);
+  color: white;
+}
+.btn-telegram:hover::before {
+  left: 100%;
+}
+
+.error-box {
+  padding: 14px 18px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 12px;
+  color: #fca5a5;
+  font-size: 13px;
+  margin-bottom: 20px;
+  text-align: right;
+}
+
+.steps {
+  text-align: right;
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+.step {
+  display: flex;
+  gap: 12px;
+  padding: 10px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  align-items: center;
+}
+.step-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 212, 255, 0.1);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.step code {
+  background: rgba(0, 212, 255, 0.1);
+  color: var(--primary);
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 12px;
+}
+.footer {
+  margin-top: 24px;
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
 </style>
 </head>
 <body>
 
-<div class="login-card">
-  <div class="shield-icon">🛡️</div>
-  
-  <h1>لوحة التحكم</h1>
-  <p class="subtitle">
-    للدخول، اضغط على الزر أدناه<br>
-    ثم اضغط <b>Start</b> في البوت
-  </p>
+<div class="login-container">
+  <div class="login-card">
+    <div class="shield-icon">🛡️</div>
 
-  {% if error %}
-  <div class="error-box">
-    {% if error == 'expired' %}
-      ⏰ الرابط منتهي الصلاحية، اطلب رابط جديد
-    {% elif error == 'invalid' %}
-      ❌ رابط غير صالح
-    {% else %}
-      ⚠️ حدث خطأ، حاول مرة أخرى
+    <h1>K_J6 Dashboard</h1>
+    <p class="subtitle">
+      للدخول للوحة التحكم<br>
+      اضغط على الزر ثم <b style="color:var(--primary);">Start</b> في البوت
+    </p>
+
+    {% if error %}
+    <div class="error-box">
+      {% if error == 'expired' %}
+        ⏰ الرابط منتهي الصلاحية — اطلب رابط جديد
+      {% elif error == 'invalid' %}
+        ❌ رابط غير صالح
+      {% else %}
+        ⚠️ حدث خطأ — حاول مرة أخرى
+      {% endif %}
+    </div>
     {% endif %}
-  </div>
-  {% endif %}
 
-  <a href="{{ bot_url }}" target="_blank" class="btn-telegram">
-    <i class="bi bi-telegram"></i>
-    افتح البوت وأرسل /dashboard
-  </a>
+    <a href="{{ bot_url }}" target="_blank" class="btn-telegram">
+      <i class="bi bi-telegram" style="font-size:20px;"></i>
+      فتح البوت
+    </a>
 
-  <div class="steps">
-    <div class="step">
-      <div class="step-num">1</div>
-      <div>افتح البوت على تلجرام</div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div>افتح البوت: <code>{{ bot_username }}</code></div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div>أرسل الأمر <code>/dashboard</code></div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div>اضغط <code>ادخل لوحة التحكم</code></div>
+      </div>
     </div>
-    <div class="step">
-      <div class="step-num">2</div>
-      <div>أرسل الأمر <code style="color:#60a5fa">/dashboard</code></div>
-    </div>
-    <div class="step">
-      <div class="step-num">3</div>
-      <div>اضغط على زر "ادخل لوحة التحكم"</div>
-    </div>
-  </div>
 
-  <div class="footer">
-    🔒 جلسة آمنة · تنتهي تلقائياً بعد 7 أيام
+    <div class="footer">
+      <i class="bi bi-shield-lock-fill"></i>
+      جلسة آمنة · تنتهي بعد 7 أيام
+    </div>
   </div>
 </div>
 
