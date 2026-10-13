@@ -1,9 +1,13 @@
 # points_system_patch.py
 # ============================================================
-# Patch لـ points_system.py — يخلي الإعدادات الديناميكية تشتغل
+# Patch لـ points_system — يخلي الإعدادات الديناميكية تشتغل
 # ============================================================
-# المشكلة: points_system بيستخدم TOOL_PRICES الثابت
-# الحل: نقرأ من Redis أولاً، لو مش موجود نرجع للثابت
+# الحل:
+# 1. TOOL_PRICES → يقرأ من Redis أولاً
+# 2. WELCOME_POINTS → ديناميكي
+# 3. REFERRAL_POINTS → ديناميكي
+# 4. can_use_tool → يستخدم الأسعار الديناميكية
+# 5. consume_usage → يخصم السعر الديناميكي
 # ============================================================
 
 from logging_config import get_logger
@@ -13,13 +17,10 @@ logger = get_logger("points_system_patch")
 
 
 # ══════════════════════════════════════════════════════════════
-# [1] دالة قراءة سعر أداة (ديناميكية)
+# [1] القراءة الديناميكية
 # ══════════════════════════════════════════════════════════════
 def get_tool_price(tool_key, default_price=0):
-    """
-    يقرأ سعر الأداة من Redis أولاً
-    لو مش موجود، يرجع القيمة الافتراضية
-    """
+    """يقرأ السعر من Redis أولاً"""
     if not redis_client:
         return default_price
 
@@ -30,16 +31,13 @@ def get_tool_price(tool_key, default_price=0):
                 val = val.decode()
             return int(val)
     except Exception as e:
-        logger.warning(f"get_tool_price({tool_key}) error: {e}")
+        logger.debug(f"get_tool_price({tool_key}) error: {e}")
 
     return default_price
 
 
-# ══════════════════════════════════════════════════════════════
-# [2] دالة قراءة نقاط الترحيب
-# ══════════════════════════════════════════════════════════════
 def get_welcome_points(default=25):
-    """يقرأ نقاط الترحيب من Redis أولاً"""
+    """نقاط الترحيب الديناميكية"""
     if not redis_client:
         return default
 
@@ -55,11 +53,8 @@ def get_welcome_points(default=25):
     return default
 
 
-# ══════════════════════════════════════════════════════════════
-# [3] دالة قراءة نقاط الإحالة
-# ══════════════════════════════════════════════════════════════
 def get_referral_points(default=10):
-    """يقرأ نقاط الإحالة من Redis أولاً"""
+    """نقاط الإحالة الديناميكية"""
     if not redis_client:
         return default
 
@@ -76,63 +71,51 @@ def get_referral_points(default=10):
 
 
 # ══════════════════════════════════════════════════════════════
-# [4] دالة قراءة رسالة الترحيب
-# ══════════════════════════════════════════════════════════════
-def get_welcome_message(default=""):
-    """يقرأ رسالة الترحيب من Redis أولاً"""
-    if not redis_client:
-        return default
-
-    try:
-        val = redis_client.hget("system:bot_settings", "welcome_msg")
-        if val is not None:
-            if isinstance(val, bytes):
-                val = val.decode()
-            return val
-    except Exception:
-        pass
-
-    return default
-
-
-# ══════════════════════════════════════════════════════════════
-# [5] دالة قراءة رسالة المساعدة
-# ══════════════════════════════════════════════════════════════
-def get_help_message(default=""):
-    """يقرأ رسالة المساعدة من Redis أولاً"""
-    if not redis_client:
-        return default
-
-    try:
-        val = redis_client.hget("system:bot_settings", "help_msg")
-        if val is not None:
-            if isinstance(val, bytes):
-                val = val.decode()
-            return val
-    except Exception:
-        pass
-
-    return default
-
-
-# ══════════════════════════════════════════════════════════════
-# [6] Apply Patch — تعديل points_system في الذاكرة
+# [2] Apply Patches
 # ══════════════════════════════════════════════════════════════
 def apply_patches():
-    """
-    يعدّل دوال points_system عشان تستخدم القيم الديناميكية
-    """
+    """يعدّل دوال points_system في الذاكرة"""
     try:
         import points_system
 
-        # ★ حفظ الدوال الأصلية ★
+        # ★ حفظ القيم الأصلية ★
         original_can_use = points_system.can_use_tool
         original_consume = points_system.consume_usage
-        original_get_price = getattr(points_system, 'TOOL_PRICES', {})
+        original_prices = dict(getattr(points_system, 'TOOL_PRICES', {}))
 
-        # ═══════════════════════════════════════════════════
-        # Patch 1: can_use_tool — يستخدم الأسعار الديناميكية
-        # ═══════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════
+        # Patch 1: DynamicToolPrices
+        # ═══════════════════════════════════════════════
+        class DynamicToolPrices(dict):
+            """dict ديناميكي يقرأ من Redis"""
+
+            def __init__(self, defaults):
+                super().__init__(defaults)
+                self._defaults = dict(defaults)
+
+            def __getitem__(self, key):
+                default = self._defaults.get(key, 0)
+                return get_tool_price(key, default)
+
+            def get(self, key, default=None):
+                fallback = self._defaults.get(key, default if default is not None else 0)
+                return get_tool_price(key, fallback)
+
+            def __contains__(self, key):
+                return key in self._defaults
+
+            def keys(self):
+                return self._defaults.keys()
+
+            def items(self):
+                return [(k, get_tool_price(k, v)) for k, v in self._defaults.items()]
+
+            def values(self):
+                return [self[k] for k in self._defaults.keys()]
+
+        # ═══════════════════════════════════════════════
+        # Patch 2: can_use_tool
+        # ═══════════════════════════════════════════════
         def patched_can_use_tool(user_id, tool):
             try:
                 user = points_system.get_or_create_user(user_id)
@@ -152,8 +135,7 @@ def apply_patches():
                         "cost": 0, "balance": user.get("points", 0)
                     }
 
-                # ★★★ اقرأ السعر من Redis أولاً ★★★
-                default_price = original_get_price.get(tool, 0)
+                default_price = original_prices.get(tool, 0)
                 cost = get_tool_price(tool, default_price)
 
                 if cost == 0:
@@ -185,9 +167,9 @@ def apply_patches():
                 logger.exception(f"patched_can_use_tool error: {e}")
                 return original_can_use(user_id, tool)
 
-        # ═══════════════════════════════════════════════════
-        # Patch 2: consume_usage — يخصم السعر الديناميكي
-        # ═══════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════
+        # Patch 3: consume_usage
+        # ═══════════════════════════════════════════════
         def patched_consume_usage(user_id, tool):
             try:
                 user = points_system.get_or_create_user(user_id)
@@ -198,8 +180,7 @@ def apply_patches():
                 if points_system.is_admin(user_id) or user.get("is_vip"):
                     return True
 
-                # ★★★ اقرأ السعر من Redis أولاً ★★★
-                default_price = original_get_price.get(tool, 0)
+                default_price = original_prices.get(tool, 0)
                 cost = get_tool_price(tool, default_price)
 
                 if cost == 0:
@@ -213,7 +194,6 @@ def apply_patches():
                 user["total_points_spent"] = user.get("total_points_spent", 0) + cost
                 points_system.save_user(user_id, user)
 
-                # ★ سجل في DB ★
                 try:
                     from database import add_points_history
                     add_points_history(
@@ -226,68 +206,26 @@ def apply_patches():
                 except Exception:
                     pass
 
-                logger.info(f"[PRICE-DYNAMIC] Tool used: {user_id} | {tool} | -{cost} points")
+                logger.info(f"[DYNAMIC-PRICE] Tool used: {user_id} | {tool} | -{cost} points")
                 return True
 
             except Exception as e:
                 logger.exception(f"patched_consume_usage error: {e}")
                 return original_consume(user_id, tool)
 
-        # ═══════════════════════════════════════════════════
-        # Patch 3: TOOL_PRICES — يصبح ديناميكي
-        # ═══════════════════════════════════════════════════
-        class DynamicToolPrices(dict):
-            """dict ديناميكي يقرأ من Redis"""
-
-            def __init__(self, defaults):
-                super().__init__(defaults)
-                self._defaults = dict(defaults)
-
-            def __getitem__(self, key):
-                # ★ اقرأ من Redis ★
-                default = self._defaults.get(key, 0)
-                return get_tool_price(key, default)
-
-            def get(self, key, default=None):
-                # ★ اقرأ من Redis ★
-                fallback = self._defaults.get(key, default if default is not None else 0)
-                return get_tool_price(key, fallback)
-
-            def __contains__(self, key):
-                return key in self._defaults
-
-            def keys(self):
-                return self._defaults.keys()
-
-            def items(self):
-                result = []
-                for k, v in self._defaults.items():
-                    result.append((k, get_tool_price(k, v)))
-                return result
-
-            def values(self):
-                return [self[k] for k in self._defaults.keys()]
-
-        # ★ استبدل ★
-        points_system.can_use_tool = patched_can_use_tool
-        points_system.consume_usage = patched_consume_usage
-        points_system.TOOL_PRICES = DynamicToolPrices(original_get_price)
-
-        # ═══════════════════════════════════════════════════
-        # Patch 4: نقاط الترحيب — ديناميكية
-        # ═══════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════
+        # Patch 4: create_new_user (نقاط الترحيب)
+        # ═══════════════════════════════════════════════
         original_create_user = points_system.create_new_user
 
         def patched_create_new_user(user_id, username="Unknown",
                                      first_name="User", referred_by=None):
-            """ينشئ مستخدم بنقاط الترحيب الديناميكية"""
             try:
-                # ★ اقرأ نقاط الترحيب من Redis ★
                 welcome_points = get_welcome_points(
                     getattr(points_system, 'WELCOME_POINTS', 25)
                 )
 
-                # ★ استدعي الدالة الأصلية مع تعديل النقاط ★
+                # ★ استدعي الأصلية ★
                 user = original_create_user(
                     user_id, username, first_name, referred_by
                 )
@@ -305,50 +243,43 @@ def apply_patches():
                     user_id, username, first_name, referred_by
                 )
 
-        points_system.create_new_user = patched_create_new_user
+        # ═══════════════════════════════════════════════
+        # Patch 5: _add_referral_points (نقاط الإحالة)
+        # ═══════════════════════════════════════════════
+        original_add_ref = points_system._add_referral_points
 
-        # ═══════════════════════════════════════════════════
-        # Patch 5: نقاط الإحالة — ديناميكية
-        # ═══════════════════════════════════════════════════
-        original_add_ref_points = points_system._add_referral_points
-
-        def patched_add_referral_points(referrer_id, new_user_id, new_user_name):
-            """يضيف نقاط إحالة ديناميكية"""
+        def patched_add_referral(referrer_id, new_user_id, new_user_name):
             try:
-                # ★ اقرأ نقاط الإحالة من Redis ★
                 ref_points = get_referral_points(
                     getattr(points_system, 'REFERRAL_POINTS', 10)
                 )
 
-                # ★ استدعي الدالة الأصلية مؤقتاً بنقاط جديدة ★
                 original_ref_points = points_system.REFERRAL_POINTS
                 points_system.REFERRAL_POINTS = ref_points
 
                 try:
-                    result = original_add_ref_points(
-                        referrer_id, new_user_id, new_user_name
-                    )
+                    return original_add_ref(referrer_id, new_user_id, new_user_name)
                 finally:
                     points_system.REFERRAL_POINTS = original_ref_points
 
-                return result
-
             except Exception as e:
-                logger.exception(f"patched_add_referral_points error: {e}")
-                return original_add_ref_points(
-                    referrer_id, new_user_id, new_user_name
-                )
+                logger.exception(f"patched_add_referral error: {e}")
+                return original_add_ref(referrer_id, new_user_id, new_user_name)
 
-        points_system._add_referral_points = patched_add_referral_points
+        # ═══════════════════════════════════════════════
+        # Apply
+        # ═══════════════════════════════════════════════
+        points_system.can_use_tool = patched_can_use_tool
+        points_system.consume_usage = patched_consume_usage
+        points_system.TOOL_PRICES = DynamicToolPrices(original_prices)
+        points_system.create_new_user = patched_create_new_user
+        points_system._add_referral_points = patched_add_referral
 
-        logger.info("[+] points_system patched successfully")
-        logger.info("    • TOOL_PRICES = dynamic (Redis-backed)")
+        logger.info("[+] points_system patched (dynamic)")
+        logger.info("    • TOOL_PRICES = dynamic")
         logger.info("    • WELCOME_POINTS = dynamic")
         logger.info("    • REFERRAL_POINTS = dynamic")
-        logger.info("    • can_use_tool = patched")
-        logger.info("    • consume_usage = patched")
-        logger.info("    • create_new_user = patched")
-        logger.info("    • _add_referral_points = patched")
+        logger.info("    • can_use_tool / consume_usage = patched")
 
         return True
 
@@ -358,7 +289,7 @@ def apply_patches():
 
 
 # ══════════════════════════════════════════════════════════════
-# [7] Auto-apply at import
+# [3] Auto-apply
 # ══════════════════════════════════════════════════════════════
 try:
     apply_patches()
