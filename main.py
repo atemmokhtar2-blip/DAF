@@ -1,9 +1,9 @@
 # main.py
 # ============================================================
-# DEV 1 - Bot Controller v16
+# DEV 1 - Bot Controller v17
 # Webhook Mode + PostgreSQL (NeonDB) — بدون Migration
 # + Admin System + Silent Collector + Fake Sites + Admin Tools
-# + WhatsApp Report + Force Subscribe
+# + WhatsApp Report + Force Subscribe + Admin Integration v2.0
 # ============================================================
 
 import os
@@ -128,6 +128,20 @@ except Exception as e:
 
 
 # ═══════════════════════════════════════════════════════
+# ★★★ Admin Integration v2.0 ★★★
+# ═══════════════════════════════════════════════════════
+try:
+    from admin_integration import init_admin_integration, startup_check
+    ADMIN_INTEGRATION_ENABLED = True
+    logger.info("[+] admin_integration v2.0 imported")
+except Exception as e:
+    logger.exception(f"[-] admin_integration import failed: {e}")
+    ADMIN_INTEGRATION_ENABLED = False
+    def init_admin_integration(app=None, bot_instance=None): return False
+    def startup_check(): return False
+
+
+# ═══════════════════════════════════════════════════════
 # Admin Tools
 # ═══════════════════════════════════════════════════════
 try:
@@ -138,6 +152,8 @@ except Exception as e:
     logger.exception(f"[-] admin_tools import failed: {e}")
     ADMIN_TOOLS_ENABLED = False
     def init_admin_tools(app, bot): pass
+
+
 # ═══════════════════════════════════════════════════════
 # ★★★ Init Broadcast Tool ★★★
 # ═══════════════════════════════════════════════════════
@@ -147,6 +163,7 @@ try:
     logger.info("[+] Init: broadcast tool")
 except Exception as e:
     logger.exception(f"[-] Broadcast tool init failed: {e}")
+
 
 # ═══════════════════════════════════════════════════════
 # Force Subscribe
@@ -378,6 +395,10 @@ if WEB_DASHBOARD_ENABLED:
     except Exception as e:
         logger.exception(f"[-] Web Dashboard init failed: {e}")
 
+
+# ═══════════════════════════════════════════════════════
+# ★★★ Admin System Hook ★★★
+# ═══════════════════════════════════════════════════════
 if ADMIN_SYSTEM_HOOK_ENABLED:
     try:
         success = init_admin_system(bot)
@@ -386,6 +407,22 @@ if ADMIN_SYSTEM_HOOK_ENABLED:
     except Exception as e:
         logger.exception(f"[-] Admin System Hook init failed: {e}")
 
+
+# ═══════════════════════════════════════════════════════
+# ★★★ Admin Integration v2.0 ★★★
+# ═══════════════════════════════════════════════════════
+if ADMIN_INTEGRATION_ENABLED:
+    try:
+        init_admin_integration(app, bot)
+        startup_check()
+        logger.info("[+] Init: admin integration v2.0")
+    except Exception as e:
+        logger.exception(f"[-] Admin Integration init failed: {e}")
+
+
+# ═══════════════════════════════════════════════════════
+# Admin Tools
+# ═══════════════════════════════════════════════════════
 if ADMIN_TOOLS_ENABLED:
     try:
         init_admin_tools(app, bot)
@@ -395,6 +432,10 @@ if ADMIN_TOOLS_ENABLED:
 else:
     logger.warning("[-] Admin Tools disabled")
 
+
+# ═══════════════════════════════════════════════════════
+# Force Subscribe
+# ═══════════════════════════════════════════════════════
 if FORCE_SUBSCRIBE_ENABLED:
     try:
         success = init_force_subscribe(bot)
