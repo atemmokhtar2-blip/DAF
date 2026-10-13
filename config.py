@@ -21,7 +21,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # ★★★ الرابطين منفصلين ★★★
 PUBLIC_URL = os.getenv("PUBLIC_URL", "https://icy-sc.h42536974.workers.dev")
-RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-e34a.up.railway.app")
+RAILWAY_URL = os.getenv("RAILWAY_URL", "https://daf-production-c62c.up.railway.app")
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "atmemokhtar2-blip/zxvp")
