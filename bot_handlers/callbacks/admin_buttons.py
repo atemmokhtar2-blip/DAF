@@ -1,17 +1,6 @@
 # bot_handlers/callbacks/admin_buttons.py
 # ============================================================
-# Admin Buttons Handler — كل الـ Callbacks الجديدة
-# ============================================================
-# المسؤول عن:
-# 1. وضع الصيانة
-# 2. الإشعارات المخصصة
-# 3. إدارة الجلسات
-# 4. إعدادات البوت
-# 5. قائمة الحظر
-# 6. النسخ الاحتياطي
-# 7. صحة النظام
-# 8. التحليلات المتقدمة
-# 9. البث الذكي
+# Admin Buttons Handler v2.1 — ديناميكي كامل
 # ============================================================
 
 import io
@@ -37,9 +26,10 @@ from admin_system import (
     # Sessions
     get_active_sessions, get_online_devices, kill_session,
     build_sessions_text,
-    # Settings
+    # Settings (v2.1)
     get_bot_setting, set_bot_setting, get_all_settings,
-    set_tool_price, get_tool_prices,
+    set_tool_price, get_tool_prices, get_tool_price,
+    reset_tool_prices, build_settings_text,
     # Ban
     ban_user_permanent, unban_user, unban_all,
     get_banned_users, ban_ip, unban_ip, get_banned_ips,
@@ -66,7 +56,6 @@ logger = get_logger("admin_buttons")
 # Helpers
 # ══════════════════════════════════════════════════════════════
 def _safe_edit(call, text, reply_markup=None, parse_mode="HTML"):
-    """تعديل آمن للرسالة"""
     try:
         bot.edit_message_text(
             text=text,
@@ -98,7 +87,6 @@ def _safe_edit(call, text, reply_markup=None, parse_mode="HTML"):
 
 
 def _answer(call, text="", show_alert=False):
-    """رد سريع على call"""
     try:
         bot.answer_callback_query(call.id, text=text, show_alert=show_alert)
     except Exception:
@@ -106,26 +94,17 @@ def _answer(call, text="", show_alert=False):
 
 
 def _build_maintenance_panel():
-    """لوحة وضع الصيانة"""
     m = InlineKeyboardMarkup()
 
     if is_maintenance():
-        # ★ مفعّل — اعرض إيقاف ★
-        m.row(
-            InlineKeyboardButton("✅ إيقاف الصيانة", callback_data="maint_disable")
-        )
+        m.row(InlineKeyboardButton("✅ إيقاف الصيانة", callback_data="maint_disable"))
         m.row(
             InlineKeyboardButton("📝 تعديل الرسالة", callback_data="maint_edit_msg"),
             InlineKeyboardButton("🔄 تحديث", callback_data="admin_maintenance")
         )
-        m.row(
-            InlineKeyboardButton("🛡️ تغيير المستثنى", callback_data="maint_change_exempt")
-        )
+        m.row(InlineKeyboardButton("🛡️ تغيير المستثنى", callback_data="maint_change_exempt"))
     else:
-        # ★ معطّل — اعرض تفعيل ★
-        m.row(
-            InlineKeyboardButton("▶️ تفعيل الصيانة", callback_data="maint_enable")
-        )
+        m.row(InlineKeyboardButton("▶️ تفعيل الصيانة", callback_data="maint_enable"))
         m.row(
             InlineKeyboardButton("⏱️ تفعيل 30 دقيقة", callback_data="maint_enable_30"),
             InlineKeyboardButton("⏱️ تفعيل ساعة", callback_data="maint_enable_60")
@@ -134,19 +113,14 @@ def _build_maintenance_panel():
             InlineKeyboardButton("⏱️ تفعيل 3 ساعات", callback_data="maint_enable_180"),
             InlineKeyboardButton("⏱️ تفعيل 24 ساعة", callback_data="maint_enable_1440")
         )
-        m.row(
-            InlineKeyboardButton("📝 رسالة مخصصة + تفعيل", callback_data="maint_custom")
-        )
-        m.row(
-            InlineKeyboardButton("🛡️ خيارات المستثنى", callback_data="maint_change_exempt")
-        )
+        m.row(InlineKeyboardButton("📝 رسالة مخصصة + تفعيل", callback_data="maint_custom"))
+        m.row(InlineKeyboardButton("🛡️ خيارات المستثنى", callback_data="maint_change_exempt"))
 
     m.row(InlineKeyboardButton("🔙 رجوع للأدمن", callback_data="admin_panel"))
     return m
 
 
 def _build_exempt_panel():
-    """لوحة اختيار المستثنى من الصيانة"""
     m = InlineKeyboardMarkup()
     current = get_maintenance_exempt()
 
@@ -159,20 +133,16 @@ def _build_exempt_panel():
 
     for key, label in opts:
         icon = "✅" if key == current else "⚪"
-        m.row(InlineKeyboardButton(
-            f"{icon} {label}",
-            callback_data=f"maint_set_exempt_{key}"
-        ))
+        m.row(InlineKeyboardButton(f"{icon} {label}", callback_data=f"maint_set_exempt_{key}"))
 
     m.row(InlineKeyboardButton("🔙 رجوع", callback_data="admin_maintenance"))
     return m
 
 
 # ══════════════════════════════════════════════════════════════
-# [1] ★★★ MAINTENANCE HANDLERS ★★★
+# [1] MAINTENANCE HANDLERS
 # ══════════════════════════════════════════════════════════════
 def handle_maintenance(call):
-    """لوحة الصيانة"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -183,7 +153,6 @@ def handle_maintenance(call):
 
 
 def handle_maint_enable(call):
-    """تفعيل الصيانة"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -210,7 +179,6 @@ def handle_maint_enable(call):
 
 
 def handle_maint_enable_with_duration(call, minutes):
-    """تفعيل الصيانة لمدة محددة"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -238,7 +206,6 @@ def handle_maint_enable_with_duration(call, minutes):
 
 
 def handle_maint_disable(call):
-    """تعطيل الصيانة"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -260,7 +227,6 @@ def handle_maint_disable(call):
 
 
 def handle_maint_edit_msg(call):
-    """تعديل رسالة الصيانة"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -284,7 +250,6 @@ def handle_maint_edit_msg(call):
 
 
 def _process_maint_msg(message):
-    """معالجة رسالة الصيانة الجديدة"""
     if not is_admin(message.chat.id):
         return
 
@@ -313,7 +278,6 @@ def _process_maint_msg(message):
 
 
 def handle_maint_custom(call):
-    """تفعيل صيانة برسالة مخصصة"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -334,7 +298,6 @@ def handle_maint_custom(call):
 
 
 def _process_maint_custom_msg(message):
-    """معالجة رسالة الصيانة المخصصة + التفعيل"""
     if not is_admin(message.chat.id):
         return
 
@@ -368,7 +331,6 @@ def _process_maint_custom_msg(message):
 
 
 def handle_maint_change_exempt(call):
-    """تغيير المستثنى من الصيانة"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -383,7 +345,6 @@ def handle_maint_change_exempt(call):
 
 
 def handle_maint_set_exempt(call, mode):
-    """تعيين وضع المستثنى"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -408,10 +369,9 @@ def handle_maint_set_exempt(call, mode):
 
 
 # ══════════════════════════════════════════════════════════════
-# [2] ★★★ HEALTH ★★★
+# [2] HEALTH
 # ══════════════════════════════════════════════════════════════
 def handle_health(call):
-    """صحة النظام"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -427,10 +387,9 @@ def handle_health(call):
 
 
 # ══════════════════════════════════════════════════════════════
-# [3] ★★★ SESSIONS ★★★
+# [3] SESSIONS
 # ══════════════════════════════════════════════════════════════
 def handle_sessions(call):
-    """الجلسات النشطة"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -450,7 +409,6 @@ def handle_sessions(call):
 
 
 def handle_devices(call):
-    """الأجهزة المتصلة"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -485,12 +443,10 @@ def handle_devices(call):
 
 
 def handle_sessions_kill_all(call):
-    """حذف كل الجلسات"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
 
-    # ★ تأكيد ★
     m = InlineKeyboardMarkup()
     m.row(
         InlineKeyboardButton("⚠️ نعم، احذف الكل", callback_data="admin_sessions_kill_all_confirm"),
@@ -508,7 +464,6 @@ def handle_sessions_kill_all(call):
 
 
 def handle_sessions_kill_all_confirm(call):
-    """تأكيد حذف كل الجلسات"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -519,7 +474,6 @@ def handle_sessions_kill_all_confirm(call):
 
     killed = 0
     try:
-        # ★ جلسات Silent ★
         for key in redis_client.scan_iter(match="silent:*", count=100):
             if isinstance(key, bytes):
                 key = key.decode()
@@ -528,7 +482,6 @@ def handle_sessions_kill_all_confirm(call):
             redis_client.delete(f"silent_data:{session_id}")
             killed += 1
 
-        # ★ جلسات Facebook/Instagram ★
         for key in redis_client.scan_iter(match="se_session:*", count=100):
             if isinstance(key, bytes):
                 key = key.decode()
@@ -543,30 +496,17 @@ def handle_sessions_kill_all_confirm(call):
 
 
 # ══════════════════════════════════════════════════════════════
-# [4] ★★★ SETTINGS ★★★
+# [4] SETTINGS (ديناميكي كامل)
 # ══════════════════════════════════════════════════════════════
 def handle_settings(call):
-    """إعدادات البوت"""
+    """إعدادات البوت — ديناميكي"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
 
     _answer(call)
 
-    settings = get_all_settings()
-    prices = get_tool_prices()
-
-    text = (
-        "⚙️ <b>إعدادات البوت</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📝 <b>الإعدادات المحفوظة:</b> <code>{len(settings)}</code>\n"
-        f"💰 <b>أسعار مخصصة:</b> <code>{len(prices)}</code>\n\n"
-        "━━━ 🎯 <b>الإجراءات</b> ━━━\n"
-        "• تعديل رسالة ترحيب\n"
-        "• تعديل رسالة مساعدة\n"
-        "• تعديل سعر أداة\n"
-        "• تعديل نقاط الترحيب\n"
-    )
+    text = build_settings_text()
 
     m = InlineKeyboardMarkup()
     m.row(
@@ -574,11 +514,17 @@ def handle_settings(call):
         InlineKeyboardButton("❓ رسالة مساعدة", callback_data="setting_edit_help")
     )
     m.row(
-        InlineKeyboardButton("💰 سعر أداة", callback_data="setting_edit_tool_price"),
-        InlineKeyboardButton("🎁 نقاط ترحيب", callback_data="setting_edit_welcome_points")
+        InlineKeyboardButton("💰 سعر أداة", callback_data="setting_edit_tool_price")
     )
     m.row(
+        InlineKeyboardButton("🎁 نقاط ترحيب", callback_data="setting_edit_welcome_points"),
         InlineKeyboardButton("🎁 نقاط إحالة", callback_data="setting_edit_ref_points")
+    )
+    m.row(
+        InlineKeyboardButton("📋 عرض الأسعار", callback_data="setting_show_prices")
+    )
+    m.row(
+        InlineKeyboardButton("🔄 Reset للأسعار", callback_data="setting_reset_all")
     )
     m.row(InlineKeyboardButton("🔙 رجوع للأدمن", callback_data="admin_panel"))
 
@@ -586,7 +532,6 @@ def handle_settings(call):
 
 
 def handle_setting_edit_welcome(call):
-    """تعديل رسالة الترحيب"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -615,7 +560,7 @@ def _process_setting_welcome(message):
     set_bot_setting("welcome_msg", message.text.strip())
     bot.send_message(
         message.chat.id,
-        "✅ تم تحديث رسالة الترحيب",
+        "✅ تم تحديث رسالة الترحيب (شغالة فوراً)",
         reply_markup=InlineKeyboardMarkup().add(
             InlineKeyboardButton("🔙 رجوع", callback_data="admin_settings")
         )
@@ -623,7 +568,6 @@ def _process_setting_welcome(message):
 
 
 def handle_setting_edit_help(call):
-    """تعديل رسالة المساعدة"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -652,7 +596,7 @@ def _process_setting_help(message):
     set_bot_setting("help_msg", message.text.strip())
     bot.send_message(
         message.chat.id,
-        "✅ تم تحديث رسالة المساعدة",
+        "✅ تم تحديث رسالة المساعدة (شغالة فوراً)",
         reply_markup=InlineKeyboardMarkup().add(
             InlineKeyboardButton("🔙 رجوع", callback_data="admin_settings")
         )
@@ -660,14 +604,12 @@ def _process_setting_help(message):
 
 
 def handle_setting_edit_tool_price(call):
-    """تعديل سعر أداة"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
 
     _answer(call)
 
-    # ★ جلب الأسعار الحالية ★
     try:
         from points_system import TOOL_PRICES, TOOL_NAMES_AR
     except Exception:
@@ -677,6 +619,7 @@ def handle_setting_edit_tool_price(call):
     custom_prices = get_tool_prices()
 
     text = "💰 <b>تعديل سعر أداة</b>\n━━━━━━━━━━━━━━━━━━━━\n\n"
+    text += "<i>⭐ = سعر مخصص | ⚪ = افتراضي</i>\n\n"
 
     m = InlineKeyboardMarkup()
     for tool_key, default_price in TOOL_PRICES.items():
@@ -694,16 +637,29 @@ def handle_setting_edit_tool_price(call):
 
 
 def handle_setting_set_price(call, tool_key):
-    """تعيين سعر أداة"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
 
     _answer(call)
 
+    try:
+        from points_system import TOOL_PRICES, TOOL_NAMES_AR
+        default = TOOL_PRICES.get(tool_key, 0)
+        name = TOOL_NAMES_AR.get(tool_key, tool_key)
+    except Exception:
+        default = 0
+        name = tool_key
+
+    current = get_tool_price(tool_key, default)
+
     msg = bot.send_message(
         call.message.chat.id,
-        f"💰 <b>سعر جديد للأداة: {tool_key}</b>\n\n"
+        f"💰 <b>سعر جديد للأداة</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📌 <b>الأداة:</b> {name}\n"
+        f"💵 <b>الحالي:</b> <code>{current}</code>\n"
+        f"⚙️ <b>الافتراضي:</b> <code>{default}</code>\n\n"
         f"أرسل السعر الجديد (رقم فقط):",
         parse_mode="HTML"
     )
@@ -731,16 +687,95 @@ def _process_set_tool_price(message, tool_key):
     set_tool_price(tool_key, price)
     bot.send_message(
         message.chat.id,
-        f"✅ تم تحديث سعر <code>{tool_key}</code> إلى <code>{price}</code>",
+        f"✅ <b>تم التحديث بنجاح</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📌 <code>{tool_key}</code>\n"
+        f"💵 <b>السعر الجديد:</b> <code>{price}</code>\n\n"
+        f"⚡ <i>التعديل شغال فوراً</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup().add(
-            InlineKeyboardButton("🔙 رجوع", callback_data="admin_settings")
+            InlineKeyboardButton("🔙 رجوع للإعدادات", callback_data="admin_settings")
         )
     )
 
 
+def handle_setting_show_prices(call):
+    """عرض كل الأسعار — الافتراضية والمخصصة"""
+    if not is_admin(call.from_user.id):
+        _answer(call, "❌ للأدمن فقط", True)
+        return
+
+    _answer(call)
+
+    try:
+        from points_system import TOOL_PRICES, TOOL_NAMES_AR
+    except Exception:
+        TOOL_PRICES = {}
+        TOOL_NAMES_AR = {}
+
+    text = (
+        "📋 <b>الأسعار الفعلية (ديناميكية)</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<i>⭐ = مخصص | ⚪ = افتراضي</i>\n\n"
+    )
+
+    for tool_key, default_price in TOOL_PRICES.items():
+        current_price = get_tool_price(tool_key, default_price)
+        name = TOOL_NAMES_AR.get(tool_key, tool_key)[:25]
+
+        if current_price != default_price:
+            marker = f"⭐ <b>{default_price} → {current_price}</b>"
+        else:
+            marker = f"⚪ <code>{current_price}</code>"
+
+        text += f"• {name}: {marker}\n"
+
+    m = InlineKeyboardMarkup()
+    m.row(InlineKeyboardButton("🔄 تحديث", callback_data="setting_show_prices"))
+    m.row(InlineKeyboardButton("🔙 رجوع للإعدادات", callback_data="admin_settings"))
+
+    _safe_edit(call, text, reply_markup=m)
+
+
+def handle_setting_reset_all(call):
+    """تأكيد reset للأسعار"""
+    if not is_admin(call.from_user.id):
+        _answer(call, "❌ للأدمن فقط", True)
+        return
+
+    m = InlineKeyboardMarkup()
+    m.row(
+        InlineKeyboardButton("⚠️ نعم، reset الكل", callback_data="setting_reset_confirm"),
+        InlineKeyboardButton("❌ إلغاء", callback_data="admin_settings")
+    )
+
+    _answer(call)
+    _safe_edit(call,
+        "⚠️ <b>تأكيد Reset</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "هيتم حذف كل الأسعار المخصصة\n"
+        "والرجوع للأسعار الافتراضية",
+        reply_markup=m
+    )
+
+
+def handle_setting_reset_confirm(call):
+    """تنفيذ reset"""
+    if not is_admin(call.from_user.id):
+        _answer(call, "❌ للأدمن فقط", True)
+        return
+
+    success = reset_tool_prices()
+
+    if success:
+        _answer(call, "✅ تم reset كل الأسعار", True)
+    else:
+        _answer(call, "❌ فشل Reset", True)
+
+    handle_settings(call)
+
+
 def handle_setting_edit_welcome_points(call):
-    """تعديل نقاط الترحيب"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -776,7 +811,8 @@ def _process_welcome_points(message):
     set_bot_setting("welcome_points", points)
     bot.send_message(
         message.chat.id,
-        f"✅ نقاط الترحيب: <code>{points}</code>",
+        f"✅ نقاط الترحيب: <code>{points}</code>\n"
+        f"⚡ <i>شغالة فوراً للمستخدمين الجدد</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup().add(
             InlineKeyboardButton("🔙 رجوع", callback_data="admin_settings")
@@ -785,7 +821,6 @@ def _process_welcome_points(message):
 
 
 def handle_setting_edit_ref_points(call):
-    """تعديل نقاط الإحالة"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -821,7 +856,8 @@ def _process_ref_points(message):
     set_bot_setting("ref_points", points)
     bot.send_message(
         message.chat.id,
-        f"✅ نقاط الإحالة: <code>{points}</code>",
+        f"✅ نقاط الإحالة: <code>{points}</code>\n"
+        f"⚡ <i>شغالة فوراً للإحالات الجديدة</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup().add(
             InlineKeyboardButton("🔙 رجوع", callback_data="admin_settings")
@@ -830,10 +866,9 @@ def _process_ref_points(message):
 
 
 # ══════════════════════════════════════════════════════════════
-# [5] ★★★ BAN LIST ★★★
+# [5] BAN LIST
 # ══════════════════════════════════════════════════════════════
 def handle_ban_list(call):
-    """قائمة الحظر"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -850,16 +885,13 @@ def handle_ban_list(call):
         InlineKeyboardButton("🌐 حظر IP", callback_data="admin_ban_ip"),
         InlineKeyboardButton("🔓 فك حظر IP", callback_data="admin_unban_ip")
     )
-    m.row(
-        InlineKeyboardButton("🧹 فك حظر الكل", callback_data="admin_unban_all")
-    )
+    m.row(InlineKeyboardButton("🧹 فك حظر الكل", callback_data="admin_unban_all"))
     m.row(InlineKeyboardButton("🔙 رجوع للأدمن", callback_data="admin_panel"))
 
     _safe_edit(call, text, reply_markup=m)
 
 
 def handle_ban_add(call):
-    """إضافة حظر"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -899,7 +931,6 @@ def _process_ban_user(message):
 
 
 def handle_ban_ip(call):
-    """حظر IP"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -938,7 +969,6 @@ def _process_ban_ip(message):
 
 
 def handle_unban_ip(call):
-    """فك حظر IP"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -973,7 +1003,6 @@ def _process_unban_ip(message):
 
 
 def handle_unban_all(call):
-    """فك حظر الكل"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -984,10 +1013,9 @@ def handle_unban_all(call):
 
 
 # ══════════════════════════════════════════════════════════════
-# [6] ★★★ BACKUP ★★★
+# [6] BACKUP
 # ══════════════════════════════════════════════════════════════
 def handle_backup(call):
-    """لوحة النسخ الاحتياطي"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -1005,7 +1033,6 @@ def handle_backup(call):
 
 
 def handle_backup_create(call):
-    """إنشاء نسخة احتياطية"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -1025,22 +1052,18 @@ def handle_backup_create(call):
                 )
                 return
 
-            # ★ احفظ النسخة في Redis ★
             backup_id = f"backup_{int(time.time())}"
             backup_json = json.dumps(backup, ensure_ascii=False)
 
             if redis_client:
                 redis_client.setex(
                     f"system:backup:{backup_id}",
-                    86400 * 30,  # 30 يوم
+                    86400 * 30,
                     backup_json
                 )
-
-                # ★ احفظ ID في قائمة ★
                 redis_client.lpush("system:backups_list", backup_id)
-                redis_client.ltrim("system:backups_list", 0, 19)  # آخر 20 نسخة
+                redis_client.ltrim("system:backups_list", 0, 19)
 
-            # ★ ابعت ملف ★
             buf = io.BytesIO(backup_json.encode('utf-8'))
             buf.name = f"backup_{backup_id}.json"
 
@@ -1073,7 +1096,6 @@ def handle_backup_create(call):
 
 
 def handle_backup_download_latest(call):
-    """تنزيل آخر نسخة"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -1116,7 +1138,6 @@ def handle_backup_download_latest(call):
 
 
 def handle_backup_list(call):
-    """قائمة النسخ"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -1152,7 +1173,6 @@ def handle_backup_list(call):
 
 
 def handle_backup_download(call, backup_id):
-    """تنزيل نسخة محددة"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -1186,10 +1206,9 @@ def handle_backup_download(call, backup_id):
 
 
 # ══════════════════════════════════════════════════════════════
-# [7] ★★★ ANALYTICS ★★★
+# [7] ANALYTICS
 # ══════════════════════════════════════════════════════════════
 def handle_advanced_analytics(call):
-    """التحليلات المتقدمة"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -1209,7 +1228,6 @@ def handle_advanced_analytics(call):
 
 
 def handle_growth(call):
-    """نمو المستخدمين"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -1236,10 +1254,9 @@ def handle_growth(call):
 
 
 # ══════════════════════════════════════════════════════════════
-# [8] ★★★ SMART BROADCAST ★★★
+# [8] SMART BROADCAST
 # ══════════════════════════════════════════════════════════════
 def handle_smart_broadcast(call):
-    """البث الذكي"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -1263,7 +1280,6 @@ def handle_smart_broadcast(call):
 
 
 def handle_sbroadcast_group(call, group):
-    """اختيار مجموعة البث"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -1302,10 +1318,9 @@ def _process_sbroadcast(message, group):
 
 
 # ══════════════════════════════════════════════════════════════
-# [9] ★★★ CUSTOM NOTIFICATION ★★★
+# [9] CUSTOM NOTIFICATION
 # ══════════════════════════════════════════════════════════════
 def handle_custom_notify(call):
-    """إشعار مخصص"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -1328,7 +1343,6 @@ def handle_custom_notify(call):
 
 
 def handle_cnotify_single(call):
-    """إشعار لمستخدم واحد"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -1360,7 +1374,6 @@ def _process_cnotify_id(message):
 
 
 def handle_cnotify_multi(call):
-    """إشعار لعدة مستخدمين"""
     if not is_admin(call.from_user.id):
         _answer(call, "❌ للأدمن فقط", True)
         return
@@ -1425,10 +1438,6 @@ def _process_cnotify_send(message, ids):
 # [10] MAIN ROUTER
 # ══════════════════════════════════════════════════════════════
 def handle(call, chat_id, user_id, data):
-    """
-    المعالج الرئيسي لكل الـ callbacks الجديدة
-    """
-    # ★ فحص الأدمن ★
     if not is_admin(user_id):
         _answer(call, "❌ للأدمن فقط", True)
         return True
@@ -1523,6 +1532,18 @@ def handle(call, chat_id, user_id, data):
         handle_setting_set_price(call, tool_key)
         return True
 
+    if data == "setting_show_prices":
+        handle_setting_show_prices(call)
+        return True
+
+    if data == "setting_reset_all":
+        handle_setting_reset_all(call)
+        return True
+
+    if data == "setting_reset_confirm":
+        handle_setting_reset_confirm(call)
+        return True
+
     if data == "setting_edit_welcome_points":
         handle_setting_edit_welcome_points(call)
         return True
@@ -1606,9 +1627,7 @@ def handle(call, chat_id, user_id, data):
         handle_cnotify_multi(call)
         return True
 
-    # ★ غير معروف ★
     return False
 
 
-# ══════════════════════════════════════════════════════════════
-logger.info("[+] admin_buttons loaded — all handlers ready")
+logger.info("[+] admin_buttons v2.1 loaded — dynamic settings enabled")
